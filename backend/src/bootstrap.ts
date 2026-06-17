@@ -1,0 +1,86 @@
+import { createServer, Server } from 'http';
+
+import { createApp } from './app';
+import { loadEnv } from './config/env';
+import { configureLogger, flushLogger, logger } from './core/logger';
+import { collectJobs, startScheduler, stopScheduler } from './core/scheduler';
+import { connectDatabase, createSequelize } from './infra/database';
+import { createModules, createServices, initModels } from './modules';
+
+export async function bootstrap() {
+  const env = loadEnv();
+  configureLogger(env.logger);
+
+  const sequelize = createSequelize(env.database);
+  const models = initModels(sequelize);
+  const services = createServices(models, {
+    authTokenSecret: env.authTokenSecret,
+    ...(env.email ? { email: env.email } : {}),
+    ...(env.sso ? { sso: env.sso } : {}),
+  });
+  const modules = createModules(services, {
+    authRateLimit: env.authRateLimit,
+    readinessChecks: [
+      {
+        name: 'database',
+        check: async () => {
+          await sequelize.authenticate();
+        },
+      },
+    ],
+  });
+
+  await connectDatabase(sequelize, env.databaseSync);
+
+  const scheduler = env.scheduleEnabled ? startScheduler(collectJobs(modules)) : undefined;
+  const app = createApp(modules, {
+    corsOrigins: env.corsOrigins,
+    requestLogEnabled: env.requestLogEnabled,
+    trustProxy: env.trustProxy,
+  });
+  const server = createServer(app.callback());
+
+  await listen(server, env.port, env.host);
+  logger.info(`HTTP server listening on ${env.host}:${env.port}`);
+
+  const shutdown = async (signal: NodeJS.Signals) => {
+    logger.info(`Received ${signal}; shutting down.`);
+    await closeServer(server);
+    await stopScheduler(scheduler);
+    await sequelize.close();
+    logger.info('Shutdown complete.');
+    await flushLogger();
+  };
+
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
+}
+
+function listen(server: Server, port: number, host: string) {
+  return new Promise<void>((resolve, reject) => {
+    const handleError = (error: Error) => {
+      server.off('listening', handleListening);
+      reject(error);
+    };
+    const handleListening = () => {
+      server.off('error', handleError);
+      resolve();
+    };
+
+    server.once('error', handleError);
+    server.once('listening', handleListening);
+    server.listen(port, host);
+  });
+}
+
+function closeServer(server: Server) {
+  return new Promise<void>((resolve, reject) => {
+    server.close((err) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+}

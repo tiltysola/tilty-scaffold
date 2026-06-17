@@ -1,0 +1,32 @@
+{
+  "name": "tilty-scaffold",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "npm run dev:backend & npm run dev:frontend & wait",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix backend run dev",
+    "build": "npm run build:backend && npm run build:frontend",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:backend": "npm --prefix backend run build",
+    "db:migrate": "npm --prefix backend run db:migrate",
+    "db:rollback": "npm --prefix backend run db:rollback",
+    "db:status": "npm --prefix backend run db:status",
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:frontend": "npm --prefix frontend run test",
+    "test:backend": "npm --prefix backend run test",
+    "typecheck": "npm run typecheck:backend && npm run typecheck:frontend",
+    "typecheck:frontend": "npm --prefix frontend run typecheck",
+    "typecheck:backend": "npm --prefix backend run typecheck",
+    "lint": "npm run lint:frontend",
+    "lint:frontend": "npm --prefix frontend run lint",
+    "fix": "npm --prefix frontend run fix",
+    "clean": "npm --prefix backend run clean && npm --prefix frontend run clean",
+    "preview:frontend": "npm --prefix frontend run preview",
+    "start:backend": "npm --prefix backend run start"
+  }
+}

@@ -1,0 +1,89 @@
+import { Middleware } from 'koa';
+
+import { BackendModule } from '../../core/module';
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
+import { SsoService } from './auth.sso';
+
+export interface AuthModuleOptions {
+  rateLimit?: Middleware;
+  ssoService: SsoService;
+}
+
+export function createAuthModule(authService: AuthService, options: AuthModuleOptions): BackendModule {
+  const controller = new AuthController(authService, options.ssoService);
+  const rateLimitedHandlers = (handler: Middleware) =>
+    options.rateLimit ? [options.rateLimit, handler] : [handler];
+
+  return {
+    name: 'auth',
+    prefix: '/api/auth',
+    routes: [
+      {
+        method: 'get',
+        path: '/config',
+        handlers: [controller.config],
+      },
+      {
+        method: 'post',
+        path: '/register',
+        handlers: rateLimitedHandlers(controller.register),
+      },
+      {
+        method: 'post',
+        path: '/register/email-verification',
+        handlers: rateLimitedHandlers(controller.sendRegistrationEmailVerification),
+      },
+      {
+        method: 'post',
+        path: '/password-reset/email-verification',
+        handlers: rateLimitedHandlers(controller.sendPasswordResetEmailVerification),
+      },
+      {
+        method: 'post',
+        path: '/password-reset',
+        handlers: rateLimitedHandlers(controller.resetPassword),
+      },
+      {
+        method: 'post',
+        path: '/login',
+        handlers: rateLimitedHandlers(controller.login),
+      },
+      {
+        method: 'get',
+        path: '/me',
+        handlers: [controller.me],
+      },
+      {
+        method: 'get',
+        path: '/sso/config',
+        handlers: [controller.ssoConfig],
+      },
+      {
+        method: 'get',
+        path: '/sso/start',
+        handlers: [controller.ssoStart],
+      },
+      {
+        method: 'get',
+        path: '/sso/callback',
+        handlers: [controller.ssoCallback],
+      },
+      {
+        method: 'post',
+        path: '/sso/session',
+        handlers: [controller.ssoSession],
+      },
+      {
+        method: 'post',
+        path: '/sso/account',
+        handlers: rateLimitedHandlers(controller.ssoCreateAccount),
+      },
+      {
+        method: 'post',
+        path: '/sso/bind',
+        handlers: rateLimitedHandlers(controller.ssoBindAccount),
+      },
+    ],
+  };
+}
