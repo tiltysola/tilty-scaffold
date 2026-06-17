@@ -1,19 +1,11 @@
-import {
-  CreationOptional,
-  DataTypes,
-  InferAttributes,
-  InferCreationAttributes,
-  Model,
-  Sequelize,
-} from 'sequelize';
+import { CreationOptional, DataTypes, InferAttributes, InferCreationAttributes, Model, Sequelize } from 'sequelize';
 
-export class UserModel extends Model<
-  InferAttributes<UserModel>,
-  InferCreationAttributes<UserModel>
-> {
+export class UserModel extends Model<InferAttributes<UserModel>, InferCreationAttributes<UserModel>> {
   declare id: CreationOptional<string>;
   declare username: string;
   declare email: string;
+  declare avatarStorageKey: CreationOptional<string | null>;
+  declare avatarUrl: CreationOptional<string | null>;
   declare passwordHash: CreationOptional<string | null>;
   declare passwordSalt: CreationOptional<string | null>;
   declare ssoSubject: CreationOptional<string | null>;
@@ -38,6 +30,14 @@ export function initUserModel(sequelize: Sequelize) {
         type: DataTypes.STRING(255),
         allowNull: false,
         unique: 'users_email',
+      },
+      avatarUrl: {
+        type: DataTypes.STRING(1024),
+        allowNull: true,
+      },
+      avatarStorageKey: {
+        type: DataTypes.STRING(1024),
+        allowNull: true,
       },
       passwordHash: {
         type: DataTypes.STRING(255),

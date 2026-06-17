@@ -1,12 +1,12 @@
 import { appConfig } from './config';
 
-export interface ApiSuccess<T> {
+interface ApiSuccess<T> {
   code: number;
   error: null;
   data: T;
 }
 
-export interface ApiFailure {
+interface ApiFailure {
   code: number;
   error: string;
   message: string;
@@ -30,28 +30,29 @@ export class ApiError extends Error {
 export interface ApiRequestOptions extends Omit<RequestInit, 'body' | 'headers'> {
   body?: unknown;
   headers?: Record<string, string>;
-  token?: string;
 }
 
+const defaultRequestTimeoutMs = 15_000;
+
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}) {
-  const { body, headers: inputHeaders, token, ...requestOptions } = options;
+  const { body, headers: inputHeaders, signal: inputSignal, ...requestOptions } = options;
   const headers = new Headers(inputHeaders);
+  const requestBody = createRequestBody(body);
+  const signal = createRequestSignal(inputSignal);
 
-  if (body !== undefined && !headers.has('Content-Type')) {
+  if (body !== undefined && !isBodyInit(body) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
-  }
-
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
   }
 
   let response: Response;
 
   try {
     response = await fetch(`${appConfig.apiBaseUrl}${path}`, {
+      credentials: 'include',
       ...requestOptions,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: requestBody,
       headers,
+      signal,
     });
   } catch {
     throw new ApiError(0, 'NETWORK_ERROR', 'The server could not be reached.');
@@ -72,6 +73,36 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   }
 
   return payload.data;
+}
+
+function createRequestBody(body: unknown) {
+  if (body === undefined) {
+    return undefined;
+  }
+
+  return isBodyInit(body) ? body : JSON.stringify(body);
+}
+
+function isBodyInit(value: unknown): value is BodyInit {
+  return (
+    typeof value === 'string' ||
+    (typeof Blob !== 'undefined' && value instanceof Blob) ||
+    (typeof FormData !== 'undefined' && value instanceof FormData) ||
+    (typeof URLSearchParams !== 'undefined' && value instanceof URLSearchParams) ||
+    (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) ||
+    ArrayBuffer.isView(value) ||
+    (typeof ReadableStream !== 'undefined' && value instanceof ReadableStream)
+  );
+}
+
+function createRequestSignal(inputSignal?: AbortSignal | null) {
+  const timeoutSignal = AbortSignal.timeout(defaultRequestTimeoutMs);
+
+  if (!inputSignal) {
+    return timeoutSignal;
+  }
+
+  return AbortSignal.any([inputSignal, timeoutSignal]);
 }
 
 export function getApiErrorMessage(error: unknown, fallback: string) {

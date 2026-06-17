@@ -1,55 +1,41 @@
-import type { ChangeEvent, FormEvent } from 'react';
+import type { FormEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import { KeyRoundIcon, LinkIcon, UserPlusIcon } from 'lucide-react';
-import { z } from 'zod';
+import type { z } from 'zod';
 
-import { getApiErrorMessage } from '@/lib/api';
+import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { useFormState } from '@/hooks/useFormState';
 import {
   bindSsoAccount,
   completeSsoLogin,
   createSsoAccount,
   fetchSsoConfig,
+  getSsoCallbackParams,
   getSsoStartUrl,
   login,
   type SsoPublicConfig,
 } from '@/lib/auth';
+import { createPasswordFormSchema, loginCredentialsSchema, usernameSchema } from '@/lib/auth-validation';
 import { Button } from '@/shadcn/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/shadcn/components/ui/card';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shadcn/components/ui/tabs';
+import { isSafeRelativePath } from '@tilty/shared/paths';
 
-const loginSchema = z.object({
-  email: z.string().trim().email('Provide a valid email address.'),
-  password: z.string().min(8, 'Password must contain at least 8 characters.'),
-});
+import FormMessage from '@/components/FormMessage';
 
-const ssoCreateSchema = z.object({
-  username: z.string().trim().min(2, 'Name must contain at least 2 characters.').max(32),
-  password: z.string().min(8, 'Password must contain at least 8 characters.').max(128),
-  confirmPassword: z.string().min(8, 'Confirm password.'),
+const loginSchema = loginCredentialsSchema;
+const ssoCreateSchema = createPasswordFormSchema({
+  username: usernameSchema,
 });
 
 type LoginFormState = z.input<typeof loginSchema>;
 type SsoCreateFormState = z.input<typeof ssoCreateSchema>;
 
 const Index = () => {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const handledSsoTokenRef = useRef<string | null>(null);
-  const handledSsoBindTokenRef = useRef<string | null>(null);
-  const [form, setForm] = useState<LoginFormState>({
-    email: '',
-    password: '',
-  });
-  const [ssoCreateForm, setSsoCreateForm] = useState<SsoCreateFormState>({
-    username: '',
-    password: '',
-    confirmPassword: '',
-  });
-  const [error, setError] = useState<string | null>(null);
   const [ssoBind, setSsoBind] = useState<{
     email: string;
     redirectPath: string;
@@ -58,7 +44,24 @@ const Index = () => {
   } | null>(null);
   const [ssoTab, setSsoTab] = useState<'create' | 'bind'>('create');
   const [ssoConfig, setSsoConfig] = useState<SsoPublicConfig>({ enabled: false });
-  const [submitting, setSubmitting] = useState(false);
+  const handledSsoTokenRef = useRef<string | null>(null);
+  const handledSsoBindTokenRef = useRef<string | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { error, pending: submitting, run, setError, setPending: setSubmitting } = useAsyncAction();
+  const { form, handleChange } = useFormState<LoginFormState>({
+    email: '',
+    password: '',
+  });
+  const {
+    form: ssoCreateForm,
+    handleChange: handleSsoCreateChange,
+    setForm: setSsoCreateForm,
+  } = useFormState<SsoCreateFormState>({
+    username: '',
+    password: '',
+    confirmPassword: '',
+  });
   const redirectPath = getRedirectPath(location.state);
   const ssoStartUrl = ssoConfig.enabled ? getSsoStartUrl(redirectPath) : null;
 
@@ -83,7 +86,7 @@ const Index = () => {
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
+    const params = getSsoCallbackParams(location.search, location.hash);
     const token = params.get('sso_token');
     const bindToken = params.get('sso_bind_token');
 
@@ -93,17 +96,14 @@ const Index = () => {
 
       navigate('/login', { replace: true });
       setSsoBind(null);
-      setError(null);
-      setSubmitting(true);
 
-      void completeSsoLogin(token)
-        .then(() => {
-          navigate(nextRedirectPath, { replace: true });
-        })
-        .catch((requestError) => {
-          setError(getApiErrorMessage(requestError, 'SSO authentication could not be completed.'));
-          setSubmitting(false);
-        });
+      void run(() => completeSsoLogin(token), 'SSO authentication could not be completed.').then((session) => {
+        if (!session) {
+          return;
+        }
+
+        navigate(nextRedirectPath, { replace: true });
+      });
 
       return;
     }
@@ -113,11 +113,11 @@ const Index = () => {
     }
 
     handledSsoBindTokenRef.current = bindToken;
-    const username = getDisplayValue(params.get('sso_username'));
+    const username = params.get('sso_username') ?? '';
     const nextRedirectPath = getSafeRedirectPath(params.get('redirect'));
 
     setSsoBind({
-      email: getDisplayValue(params.get('sso_email')),
+      email: params.get('sso_email') ?? '',
       redirectPath: nextRedirectPath,
       token: bindToken,
       username,
@@ -130,21 +130,7 @@ const Index = () => {
     setError(null);
     setSubmitting(false);
     navigate('/login', { replace: true });
-  }, [location.search, navigate]);
-
-  const handleChange = (field: keyof LoginFormState) => (event: ChangeEvent<HTMLInputElement>) => {
-    setForm((current) => ({
-      ...current,
-      [field]: event.target.value,
-    }));
-  };
-
-  const handleSsoCreateChange = (field: keyof SsoCreateFormState) => (event: ChangeEvent<HTMLInputElement>) => {
-    setSsoCreateForm((current) => ({
-      ...current,
-      [field]: event.target.value,
-    }));
-  };
+  }, [location.hash, location.search, navigate, run, setError, setSsoCreateForm, setSubmitting]);
 
   const handleSsoTabChange = (value: string) => {
     if (value !== 'create' && value !== 'bind') {
@@ -166,15 +152,10 @@ const Index = () => {
       return;
     }
 
-    setSubmitting(true);
+    const session = await run(() => login(parsed.data), 'Login could not be completed.');
 
-    try {
-      await login(parsed.data);
+    if (session) {
       navigate(redirectPath, { replace: true });
-    } catch (requestError) {
-      setError(getApiErrorMessage(requestError, 'Login could not be completed.'));
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -194,23 +175,17 @@ const Index = () => {
       return;
     }
 
-    if (parsed.data.password !== parsed.data.confirmPassword) {
-      setError('Password confirmation does not match.');
-      return;
-    }
+    const session = await run(
+      () =>
+        createSsoAccount({
+          ...parsed.data,
+          token: ssoBind.token,
+        }),
+      'SSO account creation could not be completed.',
+    );
 
-    setSubmitting(true);
-
-    try {
-      await createSsoAccount({
-        ...parsed.data,
-        token: ssoBind.token,
-      });
+    if (session) {
       navigate(ssoBind.redirectPath, { replace: true });
-    } catch (requestError) {
-      setError(getApiErrorMessage(requestError, 'SSO account creation could not be completed.'));
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -230,18 +205,17 @@ const Index = () => {
       return;
     }
 
-    setSubmitting(true);
+    const session = await run(
+      () =>
+        bindSsoAccount({
+          ...parsed.data,
+          token: ssoBind.token,
+        }),
+      'SSO account binding could not be completed.',
+    );
 
-    try {
-      await bindSsoAccount({
-        ...parsed.data,
-        token: ssoBind.token,
-      });
+    if (session) {
       navigate(ssoBind.redirectPath, { replace: true });
-    } catch (requestError) {
-      setError(getApiErrorMessage(requestError, 'SSO account binding could not be completed.'));
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -249,7 +223,7 @@ const Index = () => {
     <main className="flex min-h-svh w-full items-center justify-center bg-muted px-4 py-10 text-foreground sm:px-6">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>{ssoBind ? 'Complete SSO Authentication' : 'Login'}</CardTitle>
+          <CardTitle>{ssoBind ? 'Complete SSO authentication' : 'Log in'}</CardTitle>
           <CardDescription>
             {ssoBind
               ? 'Select the account association method for this SSO identity.'
@@ -260,18 +234,16 @@ const Index = () => {
           {ssoBind ? (
             <Tabs className="w-full" onValueChange={handleSsoTabChange} value={ssoTab}>
               <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="create">New Account</TabsTrigger>
-                <TabsTrigger value="bind">Existing Account</TabsTrigger>
+                <TabsTrigger value="create">New account</TabsTrigger>
+                <TabsTrigger value="bind">Existing account</TabsTrigger>
               </TabsList>
-              {error ? (
-                <p className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  {error}
-                </p>
-              ) : null}
+              <div className="mt-2">
+                <FormMessage message={error} variant="error" />
+              </div>
               <TabsContent className="mt-2" value="create">
                 <form className="grid gap-4" onSubmit={handleCreateSsoAccount}>
                   <div className="grid gap-2">
-                    <Label htmlFor="sso-username">Display Name</Label>
+                    <Label htmlFor="sso-username">Display name</Label>
                     <Input
                       autoComplete="name"
                       disabled={submitting}
@@ -305,7 +277,7 @@ const Index = () => {
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="sso-confirm-password">Confirm Password</Label>
+                    <Label htmlFor="sso-confirm-password">Confirm password</Label>
                     <Input
                       autoComplete="new-password"
                       disabled={submitting}
@@ -318,7 +290,7 @@ const Index = () => {
                   </div>
                   <Button className="w-full" disabled={submitting} type="submit">
                     <UserPlusIcon />
-                    {submitting ? 'Processing' : 'Create New Account'}
+                    {submitting ? 'Processing' : 'Create new account'}
                   </Button>
                 </form>
               </TabsContent>
@@ -350,7 +322,7 @@ const Index = () => {
                   </div>
                   <Button className="w-full" disabled={submitting} type="submit" variant="outline">
                     <LinkIcon />
-                    {submitting ? 'Processing' : 'Bind Existing Account'}
+                    {submitting ? 'Processing' : 'Bind existing account'}
                   </Button>
                 </form>
               </TabsContent>
@@ -359,9 +331,14 @@ const Index = () => {
             <>
               {ssoStartUrl ? (
                 <div className="mb-4 grid gap-4">
-                  <Button disabled={submitting} onClick={() => window.location.assign(ssoStartUrl)} type="button" variant="outline">
+                  <Button
+                    disabled={submitting}
+                    onClick={() => window.location.assign(ssoStartUrl)}
+                    type="button"
+                    variant="outline"
+                  >
                     <KeyRoundIcon />
-                    Log In with SSO
+                    Log in with SSO
                   </Button>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     <div className="h-px flex-1 bg-border" />
@@ -395,13 +372,9 @@ const Index = () => {
                     value={form.password}
                   />
                 </div>
-                {error ? (
-                  <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                    {error}
-                  </p>
-                ) : null}
+                <FormMessage message={error} variant="error" />
                 <Button className="w-full" disabled={submitting} type="submit">
-                  {submitting ? 'Logging In' : 'Log In'}
+                  {submitting ? 'Logging in' : 'Log in'}
                 </Button>
               </form>
             </>
@@ -412,11 +385,11 @@ const Index = () => {
             <div className="flex gap-2">
               <span>Need an account?</span>
               <Link className="font-medium text-primary hover:underline" to="/register">
-                Create Account
+                Create account
               </Link>
             </div>
             <Link className="font-medium text-primary hover:underline" to="/forgot-password">
-              Password Recovery
+              Password recovery
             </Link>
           </CardFooter>
         )}
@@ -436,19 +409,11 @@ function getRedirectPath(state: unknown) {
 }
 
 function getSafeRedirectPath(value: unknown) {
-  if (typeof value !== 'string' || !isSafeRedirectPath(value)) {
+  if (typeof value !== 'string' || !isSafeRelativePath(value)) {
     return '/dashboard';
   }
 
   return value;
-}
-
-function isSafeRedirectPath(value: string) {
-  return value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
-}
-
-function getDisplayValue(value: unknown) {
-  return typeof value === 'string' ? value : '';
 }
 
 export default Index;

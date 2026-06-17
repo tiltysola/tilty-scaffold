@@ -6,6 +6,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
+const repositoryRoot = path.resolve(dirname, '..');
 
 export default defineConfig({
   root: './',
@@ -22,6 +23,9 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    fs: {
+      allow: [repositoryRoot],
+    },
     host: '0.0.0.0',
     port: 8011,
     strictPort: true,

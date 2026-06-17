@@ -1,9 +1,9 @@
 import schedule from 'node-schedule';
 
 import { logger } from './logger';
-import { BackendModule, JobDefinition } from './module';
+import { type BackendModule, type JobDefinition } from './module';
 
-export interface SchedulerHandle {
+interface SchedulerHandle {
   jobs: schedule.Job[];
 }
 

@@ -1,4 +1,4 @@
-import { QueryInterface, Sequelize } from 'sequelize';
+import { type QueryInterface, type Sequelize } from 'sequelize';
 import { SequelizeStorage, Umzug } from 'umzug';
 
 import { migrations } from '../migrations';

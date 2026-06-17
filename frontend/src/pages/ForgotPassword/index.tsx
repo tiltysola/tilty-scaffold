@@ -1,40 +1,50 @@
-import type { ChangeEvent, FormEvent } from 'react';
+import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { z } from 'zod';
+import type { z } from 'zod';
 
+import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { useEmailVerification } from '@/hooks/useEmailVerification';
+import { useFormState } from '@/hooks/useFormState';
 import { ApiError, getApiErrorMessage } from '@/lib/api';
 import { fetchAuthConfig, resetPassword, sendPasswordResetEmailVerification } from '@/lib/auth';
+import { createPasswordFormSchema, emailSchema, verificationCodeSchema } from '@/lib/auth-validation';
 import { Button } from '@/shadcn/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/shadcn/components/ui/card';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
 
+import FormMessage from '@/components/FormMessage';
+
 const passwordRecoveryUnavailableMessage = 'Password recovery is not available. Contact the site administrator.';
-const emailSchema = z.string().trim().email('Provide a valid email address.');
-const resetPasswordSchema = z.object({
+const resetPasswordSchema = createPasswordFormSchema({
   email: emailSchema,
-  emailVerificationCode: z.string().trim().regex(/^\d{6}$/, 'Provide the 6-digit verification code.'),
-  password: z.string().min(8, 'Password must contain at least 8 characters.').max(128),
-  confirmPassword: z.string().min(8, 'Confirm password.'),
+  emailVerificationCode: verificationCodeSchema,
 });
 
 type ResetPasswordFormState = z.input<typeof resetPasswordSchema>;
 
 const Index = () => {
-  const [form, setForm] = useState<ResetPasswordFormState>({
+  const [configLoading, setConfigLoading] = useState(true);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [pageNotice, setPageNotice] = useState<string | null>(null);
+  const [passwordRecoveryEnabled, setPasswordRecoveryEnabled] = useState(false);
+  const submitAction = useAsyncAction(getPasswordRecoveryErrorMessage);
+  const emailVerification = useEmailVerification({
+    getErrorMessage: getPasswordRecoveryErrorMessage,
+    sendCode: sendPasswordResetEmailVerification,
+  });
+  const { form, handleChange, setForm } = useFormState<ResetPasswordFormState>({
     email: '',
     emailVerificationCode: '',
     password: '',
     confirmPassword: '',
   });
-  const [configLoading, setConfigLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [passwordRecoveryEnabled, setPasswordRecoveryEnabled] = useState(false);
-  const [sendingCode, setSendingCode] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const error = submitAction.error ?? emailVerification.error ?? configError;
+  const notice = pageNotice ?? emailVerification.notice;
+  const sendingCode = emailVerification.sending;
+  const submitting = submitAction.pending;
 
   useEffect(() => {
     let active = true;
@@ -47,12 +57,12 @@ const Index = () => {
 
         setPasswordRecoveryEnabled(config.passwordRecoveryEnabled);
         if (!config.passwordRecoveryEnabled) {
-          setNotice(passwordRecoveryUnavailableMessage);
+          setPageNotice(passwordRecoveryUnavailableMessage);
         }
       })
       .catch((requestError) => {
         if (active) {
-          setError(getApiErrorMessage(requestError, 'Password recovery configuration could not be loaded.'));
+          setConfigError(getApiErrorMessage(requestError, 'Password recovery configuration could not be loaded.'));
         }
       })
       .finally(() => {
@@ -66,82 +76,54 @@ const Index = () => {
     };
   }, []);
 
-  const handleChange = (field: keyof ResetPasswordFormState) => (event: ChangeEvent<HTMLInputElement>) => {
-    setForm((current) => ({
-      ...current,
-      [field]: event.target.value,
-    }));
-  };
-
   const handleSendCode = async () => {
-    setError(null);
-    setNotice(null);
+    submitAction.clearError();
+    emailVerification.clearMessages();
+    setPageNotice(null);
 
     if (!passwordRecoveryEnabled) {
-      setNotice(passwordRecoveryUnavailableMessage);
+      setPageNotice(passwordRecoveryUnavailableMessage);
       return;
     }
 
     const parsed = emailSchema.safeParse(form.email);
 
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? 'Provide a valid email address.');
+      emailVerification.setError(parsed.error.issues[0]?.message ?? 'Provide a valid email address.');
       return;
     }
 
-    setSendingCode(true);
-
-    try {
-      const result = await sendPasswordResetEmailVerification({
-        email: parsed.data,
-      });
-      const expiresInMinutes = Math.ceil(result.expiresInSeconds / 60);
-
-      setNotice(`Verification code sent. It expires in ${expiresInMinutes} minutes.`);
-    } catch (requestError) {
-      setError(getPasswordRecoveryErrorMessage(requestError, 'Verification code could not be sent.'));
-    } finally {
-      setSendingCode(false);
-    }
+    await emailVerification.requestCode(parsed.data, 'Verification code could not be sent.');
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setError(null);
-    setNotice(null);
+    submitAction.clearError();
+    emailVerification.clearMessages();
+    setPageNotice(null);
 
     if (!passwordRecoveryEnabled) {
-      setNotice(passwordRecoveryUnavailableMessage);
+      setPageNotice(passwordRecoveryUnavailableMessage);
       return;
     }
 
     const parsed = resetPasswordSchema.safeParse(form);
 
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? 'Password reset details are invalid.');
+      submitAction.setError(parsed.error.issues[0]?.message ?? 'Password reset details are invalid.');
       return;
     }
 
-    if (parsed.data.password !== parsed.data.confirmPassword) {
-      setError('Password confirmation does not match.');
-      return;
-    }
+    const result = await submitAction.run(() => resetPassword(parsed.data), 'Password reset could not be completed.');
 
-    setSubmitting(true);
-
-    try {
-      await resetPassword(parsed.data);
+    if (result) {
       setForm((current) => ({
         ...current,
         emailVerificationCode: '',
         password: '',
         confirmPassword: '',
       }));
-      setNotice('Password has been reset. Log in with the new password.');
-    } catch (requestError) {
-      setError(getPasswordRecoveryErrorMessage(requestError, 'Password reset could not be completed.'));
-    } finally {
-      setSubmitting(false);
+      setPageNotice('Password has been reset. Log in with the new password.');
     }
   };
 
@@ -149,7 +131,7 @@ const Index = () => {
     <main className="flex min-h-svh w-full items-center justify-center bg-muted px-4 py-10 text-foreground sm:px-6">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Password Recovery</CardTitle>
+          <CardTitle>Password recovery</CardTitle>
         </CardHeader>
         <CardContent>
           <form className="grid gap-4" onSubmit={handleSubmit}>
@@ -171,12 +153,12 @@ const Index = () => {
                   type="button"
                   variant="outline"
                 >
-                  {sendingCode ? 'Sending' : 'Send Code'}
+                  {sendingCode ? 'Sending' : 'Send code'}
                 </Button>
               </div>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="emailVerificationCode">Verification Code</Label>
+              <Label htmlFor="emailVerificationCode">Verification code</Label>
               <Input
                 autoComplete="one-time-code"
                 disabled={configLoading || submitting || !passwordRecoveryEnabled}
@@ -190,7 +172,7 @@ const Index = () => {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="password">New Password</Label>
+              <Label htmlFor="password">New password</Label>
               <Input
                 autoComplete="new-password"
                 disabled={configLoading || submitting || !passwordRecoveryEnabled}
@@ -202,7 +184,7 @@ const Index = () => {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <Label htmlFor="confirmPassword">Confirm password</Label>
               <Input
                 autoComplete="new-password"
                 disabled={configLoading || submitting || !passwordRecoveryEnabled}
@@ -213,25 +195,17 @@ const Index = () => {
                 value={form.confirmPassword}
               />
             </div>
-            {error ? (
-              <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
-              </p>
-            ) : null}
-            {notice ? (
-              <p className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary">
-                {notice}
-              </p>
-            ) : null}
+            <FormMessage message={error} variant="error" />
+            <FormMessage message={notice} variant="notice" />
             <Button className="w-full" disabled={configLoading || submitting || !passwordRecoveryEnabled} type="submit">
-              {submitting ? 'Resetting Password' : configLoading ? 'Loading' : 'Reset Password'}
+              {submitting ? 'Resetting password' : configLoading ? 'Loading' : 'Reset password'}
             </Button>
           </form>
         </CardContent>
         <CardFooter className="justify-center gap-2 text-sm text-muted-foreground">
           <span>Remember your password?</span>
           <Link className="font-medium text-primary hover:underline" to="/login">
-            Log In
+            Log in
           </Link>
         </CardFooter>
       </Card>

@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "paths": {
+      "@tilty/shared": ["../shared/src/index.ts"],
+      "@tilty/shared/*": ["../shared/src/*.ts"]
+    }
+  }
+}

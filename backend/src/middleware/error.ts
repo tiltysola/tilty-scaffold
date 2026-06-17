@@ -1,4 +1,4 @@
-import { Middleware } from 'koa';
+import { type Middleware } from 'koa';
 
 import { normalizeError } from '../core/errors';
 import { fail } from '../core/http';

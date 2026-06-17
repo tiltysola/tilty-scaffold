@@ -9,6 +9,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(dirname, 'src'),
     },
+    conditions: ['development'],
   },
   test: {
     environment: 'node',

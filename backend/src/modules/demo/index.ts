@@ -1,5 +1,5 @@
 import { logger } from '../../core/logger';
-import { BackendModule } from '../../core/module';
+import { type BackendModule } from '../../core/module';
 
 export function createDemoModule(): BackendModule {
   return {

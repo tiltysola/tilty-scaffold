@@ -1,20 +1,19 @@
 import { ReadStream } from 'fs';
-
 import { describe, expect, it } from 'vitest';
 
-import { RouteDefinition } from '../src/core/module';
 import { createDocsModule } from '../src/modules/docs';
-import { createTestContext, runMiddleware } from './support/http';
+import { createTestContext, getTestRouteHandler, runMiddleware } from './support/http';
 
 describe('docs API', () => {
   const routes = createDocsModule().routes;
 
   it('returns the OpenAPI document', async () => {
-    const context = await runMiddleware(getRoute('/openapi.json'), createTestContext());
+    const context = await runMiddleware(getTestRouteHandler(routes, 'get', '/openapi.json'), createTestContext());
     const body = context.body as OpenApiDocument;
 
     expect(body.openapi).toBe('3.1.0');
     expect(body.paths['/api/auth/login']).toBeDefined();
+    expect(body.paths['/api/auth/refresh']).toBeDefined();
     expect(body.paths['/api/auth/register/email-verification']).toBeDefined();
     expect(body.paths['/api/auth/password-reset']).toBeDefined();
     expect(body.paths['/api/auth/password-reset/email-verification']).toBeDefined();
@@ -24,12 +23,17 @@ describe('docs API', () => {
     expect(body.paths['/api/auth/sso/session']).toBeDefined();
     expect(body.paths['/api/auth/sso/account']).toBeDefined();
     expect(body.paths['/api/auth/sso/bind']).toBeDefined();
+    expect(body.paths['/api/auth/logout']).toBeDefined();
+    expect(body.paths['/api/users/']).toBeDefined();
+    expect(body.paths['/api/users/{id}/roles']).toBeDefined();
     expect(body.paths['/api/health']).toBeDefined();
     expect(body.paths['/api/health/ready']).toBeDefined();
+    expect(body.paths['/api/openapi.json']).toBeDefined();
+    expect(body.paths['/api/docs']).toBeDefined();
   });
 
   it('returns Swagger UI HTML', async () => {
-    const context = await runMiddleware(getRoute('/docs'), createTestContext());
+    const context = await runMiddleware(getTestRouteHandler(routes, 'get', '/docs'), createTestContext());
 
     expect(context.type).toBe('html');
     expect(context.body).toContain('swagger-ui-bundle.js');
@@ -39,7 +43,7 @@ describe('docs API', () => {
 
   it('returns Swagger UI assets', async () => {
     const context = await runMiddleware(
-      getRoute('/docs/:asset'),
+      getTestRouteHandler(routes, 'get', '/docs/:asset'),
       createTestContext(undefined, {}, { asset: 'swagger-ui.css' }),
     );
 
@@ -49,23 +53,13 @@ describe('docs API', () => {
 
   it('returns the Swagger UI initializer asset', async () => {
     const context = await runMiddleware(
-      getRoute('/docs/:asset'),
+      getTestRouteHandler(routes, 'get', '/docs/:asset'),
       createTestContext(undefined, {}, { asset: 'swagger-initializer.js' }),
     );
 
     expect(context.type).toContain('application/javascript');
     expect(context.body).toContain("url: '/api/openapi.json'");
   });
-
-  function getRoute(path: string) {
-    const route = routes.find((item) => item.method === 'get' && item.path === path);
-
-    if (!route) {
-      throw new Error(`Missing docs route ${path}`);
-    }
-
-    return route.handlers[0]!;
-  }
 });
 
 interface OpenApiDocument {

@@ -1,10 +1,10 @@
-export interface ApiSuccess<T> {
+interface ApiSuccess<T> {
   code: 200;
   error: null;
   data: T;
 }
 
-export interface ApiFailure {
+interface ApiFailure {
   code: number;
   error: string;
   message: string;
@@ -19,12 +19,7 @@ export function ok<T>(data: T): ApiSuccess<T> {
   };
 }
 
-export function fail(
-  status: number,
-  error: string,
-  message: string,
-  details?: unknown,
-): ApiFailure {
+export function fail(status: number, error: string, message: string, details?: unknown): ApiFailure {
   return {
     code: status,
     error,

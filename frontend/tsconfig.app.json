@@ -10,6 +10,7 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
+    "customConditions": ["development"],
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,

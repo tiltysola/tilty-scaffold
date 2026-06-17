@@ -16,8 +16,16 @@ export const openApiDocument = {
       description: 'Authentication endpoints',
     },
     {
+      name: 'Users',
+      description: 'User administration endpoints',
+    },
+    {
       name: 'Health',
       description: 'Service health endpoints',
+    },
+    {
+      name: 'Docs',
+      description: 'API documentation endpoints',
     },
   ],
   paths: {
@@ -67,7 +75,7 @@ export const openApiDocument = {
         },
         responses: {
           '201': {
-            description: 'Authenticated session',
+            description: 'Authenticated browser session metadata; tokens are set in HttpOnly cookies',
             content: {
               'application/json': {
                 schema: {
@@ -212,7 +220,7 @@ export const openApiDocument = {
         },
         responses: {
           '200': {
-            description: 'Authenticated session',
+            description: 'Authenticated browser session metadata; tokens are set in HttpOnly cookies',
             content: {
               'application/json': {
                 schema: {
@@ -236,7 +244,7 @@ export const openApiDocument = {
         summary: 'Return the authenticated user',
         security: [
           {
-            bearerAuth: [],
+            accessCookieAuth: [],
           },
         ],
         responses: {
@@ -264,6 +272,137 @@ export const openApiDocument = {
           },
           '401': {
             $ref: '#/components/responses/AuthRequired',
+          },
+        },
+      },
+    },
+    '/api/auth/refresh': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Refresh the authenticated session',
+        security: [
+          {
+            refreshCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Refreshed browser session metadata; tokens are rotated in HttpOnly cookies',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/AuthSessionResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+        },
+      },
+    },
+    '/api/auth/logout': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Clear the authenticated session',
+        security: [
+          {
+            refreshCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Sign-out result',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          type: 'object',
+                          required: ['signedOut'],
+                          properties: {
+                            signedOut: {
+                              type: 'boolean',
+                              const: true,
+                            },
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/auth/avatar': {
+      post: {
+        tags: ['Auth'],
+        summary: "Upload the authenticated user's avatar",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['avatar'],
+                properties: {
+                  avatar: {
+                    type: 'string',
+                    format: 'binary',
+                    description: 'JPEG, PNG, WebP, or GIF image.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated authenticated user',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/AuthUser',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '413': {
+            description: 'Uploaded file is too large',
           },
         },
       },
@@ -309,7 +448,8 @@ export const openApiDocument = {
             required: false,
             schema: {
               type: 'string',
-              description: 'Same-origin application path. Absolute URLs, protocol-relative URLs, and backslashes are rejected.',
+              description:
+                'Same-origin application path. Absolute URLs, protocol-relative URLs, and backslashes are rejected.',
               example: '/dashboard',
             },
           },
@@ -356,10 +496,19 @@ export const openApiDocument = {
               type: 'string',
             },
           },
+          {
+            name: 'error_description',
+            in: 'query',
+            required: false,
+            schema: {
+              type: 'string',
+            },
+          },
         ],
         responses: {
           '302': {
-            description: 'Redirect to frontend callback URL with a short-lived handoff or bind token',
+            description:
+              'Redirect to frontend callback URL with a short-lived handoff or bind token in the URL fragment',
           },
           '400': {
             $ref: '#/components/responses/ValidationError',
@@ -389,7 +538,7 @@ export const openApiDocument = {
         },
         responses: {
           '200': {
-            description: 'Authenticated session',
+            description: 'Authenticated browser session metadata; tokens are set in HttpOnly cookies',
             content: {
               'application/json': {
                 schema: {
@@ -426,7 +575,7 @@ export const openApiDocument = {
         },
         responses: {
           '201': {
-            description: 'Authenticated session',
+            description: 'Authenticated browser session metadata; tokens are set in HttpOnly cookies',
             content: {
               'application/json': {
                 schema: {
@@ -466,7 +615,7 @@ export const openApiDocument = {
         },
         responses: {
           '200': {
-            description: 'Authenticated session',
+            description: 'Authenticated browser session metadata; tokens are set in HttpOnly cookies',
             content: {
               'application/json': {
                 schema: {
@@ -486,6 +635,120 @@ export const openApiDocument = {
           },
           '409': {
             $ref: '#/components/responses/SsoBindConflict',
+          },
+        },
+      },
+    },
+    '/api/users/': {
+      get: {
+        tags: ['Users'],
+        summary: 'List users and available roles',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'User directory',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/UserListResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/Forbidden',
+          },
+        },
+      },
+    },
+    '/api/users/{id}/roles': {
+      put: {
+        tags: ['Users'],
+        summary: 'Replace a user role assignment set',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/UpdateUserRolesRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated user role assignments',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/UserListItem',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/Forbidden',
+          },
+          '404': {
+            description: 'User or role was not found',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiFailure',
+                },
+              },
+            },
+          },
+          '409': {
+            description: 'The final ROOT assignment cannot be removed',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiFailure',
+                },
+              },
+            },
           },
         },
       },
@@ -560,18 +823,69 @@ export const openApiDocument = {
         },
       },
     },
+    '/api/openapi.json': {
+      get: {
+        tags: ['Docs'],
+        summary: 'Return the OpenAPI document',
+        responses: {
+          '200': {
+            description: 'OpenAPI document',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/docs': {
+      get: {
+        tags: ['Docs'],
+        summary: 'Serve Swagger UI',
+        responses: {
+          '200': {
+            description: 'Swagger UI HTML',
+            content: {
+              'text/html': {
+                schema: {
+                  type: 'string',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
-      bearerAuth: {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
+      accessCookieAuth: {
+        type: 'apiKey',
+        in: 'cookie',
+        name: 'tilty_scaffold_access_token',
+      },
+      refreshCookieAuth: {
+        type: 'apiKey',
+        in: 'cookie',
+        name: 'tilty_scaffold_refresh_token',
       },
     },
     responses: {
       AuthRequired: {
         description: 'Authentication is required or invalid',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
+      Forbidden: {
+        description: 'The authenticated user does not have the required permission',
         content: {
           'application/json': {
             schema: {
@@ -697,18 +1011,15 @@ export const openApiDocument = {
       },
       AuthSession: {
         type: 'object',
-        required: ['accessToken', 'expiresAt', 'tokenType', 'user'],
+        required: ['accessTokenExpiresAt', 'refreshTokenExpiresAt', 'user'],
         properties: {
-          accessToken: {
-            type: 'string',
-          },
-          expiresAt: {
+          accessTokenExpiresAt: {
             type: 'string',
             format: 'date-time',
           },
-          tokenType: {
+          refreshTokenExpiresAt: {
             type: 'string',
-            const: 'Bearer',
+            format: 'date-time',
           },
           user: {
             $ref: '#/components/schemas/AuthUser',
@@ -732,7 +1043,7 @@ export const openApiDocument = {
       },
       AuthUser: {
         type: 'object',
-        required: ['id', 'username', 'email'],
+        required: ['id', 'username', 'email', 'roles', 'permissions'],
         properties: {
           id: {
             type: 'string',
@@ -746,6 +1057,144 @@ export const openApiDocument = {
           email: {
             type: 'string',
             format: 'email',
+          },
+          avatarUrl: {
+            type: 'string',
+            format: 'uri-reference',
+          },
+          roles: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['ROOT', 'USER_ADMIN', 'USER_LIST'],
+            },
+          },
+          permissions: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['ROOT', 'USER_ADMIN', 'USER_LIST'],
+            },
+          },
+        },
+      },
+      RoleSummary: {
+        type: 'object',
+        required: ['id', 'key', 'name', 'description', 'system', 'available', 'permissionKeys'],
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+          },
+          key: {
+            type: 'string',
+          },
+          name: {
+            type: 'string',
+          },
+          description: {
+            type: 'string',
+          },
+          system: {
+            type: 'boolean',
+          },
+          available: {
+            type: 'boolean',
+          },
+          permissionKeys: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+        },
+      },
+      UserListItem: {
+        type: 'object',
+        required: ['id', 'username', 'email', 'available', 'roles', 'permissions', 'createdAt', 'updatedAt'],
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+          },
+          username: {
+            type: 'string',
+          },
+          email: {
+            type: 'string',
+            format: 'email',
+          },
+          avatarUrl: {
+            type: 'string',
+            format: 'uri-reference',
+          },
+          available: {
+            type: 'boolean',
+          },
+          roles: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          permissions: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          createdAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+          updatedAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+        },
+      },
+      UserListResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['roles', 'users'],
+                properties: {
+                  roles: {
+                    type: 'array',
+                    items: {
+                      $ref: '#/components/schemas/RoleSummary',
+                    },
+                  },
+                  users: {
+                    type: 'array',
+                    items: {
+                      $ref: '#/components/schemas/UserListItem',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      UpdateUserRolesRequest: {
+        type: 'object',
+        required: ['roleKeys'],
+        properties: {
+          roleKeys: {
+            type: 'array',
+            maxItems: 50,
+            items: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 64,
+            },
           },
         },
       },

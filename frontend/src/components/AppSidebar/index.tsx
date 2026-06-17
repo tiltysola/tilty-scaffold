@@ -1,9 +1,19 @@
-import type { CSSProperties, ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { type ChangeEvent, type CSSProperties, type ReactNode, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 
-import { BracesIcon, CommandIcon, EllipsisVerticalIcon, LayoutDashboardIcon, LogOutIcon } from 'lucide-react';
+import {
+  BracesIcon,
+  CommandIcon,
+  EllipsisVerticalIcon,
+  ImageUpIcon,
+  LayoutDashboardIcon,
+  LogOutIcon,
+  UsersIcon,
+} from 'lucide-react';
+import { toast } from 'sonner';
 
-import { clearStoredSession, getStoredSession } from '@/lib/auth';
+import { getApiErrorMessage } from '@/lib/api';
+import { type AuthUser, getStoredSession, logout, resolveAssetUrl, uploadAvatar } from '@/lib/auth';
 import { appConfig } from '@/lib/config';
 import { Avatar, AvatarFallback, AvatarImage } from '@/shadcn/components/ui/avatar';
 import {
@@ -26,6 +36,7 @@ import {
   SidebarProvider,
   useSidebar,
 } from '@/shadcn/components/ui/sidebar';
+import { hasPermission, SystemPermission } from '@tilty/shared/access-control';
 
 import NavHeader from './NavHeader';
 import SideNav, { type SideNavProps } from './SideNav';
@@ -35,47 +46,74 @@ const sidebarStyle = {
   '--sidebar-width': 'calc(var(--spacing) * 72)',
 } as CSSProperties;
 
-const navItems = {
-  main: [
-    {
-      title: 'Dashboard',
-      url: '/dashboard',
-      icon: <LayoutDashboardIcon />,
-    },
-    {
-      title: 'API Docs',
-      url: `${appConfig.apiBaseUrl}/api/docs`,
-      external: true,
-      icon: <BracesIcon />,
-    },
-  ],
-} satisfies SideNavProps;
-
 interface AppSidebarProps {
   children: ReactNode;
 }
 
-interface SideUserProfile {
-  avatar?: string;
+interface SidebarUserProfile {
+  avatarUrl?: string;
   email: string;
   name: string;
 }
 
-const SideUser = ({ onSignOut, user }: { onSignOut: () => void; user: SideUserProfile }) => {
+const SidebarUser = ({
+  onAvatarChange,
+  onSignOut,
+  signingOut,
+  user,
+}: {
+  onAvatarChange: (user: AuthUser) => void;
+  onSignOut: () => void;
+  signingOut: boolean;
+  user: SidebarUserProfile;
+}) => {
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { isMobile } = useSidebar();
+  const avatarUrl = resolveAssetUrl(user.avatarUrl);
   const fallback = getInitials(user.name);
+
+  const handleAvatarSelect = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+
+    event.currentTarget.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    setUploadingAvatar(true);
+
+    try {
+      const updatedUser = await uploadAvatar(file);
+
+      onAvatarChange(updatedUser);
+      toast.success('Avatar updated.');
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Avatar upload failed.'));
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   return (
     <SidebarMenu>
       <SidebarMenuItem>
+        <input
+          ref={fileInputRef}
+          className="hidden"
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          onChange={handleAvatarSelect}
+        />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <Avatar className="h-8 w-8 rounded-lg grayscale after:hidden">
-                {user.avatar ? <AvatarImage className="rounded-lg" src={user.avatar} alt={user.name} /> : null}
+              <Avatar className="h-8 w-8 rounded-lg after:hidden">
+                {avatarUrl ? <AvatarImage className="rounded-lg" src={avatarUrl} alt={user.name} /> : null}
                 <AvatarFallback className="rounded-lg">{fallback}</AvatarFallback>
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
@@ -94,7 +132,7 @@ const SideUser = ({ onSignOut, user }: { onSignOut: () => void; user: SideUserPr
             <DropdownMenuLabel className="p-0 font-normal">
               <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                 <Avatar className="h-8 w-8 rounded-lg after:hidden">
-                  {user.avatar ? <AvatarImage className="rounded-lg" src={user.avatar} alt={user.name} /> : null}
+                  {avatarUrl ? <AvatarImage className="rounded-lg" src={avatarUrl} alt={user.name} /> : null}
                   <AvatarFallback className="rounded-lg">{fallback}</AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
@@ -104,9 +142,19 @@ const SideUser = ({ onSignOut, user }: { onSignOut: () => void; user: SideUserPr
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={onSignOut}>
+            <DropdownMenuItem
+              disabled={uploadingAvatar}
+              onSelect={(event: Event) => {
+                event.preventDefault();
+                fileInputRef.current?.click();
+              }}
+            >
+              <ImageUpIcon />
+              {uploadingAvatar ? 'Uploading' : 'Upload avatar'}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={signingOut} onSelect={onSignOut}>
               <LogOutIcon />
-              Sign Out
+              {signingOut ? 'Signing out' : 'Sign out'}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -115,17 +163,35 @@ const SideUser = ({ onSignOut, user }: { onSignOut: () => void; user: SideUserPr
   );
 };
 
-const AppSidebar = ({ children }: AppSidebarProps) => {
+const Index = ({ children }: AppSidebarProps) => {
+  const [session, setSession] = useState(() => getStoredSession());
+  const [signingOut, setSigningOut] = useState(false);
   const navigate = useNavigate();
-  const session = getStoredSession();
   const sidebarUser = {
+    avatarUrl: session?.user.avatarUrl,
     email: session?.user.email ?? '',
-    name: session?.user.username ?? 'Logged-in User',
+    name: session?.user.username ?? 'Signed-in user',
   };
+  const navItems = createNavItems(session?.user.permissions);
 
   const handleSignOut = () => {
-    clearStoredSession();
-    navigate('/login', { replace: true });
+    if (signingOut) {
+      return;
+    }
+
+    setSigningOut(true);
+    void logout()
+      .then(() => {
+        navigate('/login', { replace: true });
+      })
+      .catch((error) => {
+        toast.error(getApiErrorMessage(error, 'Sign out failed.'));
+        setSigningOut(false);
+      });
+  };
+
+  const handleAvatarChange = (user: AuthUser) => {
+    setSession((currentSession) => (currentSession ? { ...currentSession, user } : currentSession));
   };
 
   return (
@@ -135,10 +201,10 @@ const AppSidebar = ({ children }: AppSidebarProps) => {
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton asChild className="data-[slot=sidebar-menu-button]:p-1.5!">
-                <a href="/dashboard">
+                <Link to="/dashboard">
                   <CommandIcon className="size-5!" />
                   <span className="text-base font-semibold">Tilty Scaffold</span>
-                </a>
+                </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -147,7 +213,12 @@ const AppSidebar = ({ children }: AppSidebarProps) => {
           <SideNav main={navItems.main} />
         </SidebarContent>
         <SidebarFooter>
-          <SideUser onSignOut={handleSignOut} user={sidebarUser} />
+          <SidebarUser
+            onAvatarChange={handleAvatarChange}
+            onSignOut={handleSignOut}
+            signingOut={signingOut}
+            user={sidebarUser}
+          />
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
@@ -172,4 +243,31 @@ function getInitials(name: string) {
   );
 }
 
-export default AppSidebar;
+export default Index;
+
+function createNavItems(permissionKeys?: string[]) {
+  return {
+    main: [
+      {
+        title: 'Dashboard',
+        url: '/dashboard',
+        icon: <LayoutDashboardIcon />,
+      },
+      ...(hasPermission(permissionKeys, SystemPermission.UserList)
+        ? [
+            {
+              title: 'Users',
+              url: '/users',
+              icon: <UsersIcon />,
+            },
+          ]
+        : []),
+      {
+        title: 'API docs',
+        url: `${appConfig.apiBaseUrl}/api/docs`,
+        external: true,
+        icon: <BracesIcon />,
+      },
+    ],
+  } satisfies SideNavProps;
+}

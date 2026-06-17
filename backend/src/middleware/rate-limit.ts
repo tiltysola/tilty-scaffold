@@ -1,40 +1,26 @@
-import { Middleware } from 'koa';
+import { type Middleware } from 'koa';
 
 import { AppError } from '../core/errors';
+import { type CacheStore, MemoryCacheStore } from '../infra/cache';
 
 export interface RateLimitOptions {
+  cacheStore?: CacheStore;
   max: number;
   windowMs: number;
 }
 
-interface RateLimitRecord {
-  count: number;
-  expiresAt: number;
-}
-
 export function rateLimitMiddleware(options: RateLimitOptions): Middleware {
-  const records = new Map<string, RateLimitRecord>();
+  const cacheStore = options.cacheStore ?? new MemoryCacheStore();
 
   return async (ctx, next) => {
-    const now = Date.now();
-    const key = `${ctx.ip}:${ctx.method}:${ctx.path}`;
-    const record = records.get(key);
+    const key = `rate-limit:${ctx.ip}:${ctx.method}:${ctx.path}`;
+    const record = await cacheStore.increment(key, options.windowMs);
 
-    if (!record || record.expiresAt <= now) {
-      records.set(key, {
-        count: 1,
-        expiresAt: now + options.windowMs,
-      });
-      await next();
-      return;
-    }
-
-    if (record.count >= options.max) {
-      ctx.set('Retry-After', String(Math.ceil((record.expiresAt - now) / 1000)));
+    if (record.count > options.max) {
+      ctx.set('Retry-After', String(Math.ceil(record.expiresInMs / 1000)));
       throw new AppError('RATE_LIMITED', 'The request rate limit has been exceeded.', 429);
     }
 
-    record.count += 1;
     await next();
   };
 }

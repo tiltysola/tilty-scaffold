@@ -1,14 +1,14 @@
-import { Middleware } from 'koa';
+import { type Middleware } from 'koa';
 
 import { fail, ok } from '../../core/http';
-import { BackendModule } from '../../core/module';
+import { type BackendModule } from '../../core/module';
 
 export interface ReadinessCheck {
   check: () => Promise<void>;
   name: string;
 }
 
-export interface HealthModuleOptions {
+interface HealthModuleOptions {
   readinessChecks?: ReadinessCheck[];
 }
 

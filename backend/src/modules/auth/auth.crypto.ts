@@ -1,4 +1,4 @@
-import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'crypto';
+import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 
 import { AppError } from '../../core/errors';
@@ -7,18 +7,17 @@ type JoseModule = typeof import('jose', { with: { 'resolution-mode': 'import' } 
 
 const scrypt = promisify(scryptCallback);
 const passwordKeyLength = 64;
-const tokenTtlSeconds = 60 * 60 * 24;
-const ssoStateTtlSeconds = 10 * 60;
-const ssoHandoffTtlSeconds = 60;
-const ssoBindTtlSeconds = 10 * 60;
+export const ssoStateTtlMs = 10 * 60 * 1000;
+export const ssoHandoffTtlMs = 60 * 1000;
+export const ssoBindTtlMs = 10 * 60 * 1000;
 let joseModule: Promise<JoseModule> | undefined;
 
-export interface PasswordHash {
+interface PasswordHash {
   passwordHash: string;
   passwordSalt: string;
 }
 
-export interface AccessTokenPayload {
+interface AccessTokenPayload {
   sub: string;
   email: string;
   username: string;
@@ -27,7 +26,16 @@ export interface AccessTokenPayload {
   type: 'access';
 }
 
-export interface SsoStatePayload {
+interface RefreshTokenPayload {
+  sub: string;
+  jti: string;
+  iat: number;
+  exp: number;
+  type: 'refresh';
+}
+
+interface SsoStatePayload {
+  jti: string;
   nonce: string;
   redirectPath: string;
   iat: number;
@@ -35,7 +43,8 @@ export interface SsoStatePayload {
   type: 'sso_state';
 }
 
-export interface SsoHandoffPayload {
+interface SsoHandoffPayload {
+  jti: string;
   sub: string;
   email: string;
   username: string;
@@ -44,7 +53,8 @@ export interface SsoHandoffPayload {
   type: 'sso_handoff';
 }
 
-export interface SsoBindPayload {
+interface SsoBindPayload {
+  jti: string;
   ssoSubject: string;
   email: string;
   username: string;
@@ -75,10 +85,14 @@ export async function verifyPassword(password: string, passwordHash: string, pas
   return timingSafeEqual(candidate, expected);
 }
 
-export async function createAccessToken(payload: Omit<AccessTokenPayload, 'iat' | 'exp' | 'type'>, secret: string) {
+export async function createAccessToken(
+  payload: Omit<AccessTokenPayload, 'iat' | 'exp' | 'type'>,
+  secret: string,
+  ttlSeconds: number,
+) {
   const { SignJWT } = await loadJose();
   const issuedAt = Math.floor(Date.now() / 1000);
-  const expiresAt = issuedAt + tokenTtlSeconds;
+  const expiresAt = issuedAt + ttlSeconds;
   const accessToken = await new SignJWT({
     email: payload.email,
     username: payload.username,
@@ -93,6 +107,30 @@ export async function createAccessToken(payload: Omit<AccessTokenPayload, 'iat' 
   return {
     accessToken,
     expiresAt: new Date(expiresAt * 1000).toISOString(),
+  };
+}
+
+export async function createRefreshToken(
+  payload: Omit<RefreshTokenPayload, 'iat' | 'exp' | 'type'>,
+  secret: string,
+  ttlSeconds: number,
+) {
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const expiresAt = issuedAt + ttlSeconds;
+  const refreshToken = await signToken(
+    {
+      jti: payload.jti,
+      sub: payload.sub,
+      type: 'refresh',
+    },
+    secret,
+    issuedAt,
+    expiresAt,
+  );
+
+  return {
+    expiresAt: new Date(expiresAt * 1000).toISOString(),
+    refreshToken,
   };
 }
 
@@ -123,23 +161,39 @@ export async function verifyAccessToken(token: string, secret: string) {
   }
 }
 
+export async function verifyRefreshToken(token: string, secret: string) {
+  const payload = await verifyToken<RefreshTokenPayload>(token, secret);
+
+  if (!isRefreshTokenPayload(payload)) {
+    throwInvalidToken();
+  }
+
+  return payload;
+}
+
 export async function createSsoStateToken(
-  payload: Omit<SsoStatePayload, 'iat' | 'exp' | 'type'>,
+  payload: Omit<SsoStatePayload, 'jti' | 'iat' | 'exp' | 'type'>,
   secret: string,
 ) {
   const issuedAt = Math.floor(Date.now() / 1000);
-  const expiresAt = issuedAt + ssoStateTtlSeconds;
+  const expiresAt = issuedAt + Math.floor(ssoStateTtlMs / 1000);
+  const tokenId = randomUUID();
 
-  return await signToken(
-    {
-      nonce: payload.nonce,
-      redirectPath: payload.redirectPath,
-      type: 'sso_state',
-    },
-    secret,
-    issuedAt,
-    expiresAt,
-  );
+  return {
+    expiresAt: new Date(expiresAt * 1000).toISOString(),
+    token: await signToken(
+      {
+        jti: tokenId,
+        nonce: payload.nonce,
+        redirectPath: payload.redirectPath,
+        type: 'sso_state',
+      },
+      secret,
+      issuedAt,
+      expiresAt,
+    ),
+    tokenId,
+  } as const;
 }
 
 export async function verifySsoStateToken(token: string, secret: string) {
@@ -153,23 +207,29 @@ export async function verifySsoStateToken(token: string, secret: string) {
 }
 
 export async function createSsoHandoffToken(
-  payload: Omit<SsoHandoffPayload, 'iat' | 'exp' | 'type'>,
+  payload: Omit<SsoHandoffPayload, 'jti' | 'iat' | 'exp' | 'type'>,
   secret: string,
 ) {
   const issuedAt = Math.floor(Date.now() / 1000);
-  const expiresAt = issuedAt + ssoHandoffTtlSeconds;
+  const expiresAt = issuedAt + Math.floor(ssoHandoffTtlMs / 1000);
+  const tokenId = randomUUID();
 
-  return await signToken(
-    {
-      email: payload.email,
-      sub: payload.sub,
-      username: payload.username,
-      type: 'sso_handoff',
-    },
-    secret,
-    issuedAt,
-    expiresAt,
-  );
+  return {
+    expiresAt: new Date(expiresAt * 1000).toISOString(),
+    token: await signToken(
+      {
+        email: payload.email,
+        jti: tokenId,
+        sub: payload.sub,
+        username: payload.username,
+        type: 'sso_handoff',
+      },
+      secret,
+      issuedAt,
+      expiresAt,
+    ),
+    tokenId,
+  } as const;
 }
 
 export async function verifySsoHandoffToken(token: string, secret: string) {
@@ -183,24 +243,30 @@ export async function verifySsoHandoffToken(token: string, secret: string) {
 }
 
 export async function createSsoBindToken(
-  payload: Omit<SsoBindPayload, 'iat' | 'exp' | 'type'>,
+  payload: Omit<SsoBindPayload, 'jti' | 'iat' | 'exp' | 'type'>,
   secret: string,
 ) {
   const issuedAt = Math.floor(Date.now() / 1000);
-  const expiresAt = issuedAt + ssoBindTtlSeconds;
+  const expiresAt = issuedAt + Math.floor(ssoBindTtlMs / 1000);
+  const tokenId = randomUUID();
 
-  return await signToken(
-    {
-      email: payload.email,
-      redirectPath: payload.redirectPath,
-      ssoSubject: payload.ssoSubject,
-      username: payload.username,
-      type: 'sso_bind',
-    },
-    secret,
-    issuedAt,
-    expiresAt,
-  );
+  return {
+    expiresAt: new Date(expiresAt * 1000).toISOString(),
+    token: await signToken(
+      {
+        email: payload.email,
+        jti: tokenId,
+        redirectPath: payload.redirectPath,
+        ssoSubject: payload.ssoSubject,
+        username: payload.username,
+        type: 'sso_bind',
+      },
+      secret,
+      issuedAt,
+      expiresAt,
+    ),
+    tokenId,
+  } as const;
 }
 
 export async function verifySsoBindToken(token: string, secret: string) {
@@ -221,7 +287,7 @@ function loadJose() {
 async function signToken(payload: Record<string, unknown>, secret: string, issuedAt: number, expiresAt: number) {
   const { SignJWT } = await loadJose();
 
-  return await new SignJWT(payload)
+  return new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setIssuedAt(issuedAt)
     .setExpirationTime(expiresAt)
@@ -276,6 +342,22 @@ function isAccessTokenPayload(value: unknown): value is AccessTokenPayload {
   );
 }
 
+function isRefreshTokenPayload(value: unknown): value is RefreshTokenPayload {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const payload = value as Record<string, unknown>;
+
+  return (
+    typeof payload.sub === 'string' &&
+    typeof payload.jti === 'string' &&
+    typeof payload.iat === 'number' &&
+    typeof payload.exp === 'number' &&
+    payload.type === 'refresh'
+  );
+}
+
 function isSsoStatePayload(value: unknown): value is SsoStatePayload {
   if (!value || typeof value !== 'object') {
     return false;
@@ -285,6 +367,7 @@ function isSsoStatePayload(value: unknown): value is SsoStatePayload {
 
   return (
     typeof payload.nonce === 'string' &&
+    typeof payload.jti === 'string' &&
     typeof payload.redirectPath === 'string' &&
     typeof payload.iat === 'number' &&
     typeof payload.exp === 'number' &&
@@ -301,6 +384,7 @@ function isSsoHandoffPayload(value: unknown): value is SsoHandoffPayload {
 
   return (
     typeof payload.sub === 'string' &&
+    typeof payload.jti === 'string' &&
     typeof payload.email === 'string' &&
     typeof payload.username === 'string' &&
     typeof payload.iat === 'number' &&
@@ -318,6 +402,7 @@ function isSsoBindPayload(value: unknown): value is SsoBindPayload {
 
   return (
     typeof payload.ssoSubject === 'string' &&
+    typeof payload.jti === 'string' &&
     typeof payload.email === 'string' &&
     typeof payload.username === 'string' &&
     typeof payload.redirectPath === 'string' &&

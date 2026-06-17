@@ -1,19 +1,27 @@
 import { randomBytes } from 'crypto';
 
+import { SystemRole } from '@tilty/shared/access-control';
+
 import { AppError } from '../../core/errors';
+import { type CacheStore } from '../../infra/cache';
+import { type AccessControlService } from '../access-control/access-control.service';
 import { type UserModel } from '../users/user.model';
-import { UserService } from '../users/user.service';
+import { type UserService } from '../users/user.service';
 import {
   createSsoBindToken,
   createSsoHandoffToken,
   createSsoStateToken,
   hashPassword,
+  ssoBindTtlMs,
+  ssoHandoffTtlMs,
+  ssoStateTtlMs,
   verifyPassword,
   verifySsoBindToken,
   verifySsoHandoffToken,
   verifySsoStateToken,
 } from './auth.crypto';
-import { createAuthSession } from './auth.service';
+import { type AuthTokenConfig, createAuthSession } from './auth.service';
+import { assertPasswordConfirmation } from './auth.validation';
 
 type JoseModule = typeof import('jose', { with: { 'resolution-mode': 'import' } });
 
@@ -34,19 +42,6 @@ export interface SsoCallbackInput {
   state?: string | undefined;
 }
 
-export interface BindSsoAccountInput {
-  email: string;
-  password: string;
-  token: string;
-}
-
-export interface CreateSsoAccountInput {
-  confirmPassword: string;
-  password: string;
-  token: string;
-  username: string;
-}
-
 interface OidcDiscoveryDocument {
   authorization_endpoint: string;
   id_token_signing_alg_values_supported?: string[];
@@ -61,14 +56,29 @@ interface OidcTokenResponse {
 
 interface OidcIdTokenPayload {
   email?: unknown;
+  email_verified?: unknown;
   name?: unknown;
   nonce?: unknown;
   preferred_username?: unknown;
   sub?: unknown;
 }
 
+interface BindSsoAccountInput {
+  email: string;
+  password: string;
+  token: string;
+}
+
+interface CreateSsoAccountInput {
+  confirmPassword: string;
+  password: string;
+  token: string;
+  username: string;
+}
+
 interface IdTokenVerifier {
   algorithms: string[];
+  requiresDiscoveryAlgorithmSupport?: boolean;
   verify(input: IdTokenVerifierInput): Promise<OidcIdTokenPayload>;
 }
 
@@ -85,39 +95,31 @@ interface IdTokenVerifierInput {
   };
 }
 
+interface OneTimeTokenRecord {
+  expiresAt: number;
+  subject: string;
+  used: boolean;
+}
+
 let joseModule: Promise<JoseModule> | undefined;
 
 const idTokenVerifiers: IdTokenVerifier[] = [
   {
     algorithms: ['HS256', 'HS384', 'HS512'],
+    requiresDiscoveryAlgorithmSupport: true,
     async verify({ algorithms, config, idToken, jose, verifyOptions }) {
-      const { payload } = await jose.jwtVerify<OidcIdTokenPayload>(
-        idToken,
-        Buffer.from(config.clientSecret, 'utf8'),
-        {
-          ...verifyOptions,
-          algorithms,
-        },
-      );
+      const { payload } = await jose.jwtVerify<OidcIdTokenPayload>(idToken, Buffer.from(config.clientSecret, 'utf8'), {
+        ...verifyOptions,
+        algorithms,
+      });
 
       return payload;
     },
   },
   {
-    algorithms: [
-      'RS256',
-      'RS384',
-      'RS512',
-      'PS256',
-      'PS384',
-      'PS512',
-      'ES256',
-      'ES384',
-      'ES512',
-      'EdDSA',
-    ],
+    algorithms: ['RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512', 'ES256', 'ES384', 'ES512', 'EdDSA'],
     async verify({ algorithms, config, discovery, idToken, jose, verifyOptions }) {
-      if (!isUrl(discovery.jwks_uri)) {
+      if (!isAllowedProviderUrl(discovery.jwks_uri, config)) {
         throw new AppError('SSO_DISCOVERY_INVALID', 'SSO discovery document is invalid.', 502);
       }
 
@@ -136,15 +138,26 @@ const idTokenVerifiers: IdTokenVerifier[] = [
     },
   },
 ];
+const ssoDiscoveryCacheTtlMs = 60 * 60_000;
+const ssoBindCacheKeyPrefix = 'auth:sso-bind:';
+const ssoHandoffCacheKeyPrefix = 'auth:sso-handoff:';
+const ssoStateCacheKeyPrefix = 'auth:sso-state:';
+const maxTokenConsumeAttempts = 3;
 
 export class SsoService {
-  private discovery?: Promise<OidcDiscoveryDocument>;
+  private discovery: Promise<OidcDiscoveryDocument> | undefined;
+  private readonly cacheStore: CacheStore;
 
   constructor(
     private readonly userService: UserService,
+    private readonly accessControl: AccessControlService,
     private readonly tokenSecret: string,
-    private readonly config?: SsoConfig,
-  ) {}
+    private readonly config: SsoConfig | undefined,
+    cacheStore: CacheStore,
+    private readonly tokenConfig: AuthTokenConfig,
+  ) {
+    this.cacheStore = cacheStore;
+  }
 
   getPublicConfig() {
     return this.config
@@ -169,11 +182,13 @@ export class SsoService {
     );
     const url = new URL(discovery.authorization_endpoint);
 
+    await this.storeOneTimeToken(getSsoStateCacheKey(state.tokenId), nonce, ssoStateTtlMs);
+
     url.searchParams.set('client_id', config.clientId);
     url.searchParams.set('redirect_uri', config.redirectUri);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('scope', config.scopes.join(' '));
-    url.searchParams.set('state', state);
+    url.searchParams.set('state', state.token);
     url.searchParams.set('nonce', nonce);
 
     return url.toString();
@@ -183,11 +198,10 @@ export class SsoService {
     this.requireConfig();
 
     if (input.error) {
-      throw new AppError(
-        'SSO_PROVIDER_ERROR',
-        input.errorDescription || input.error,
-        401,
-      );
+      throw new AppError('SSO_PROVIDER_ERROR', 'SSO authentication could not be completed.', 401, {
+        providerError: input.error,
+        ...(input.errorDescription ? { providerErrorDescription: input.errorDescription } : {}),
+      });
     }
 
     if (!input.code || !input.state) {
@@ -195,6 +209,7 @@ export class SsoService {
     }
 
     const state = await verifySsoStateToken(input.state, this.tokenSecret);
+    await this.consumeOneTimeToken(getSsoStateCacheKey(state.jti), state.nonce);
     const tokenResponse = await this.exchangeCode(input.code);
 
     if (!tokenResponse.id_token) {
@@ -210,6 +225,10 @@ export class SsoService {
       throw new AppError('SSO_EMAIL_MISSING', 'SSO profile email is missing.', 401);
     }
 
+    if (claims.email_verified !== true) {
+      throw new AppError('SSO_EMAIL_UNVERIFIED', 'SSO profile email is not verified.', 401);
+    }
+
     const username = getUsername(claims, email);
     const user = await this.userService.findBySsoSubject(ssoSubject);
 
@@ -218,10 +237,10 @@ export class SsoService {
         throw new AppError('USER_UNAVAILABLE', 'User is not available.', 403);
       }
 
-      return await this.createSessionCallbackUrl(user, state.redirectPath);
+      return this.createSessionCallbackUrl(user, state.redirectPath);
     }
 
-    return await this.createBindCallbackUrl({
+    return this.createBindCallbackUrl({
       email,
       redirectPath: state.redirectPath,
       ssoSubject,
@@ -233,23 +252,38 @@ export class SsoService {
     this.requireConfig();
 
     const handoff = await verifySsoHandoffToken(token, this.tokenSecret);
+    await this.consumeOneTimeToken(getSsoHandoffCacheKey(handoff.jti), handoff.sub);
     const user = await this.userService.findById(handoff.sub);
 
     if (!user) {
       throw new AppError('AUTH_INVALID_TOKEN', 'Authentication token is invalid.', 401);
     }
 
-    return await createAuthSession(user, this.tokenSecret);
+    return createAuthSession(user, this.tokenSecret, this.tokenConfig, this.cacheStore, this.accessControl);
   }
 
   async createSsoAccount(input: CreateSsoAccountInput) {
     this.requireConfig();
-
-    if (input.password !== input.confirmPassword) {
-      throw new AppError('AUTH_PASSWORD_CONFIRMATION_MISMATCH', 'Password confirmation does not match.', 400);
-    }
+    assertPasswordConfirmation(input);
 
     const bind = await verifySsoBindToken(input.token, this.tokenSecret);
+    const tokenKey = getSsoBindCacheKey(bind.jti);
+
+    await this.requireOneTimeToken(tokenKey, bind.ssoSubject);
+
+    const existingBySubject = await this.userService.findBySsoSubject(bind.ssoSubject);
+
+    if (existingBySubject) {
+      throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
+    }
+
+    const existingByEmail = await this.userService.findByEmail(bind.email);
+
+    if (existingByEmail) {
+      throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+    }
+
+    await this.consumeOneTimeToken(tokenKey, bind.ssoSubject);
     const credentials = await hashPassword(input.password);
     const user = await this.userService.createWithSso({
       email: bind.email,
@@ -258,13 +292,19 @@ export class SsoService {
       username: input.username,
     });
 
-    return await createAuthSession(user, this.tokenSecret);
+    await this.bootstrapRootRoleForFirstUser(user);
+
+    return createAuthSession(user, this.tokenSecret, this.tokenConfig, this.cacheStore, this.accessControl);
   }
 
   async bindSsoAccount(input: BindSsoAccountInput) {
     this.requireConfig();
 
     const bind = await verifySsoBindToken(input.token, this.tokenSecret);
+    const tokenKey = getSsoBindCacheKey(bind.jti);
+
+    await this.requireOneTimeToken(tokenKey, bind.ssoSubject);
+
     const user = await this.userService.findByEmail(input.email);
 
     if (!user || !user.available || !user.passwordHash || !user.passwordSalt) {
@@ -277,9 +317,76 @@ export class SsoService {
       throwInvalidCredentials();
     }
 
+    await this.consumeOneTimeToken(tokenKey, bind.ssoSubject);
+
     const boundUser = await this.userService.bindSsoSubject(user, bind.ssoSubject);
 
-    return await createAuthSession(boundUser, this.tokenSecret);
+    return createAuthSession(boundUser, this.tokenSecret, this.tokenConfig, this.cacheStore, this.accessControl);
+  }
+
+  private async bootstrapRootRoleForFirstUser(user: UserModel) {
+    if (await this.userService.hasMultipleAvailableUsers()) {
+      return;
+    }
+
+    await this.accessControl.assignSystemRoleToUser(user.id, SystemRole.Root);
+  }
+
+  private async storeOneTimeToken(key: string, subject: string, ttlMs: number) {
+    await this.cacheStore.set<OneTimeTokenRecord>(
+      key,
+      {
+        expiresAt: Date.now() + ttlMs,
+        subject,
+        used: false,
+      },
+      ttlMs,
+    );
+  }
+
+  private async requireOneTimeToken(key: string, subject: string) {
+    const record = await this.cacheStore.get<OneTimeTokenRecord>(key);
+
+    if (!record || record.subject !== subject || record.used) {
+      throwInvalidSsoToken();
+    }
+
+    if (record.expiresAt <= Date.now()) {
+      await this.cacheStore.delete(key);
+      throwInvalidSsoToken();
+    }
+  }
+
+  private async consumeOneTimeToken(key: string, subject: string) {
+    for (let attempt = 0; attempt < maxTokenConsumeAttempts; attempt += 1) {
+      const record = await this.cacheStore.get<OneTimeTokenRecord>(key);
+      const now = Date.now();
+
+      if (!record || record.subject !== subject || record.used) {
+        throwInvalidSsoToken();
+      }
+
+      if (record.expiresAt <= now) {
+        await this.cacheStore.delete(key);
+        throwInvalidSsoToken();
+      }
+
+      const consumed = await this.cacheStore.compareAndSet(
+        key,
+        record,
+        {
+          ...record,
+          used: true,
+        },
+        record.expiresAt - now,
+      );
+
+      if (consumed) {
+        return;
+      }
+    }
+
+    throw new AppError('SSO_TOKEN_CONFLICT', 'SSO token state changed. Try again.', 409);
   }
 
   private async exchangeCode(code: string) {
@@ -346,7 +453,7 @@ export class SsoService {
         },
       });
 
-      if (payload.nonce !== undefined && payload.nonce !== expectedNonce) {
+      if (payload.nonce !== expectedNonce) {
         throw new AppError('SSO_NONCE_INVALID', 'SSO nonce is invalid.', 401);
       }
 
@@ -362,10 +469,29 @@ export class SsoService {
 
   private async getDiscovery() {
     const config = this.requireConfig();
+    const cacheKey = getDiscoveryCacheKey(config);
+    const cached = await this.cacheStore.get<OidcDiscoveryDocument>(cacheKey);
 
-    this.discovery ??= fetchDiscovery(config);
+    if (cached) {
+      validateDiscovery(cached, config);
+      return cached;
+    }
 
-    return await this.discovery;
+    this.discovery ??= this.fetchAndCacheDiscovery(config, cacheKey);
+
+    try {
+      return await this.discovery;
+    } finally {
+      this.discovery = undefined;
+    }
+  }
+
+  private async fetchAndCacheDiscovery(config: SsoConfig, cacheKey: string) {
+    const discovery = await fetchDiscovery(config);
+
+    await this.cacheStore.set(cacheKey, discovery, ssoDiscoveryCacheTtlMs);
+
+    return discovery;
   }
 
   private requireConfig() {
@@ -388,8 +514,12 @@ export class SsoService {
     );
     const callbackUrl = new URL(config.frontendCallbackUrl);
 
-    callbackUrl.searchParams.set('sso_token', handoffToken);
-    callbackUrl.searchParams.set('redirect', redirectPath);
+    await this.storeOneTimeToken(getSsoHandoffCacheKey(handoffToken.tokenId), user.id, ssoHandoffTtlMs);
+
+    setCallbackFragment(callbackUrl, {
+      redirect: redirectPath,
+      sso_token: handoffToken.token,
+    });
 
     return callbackUrl.toString();
   }
@@ -404,13 +534,23 @@ export class SsoService {
     const bindToken = await createSsoBindToken(input, this.tokenSecret);
     const callbackUrl = new URL(config.frontendCallbackUrl);
 
-    callbackUrl.searchParams.set('sso_bind_token', bindToken);
-    callbackUrl.searchParams.set('sso_email', input.email);
-    callbackUrl.searchParams.set('sso_username', input.username);
-    callbackUrl.searchParams.set('redirect', input.redirectPath);
+    await this.storeOneTimeToken(getSsoBindCacheKey(bindToken.tokenId), input.ssoSubject, ssoBindTtlMs);
+
+    setCallbackFragment(callbackUrl, {
+      redirect: input.redirectPath,
+      sso_bind_token: bindToken.token,
+      sso_email: input.email,
+      sso_username: input.username,
+    });
 
     return callbackUrl.toString();
   }
+}
+
+function setCallbackFragment(url: URL, values: Record<string, string>) {
+  const params = new URLSearchParams(values);
+
+  url.hash = params.toString();
 }
 
 function findIdTokenVerifier(algorithm: string) {
@@ -425,7 +565,7 @@ function findIdTokenVerifier(algorithm: string) {
 
 function getVerifierAlgorithms(discovery: OidcDiscoveryDocument, verifier: IdTokenVerifier) {
   if (!discovery.id_token_signing_alg_values_supported?.length) {
-    return verifier.algorithms;
+    return verifier.requiresDiscoveryAlgorithmSupport ? [] : verifier.algorithms;
   }
 
   return verifier.algorithms.filter((algorithm) =>
@@ -437,7 +577,7 @@ async function fetchDiscovery(config: SsoConfig) {
   let discovery: OidcDiscoveryDocument;
 
   try {
-    const response = await fetch(`${config.issuerUrl.replace(/\/+$/, '')}/.well-known/openid-configuration`, {
+    const response = await fetch(`${config.issuerUrl}/.well-known/openid-configuration`, {
       signal: AbortSignal.timeout(config.requestTimeoutMs),
     });
 
@@ -450,22 +590,45 @@ async function fetchDiscovery(config: SsoConfig) {
     throw new AppError('SSO_DISCOVERY_FAILED', 'SSO discovery could not be completed.', 502);
   }
 
+  validateDiscovery(discovery, config);
+
+  return discovery;
+}
+
+function validateDiscovery(discovery: OidcDiscoveryDocument, config: SsoConfig) {
   if (
     discovery.issuer !== config.issuerUrl ||
-    !isUrl(discovery.authorization_endpoint) ||
-    !isUrl(discovery.token_endpoint)
+    !isAllowedProviderUrl(discovery.authorization_endpoint, config) ||
+    !isAllowedProviderUrl(discovery.token_endpoint, config) ||
+    (discovery.jwks_uri !== undefined && !isAllowedProviderUrl(discovery.jwks_uri, config))
   ) {
     throw new AppError('SSO_DISCOVERY_INVALID', 'SSO discovery document is invalid.', 502);
   }
+}
 
-  return discovery;
+function getDiscoveryCacheKey(config: SsoConfig) {
+  return `sso:discovery:${config.issuerUrl}`;
+}
+
+function getSsoStateCacheKey(tokenId: string) {
+  return `${ssoStateCacheKeyPrefix}${tokenId}`;
+}
+
+function getSsoHandoffCacheKey(tokenId: string) {
+  return `${ssoHandoffCacheKeyPrefix}${tokenId}`;
+}
+
+function getSsoBindCacheKey(tokenId: string) {
+  return `${ssoBindCacheKeyPrefix}${tokenId}`;
 }
 
 async function readJson<T>(response: Response, code: string): Promise<T> {
   const text = await response.text();
 
   if (!response.ok) {
-    throw new AppError(code, 'The SSO provider request could not be completed.', 502, { status: response.status });
+    throw new AppError(code, 'The SSO provider request could not be completed.', 502, {
+      status: response.status,
+    });
   }
 
   try {
@@ -498,14 +661,28 @@ function getClaimString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function isUrl(value: unknown): value is string {
+function isAllowedProviderUrl(value: unknown, config: SsoConfig): value is string {
   if (typeof value !== 'string') {
     return false;
   }
 
   try {
-    new URL(value);
-    return true;
+    const url = new URL(value);
+    const issuer = new URL(config.issuerUrl);
+
+    if (url.username || url.password) {
+      return false;
+    }
+
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return false;
+    }
+
+    if (url.origin !== issuer.origin) {
+      return false;
+    }
+
+    return issuer.protocol !== 'https:' || url.protocol === 'https:';
   } catch {
     return false;
   }
@@ -518,4 +695,8 @@ function loadJose() {
 
 function throwInvalidCredentials(): never {
   throw new AppError('AUTH_INVALID_CREDENTIALS', 'The email address or password is invalid.', 401);
+}
+
+function throwInvalidSsoToken(): never {
+  throw new AppError('AUTH_INVALID_TOKEN', 'Authentication token is invalid.', 401);
 }

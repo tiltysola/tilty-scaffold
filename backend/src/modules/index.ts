@@ -1,39 +1,61 @@
-import { Sequelize } from 'sequelize';
+import { type Sequelize } from 'sequelize';
 
-import { BackendModule } from '../core/module';
-import { RateLimitOptions, rateLimitMiddleware } from '../middleware/rate-limit';
-import { EmailVerificationService, SmtpEmailSender, SmtpEmailSenderConfig } from './auth/auth.email';
-import { AuthService } from './auth/auth.service';
-import { SsoConfig, SsoService } from './auth/auth.sso';
+import { type BackendModule } from '../core/module';
+import { type CacheStore, MemoryCacheStore } from '../infra/cache';
+import { type FileStorage } from '../infra/file-storage';
+import { rateLimitMiddleware, type RateLimitOptions } from '../middleware/rate-limit';
+import {
+  initAccessControlModels,
+  type PermissionModel,
+  type RoleModel,
+  type RolePermissionModel,
+  type UserRoleModel,
+} from './access-control/access-control.model';
+import { AccessControlService } from './access-control/access-control.service';
 import { createAuthModule } from './auth';
+import { type AuthCookieConfig, defaultAuthCookieConfig } from './auth/auth.controller';
+import { EmailVerificationService, SmtpEmailSender, type SmtpEmailSenderConfig } from './auth/auth.email';
+import { AuthService, type AuthTokenConfig, defaultAuthTokenConfig } from './auth/auth.service';
+import { type SsoConfig, SsoService } from './auth/auth.sso';
 import { createDemoModule } from './demo';
 import { createDocsModule } from './docs';
-import { createHealthModule, ReadinessCheck } from './health';
-import { initUserModel, UserModel } from './users/user.model';
+import { createHealthModule, type ReadinessCheck } from './health';
+import { createUsersModule } from './users';
+import { initUserModel, type UserModel } from './users/user.model';
 import { UserService } from './users/user.service';
 
-export interface ServiceConfig {
+interface ServiceConfig {
+  authTokens?: AuthTokenConfig;
   authTokenSecret: string;
+  cacheStore?: CacheStore;
   email?: EmailServiceConfig;
+  fileStorage?: FileStorage;
   sso?: SsoConfig;
 }
 
-export interface EmailServiceConfig {
+interface EmailServiceConfig {
   codeCooldownMs: number;
   codeExpiresInMs: number;
   smtp: SmtpEmailSenderConfig;
 }
 
-export interface ModuleConfig {
+interface ModuleConfig {
+  authCookies?: AuthCookieConfig;
   authRateLimit: RateLimitOptions;
+  avatarUploadMaxBytes: number;
   readinessChecks?: ReadinessCheck[];
 }
 
-export interface Models {
+interface Models {
+  permission: typeof PermissionModel;
+  role: typeof RoleModel;
+  rolePermission: typeof RolePermissionModel;
   user: typeof UserModel;
+  userRole: typeof UserRoleModel;
 }
 
-export interface Services {
+interface Services {
+  accessControl: AccessControlService;
   auth: AuthService;
   sso: SsoService;
   user: UserService;
@@ -41,17 +63,30 @@ export interface Services {
 
 export function initModels(sequelize: Sequelize): Models {
   return {
+    ...initAccessControlModels(sequelize),
     user: initUserModel(sequelize),
   };
 }
 
 export function createServices(models: Models, config: ServiceConfig): Services {
+  const accessControl = new AccessControlService(models);
   const user = new UserService(models.user);
-  const emailVerification = createEmailVerificationService(config.email);
+  const cacheStore = config.cacheStore ?? new MemoryCacheStore();
+  const authTokens = config.authTokens ?? defaultAuthTokenConfig;
+  const emailVerification = createEmailVerificationService(config.email, cacheStore, config.authTokenSecret);
 
   return {
-    auth: new AuthService(user, config.authTokenSecret, emailVerification),
-    sso: new SsoService(user, config.authTokenSecret, config.sso),
+    accessControl,
+    auth: new AuthService(
+      user,
+      accessControl,
+      config.authTokenSecret,
+      emailVerification,
+      config.fileStorage,
+      authTokens,
+      cacheStore,
+    ),
+    sso: new SsoService(user, accessControl, config.authTokenSecret, config.sso, cacheStore, authTokens),
     user,
   };
 }
@@ -59,24 +94,39 @@ export function createServices(models: Models, config: ServiceConfig): Services 
 export function createModules(services: Services, config?: ModuleConfig): BackendModule[] {
   const authRateLimit = config ? rateLimitMiddleware(config.authRateLimit) : undefined;
   const authOptions = authRateLimit ? { rateLimit: authRateLimit } : {};
+  const authCookies = config?.authCookies ?? defaultAuthCookieConfig;
   const healthOptions = config?.readinessChecks ? { readinessChecks: config.readinessChecks } : {};
 
   return [
     createHealthModule(healthOptions),
-    createAuthModule(services.auth, { ...authOptions, ssoService: services.sso }),
+    createAuthModule(services.auth, {
+      ...authOptions,
+      avatarUploadMaxBytes: config?.avatarUploadMaxBytes ?? 2 * 1024 * 1024,
+      cookies: authCookies,
+      ssoService: services.sso,
+    }),
+    createUsersModule(services.user, services.accessControl, services.auth, {
+      cookies: authCookies,
+    }),
     createDocsModule(),
     createDemoModule(),
   ];
 }
 
-function createEmailVerificationService(config?: EmailServiceConfig) {
+function createEmailVerificationService(
+  config: EmailServiceConfig | undefined,
+  cacheStore: CacheStore,
+  verificationSecret: string,
+) {
   if (!config) {
     return new EmailVerificationService();
   }
 
   return new EmailVerificationService({
+    cacheStore,
     codeCooldownMs: config.codeCooldownMs,
     codeExpiresInMs: config.codeExpiresInMs,
     sender: new SmtpEmailSender(config.smtp),
+    verificationSecret,
   });
 }

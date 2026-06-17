@@ -20,14 +20,14 @@ const Index = () => {
           <EmptyMedia variant="icon">
             <FileQuestionIcon />
           </EmptyMedia>
-          <EmptyTitle>Page Not Found</EmptyTitle>
+          <EmptyTitle>Page not found</EmptyTitle>
           <EmptyDescription>The requested page does not exist or has been moved.</EmptyDescription>
         </EmptyHeader>
         <EmptyContent className="flex-row justify-center gap-2">
           <Button asChild>
             <Link to="/">
               <HomeIcon />
-              Return to Home
+              Return home
             </Link>
           </Button>
         </EmptyContent>

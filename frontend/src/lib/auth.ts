@@ -1,25 +1,31 @@
-import { ApiError, apiRequest } from './api';
+import { isSafeRelativePath } from '@tilty/shared/paths';
+
+import { ApiError, apiRequest, type ApiRequestOptions } from './api';
 import { appConfig } from './config';
+
+const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 export interface AuthUser {
   id: string;
   username: string;
   email: string;
+  roles: string[];
+  permissions: string[];
+  avatarUrl?: string;
 }
 
 export interface AuthSession {
-  accessToken: string;
-  expiresAt: string;
-  tokenType: 'Bearer';
+  accessTokenExpiresAt: string;
+  refreshTokenExpiresAt: string;
   user: AuthUser;
 }
 
-export interface AuthPublicConfig {
+interface AuthPublicConfig {
   passwordRecoveryEnabled: boolean;
   registrationEmailVerificationRequired: boolean;
 }
 
-export interface RegisterInput {
+interface RegisterInput {
   email: string;
   emailVerificationCode?: string;
   password: string;
@@ -27,25 +33,25 @@ export interface RegisterInput {
   username: string;
 }
 
-export interface LoginInput {
+interface LoginInput {
   email: string;
   password: string;
 }
 
-export interface BindSsoAccountInput {
+interface BindSsoAccountInput {
   email: string;
   password: string;
   token: string;
 }
 
-export interface CreateSsoAccountInput {
+interface CreateSsoAccountInput {
   confirmPassword: string;
   password: string;
   token: string;
   username: string;
 }
 
-export interface ResetPasswordInput {
+interface ResetPasswordInput {
   email: string;
   emailVerificationCode: string;
   password: string;
@@ -65,10 +71,8 @@ export interface EmailVerificationSendResult {
   expiresInSeconds: number;
 }
 
-const sessionStorageKey = 'tilty-scaffold.auth.session';
-
 export async function fetchAuthConfig() {
-  return await apiRequest<AuthPublicConfig>('/api/auth/config');
+  return apiRequest<AuthPublicConfig>('/api/auth/config');
 }
 
 export async function register(input: RegisterInput) {
@@ -83,14 +87,14 @@ export async function register(input: RegisterInput) {
 }
 
 export async function sendRegistrationEmailVerification(input: SendEmailVerificationInput) {
-  return await apiRequest<EmailVerificationSendResult>('/api/auth/register/email-verification', {
+  return apiRequest<EmailVerificationSendResult>('/api/auth/register/email-verification', {
     method: 'POST',
     body: input,
   });
 }
 
 export async function sendPasswordResetEmailVerification(input: SendEmailVerificationInput) {
-  return await apiRequest<EmailVerificationSendResult>('/api/auth/password-reset/email-verification', {
+  return apiRequest<EmailVerificationSendResult>('/api/auth/password-reset/email-verification', {
     method: 'POST',
     body: input,
   });
@@ -108,14 +112,24 @@ export async function login(input: LoginInput) {
 }
 
 export async function resetPassword(input: ResetPasswordInput) {
-  return await apiRequest<{ reset: true }>('/api/auth/password-reset', {
+  return apiRequest<{ reset: true }>('/api/auth/password-reset', {
     method: 'POST',
     body: input,
   });
 }
 
+export async function refreshSession() {
+  const session = await apiRequest<AuthSession>('/api/auth/refresh', {
+    method: 'POST',
+  });
+
+  storeSession(session);
+
+  return session;
+}
+
 export async function fetchSsoConfig() {
-  return await apiRequest<SsoPublicConfig>('/api/auth/sso/config');
+  return apiRequest<SsoPublicConfig>('/api/auth/sso/config');
 }
 
 export function getSsoStartUrl(redirectPath: string) {
@@ -124,6 +138,17 @@ export function getSsoStartUrl(redirectPath: string) {
   url.searchParams.set('redirect', redirectPath);
 
   return url.toString();
+}
+
+export function getSsoCallbackParams(search: string, hash: string) {
+  const fragment = hash.startsWith('#') ? hash.slice(1) : hash;
+  const fragmentParams = new URLSearchParams(fragment);
+
+  if (fragmentParams.has('sso_token') || fragmentParams.has('sso_bind_token')) {
+    return fragmentParams;
+  }
+
+  return new URLSearchParams(search);
 }
 
 export async function completeSsoLogin(token: string) {
@@ -159,18 +184,78 @@ export async function bindSsoAccount(input: BindSsoAccountInput) {
   return session;
 }
 
-export async function fetchCurrentUser(accessToken: string) {
+export async function fetchCurrentUser() {
+  return authenticatedApiRequest<AuthUser>('/api/auth/me', {
+    method: 'GET',
+  });
+}
+
+export async function authenticatedApiRequest<T>(path: string, options?: ApiRequestOptions) {
+  const { result } = await runAuthenticatedRequest(() => apiRequest<T>(path, options));
+
+  return result;
+}
+
+export async function uploadAvatar(file: File) {
+  const session = getStoredSession();
+
+  if (!session) {
+    throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication is required.');
+  }
+
+  const form = new FormData();
+
+  form.append('avatar', file);
+
+  const { result: user, session: refreshedSession } = await runAuthenticatedRequest(() =>
+    apiRequest<AuthUser>('/api/auth/avatar', {
+      body: form,
+      method: 'POST',
+    }),
+  );
+
+  storeSession({
+    ...(refreshedSession ?? session),
+    user,
+  });
+
+  return user;
+}
+
+export async function logout() {
+  await apiRequest<{ signedOut: true }>('/api/auth/logout', {
+    method: 'POST',
+  });
+  clearStoredSession();
+}
+
+export function resolveAssetUrl(url?: string) {
+  if (!url) {
+    return undefined;
+  }
+
+  if (isAllowedAbsoluteAssetUrl(url)) {
+    return url;
+  }
+
+  if (isSafeRelativePath(url)) {
+    return new URL(url, appConfig.apiBaseUrl).toString();
+  }
+
+  return undefined;
+}
+
+function isAllowedAbsoluteAssetUrl(value: string) {
   try {
-    return await apiRequest<AuthUser>('/api/auth/me', {
-      method: 'GET',
-      token: accessToken,
-    });
-  } catch (error) {
-    if (isAuthenticationError(error)) {
-      clearStoredSession();
+    const url = new URL(value);
+
+    if (url.protocol === 'https:') {
+      return !url.username && !url.password;
     }
 
-    throw error;
+    return url.protocol === 'http:' && loopbackHosts.has(url.hostname) && !url.username && !url.password;
+  } catch {
+    return false;
   }
 }
 
@@ -182,7 +267,7 @@ export async function validateStoredSession() {
   }
 
   try {
-    const user = await fetchCurrentUser(session.accessToken);
+    const user = await fetchCurrentUser();
     const validatedSession = {
       ...session,
       user,
@@ -191,12 +276,9 @@ export async function validateStoredSession() {
     storeSession(validatedSession);
 
     return validatedSession;
-  } catch (error) {
-    if (isAuthenticationError(error)) {
-      return null;
-    }
-
-    return session;
+  } catch {
+    clearStoredSession();
+    return null;
   }
 }
 
@@ -205,7 +287,7 @@ export function storeSession(session: AuthSession) {
     return;
   }
 
-  window.localStorage.setItem(sessionStorageKey, JSON.stringify(session));
+  window.localStorage.setItem(appConfig.authSessionStorageKey, JSON.stringify(session));
 }
 
 export function getStoredSession() {
@@ -213,7 +295,7 @@ export function getStoredSession() {
     return null;
   }
 
-  const value = window.localStorage.getItem(sessionStorageKey);
+  const value = window.localStorage.getItem(appConfig.authSessionStorageKey);
 
   if (!value) {
     return null;
@@ -222,7 +304,7 @@ export function getStoredSession() {
   try {
     const session = JSON.parse(value) as unknown;
 
-    if (!isAuthSession(session) || Date.parse(session.expiresAt) <= Date.now()) {
+    if (!isAuthSession(session)) {
       clearStoredSession();
       return null;
     }
@@ -239,7 +321,7 @@ export function clearStoredSession() {
     return;
   }
 
-  window.localStorage.removeItem(sessionStorageKey);
+  window.localStorage.removeItem(appConfig.authSessionStorageKey);
 }
 
 function isAuthSession(value: unknown): value is AuthSession {
@@ -249,10 +331,13 @@ function isAuthSession(value: unknown): value is AuthSession {
 
   const session = value as Record<string, unknown>;
 
+  const accessTokenExpiresAt = parseTimestamp(session.accessTokenExpiresAt);
+  const refreshTokenExpiresAt = parseTimestamp(session.refreshTokenExpiresAt);
+
   return (
-    typeof session.accessToken === 'string' &&
-    typeof session.expiresAt === 'string' &&
-    session.tokenType === 'Bearer' &&
+    accessTokenExpiresAt !== null &&
+    refreshTokenExpiresAt !== null &&
+    refreshTokenExpiresAt > Date.now() &&
     isAuthUser(session.user)
   );
 }
@@ -264,9 +349,70 @@ function isAuthUser(value: unknown): value is AuthUser {
 
   const user = value as Record<string, unknown>;
 
-  return typeof user.id === 'string' && typeof user.username === 'string' && typeof user.email === 'string';
+  return (
+    typeof user.id === 'string' &&
+    typeof user.username === 'string' &&
+    typeof user.email === 'string' &&
+    isStringArray(user.roles) &&
+    isStringArray(user.permissions) &&
+    (user.avatarUrl === undefined || typeof user.avatarUrl === 'string')
+  );
+}
+
+async function runAuthenticatedRequest<T>(request: () => Promise<T>) {
+  try {
+    return {
+      result: await request(),
+      session: undefined,
+    };
+  } catch (error) {
+    if (!isRefreshableAuthenticationError(error)) {
+      if (isAuthenticationError(error)) {
+        clearStoredSession();
+      }
+
+      throw error;
+    }
+  }
+
+  try {
+    const session = await refreshSession();
+
+    return {
+      result: await request(),
+      session,
+    };
+  } catch (refreshError) {
+    if (isAuthenticationError(refreshError)) {
+      clearStoredSession();
+    }
+
+    throw refreshError;
+  }
 }
 
 function isAuthenticationError(error: unknown) {
   return error instanceof ApiError && error.status === 401;
+}
+
+function isRefreshableAuthenticationError(error: unknown) {
+  return (
+    error instanceof ApiError &&
+    error.status === 401 &&
+    (error.code === 'AUTH_REQUIRED' || error.code === 'AUTH_TOKEN_EXPIRED')
+  );
+}
+
+function parseTimestamp(value: unknown) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const timestamp = Date.parse(value);
+
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }

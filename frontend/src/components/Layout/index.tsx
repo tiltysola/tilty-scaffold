@@ -2,7 +2,7 @@ import { Outlet } from 'react-router-dom';
 
 import AppSidebar from '@/components/AppSidebar';
 
-const Layout = () => {
+const Index = () => {
   return (
     <AppSidebar>
       <Outlet />
@@ -10,4 +10,4 @@ const Layout = () => {
   );
 };
 
-export default Layout;
+export default Index;

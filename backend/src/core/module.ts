@@ -1,6 +1,6 @@
-import { Middleware } from 'koa';
+import { type Middleware } from 'koa';
 
-export type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
+type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
 
 export interface RouteDefinition {
   method: HttpMethod;

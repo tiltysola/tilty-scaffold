@@ -1,14 +1,17 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import { once } from 'events';
-import { Socket, connect as connectSocket } from 'net';
-import { connect as connectTlsSocket, TLSSocket } from 'tls';
+import { connect as connectSocket, type Socket } from 'net';
+import { connect as connectTlsSocket, type TLSSocket } from 'tls';
 
 import { AppError } from '../../core/errors';
+import { type CacheStore, MemoryCacheStore } from '../../infra/cache';
 
-export interface EmailVerificationConfig {
+interface EmailVerificationConfig {
+  cacheStore?: CacheStore;
   codeCooldownMs: number;
   codeExpiresInMs: number;
   sender?: EmailSender;
+  verificationSecret?: string;
 }
 
 export interface SmtpEmailSenderConfig {
@@ -22,7 +25,7 @@ export interface SmtpEmailSenderConfig {
   username?: string;
 }
 
-export interface SendEmailInput {
+interface SendEmailInput {
   subject: string;
   text: string;
   to: string;
@@ -51,19 +54,24 @@ const defaultVerificationConfig = {
   codeExpiresInMs: 10 * 60_000,
 } as const;
 const verificationCodeLength = 6;
+const maxVerificationRecordUpdateAttempts = 3;
 const maxVerificationAttempts = 5;
 
 export class EmailVerificationService {
-  private readonly records = new Map<string, VerificationRecord>();
+  private readonly cacheStore: CacheStore;
   private readonly codeCooldownMs: number;
   private readonly codeExpiresInMs: number;
-  private readonly verificationSecret = randomBytes(32);
+  private readonly verificationSecret: Buffer;
   private readonly sender: EmailSender | undefined;
 
   constructor(config: EmailVerificationConfig = defaultVerificationConfig) {
+    this.cacheStore = config.cacheStore ?? new MemoryCacheStore();
     this.codeCooldownMs = config.codeCooldownMs;
     this.codeExpiresInMs = config.codeExpiresInMs;
     this.sender = config.sender;
+    this.verificationSecret = config.verificationSecret
+      ? Buffer.from(config.verificationSecret, 'utf8')
+      : randomBytes(32);
   }
 
   isEnabled() {
@@ -79,7 +87,7 @@ export class EmailVerificationService {
   }
 
   async sendRegistrationCode(email: string) {
-    return await this.sendCode('registration', email, 'Registration verification code', (code) => [
+    return this.sendCode('registration', email, 'Registration verification code', (code) => [
       `Your registration verification code is ${code}.`,
       `This code expires in ${Math.ceil(this.codeExpiresInMs / 60_000)} minutes.`,
       'No action is required if this code was not requested by you.',
@@ -87,27 +95,27 @@ export class EmailVerificationService {
   }
 
   async sendPasswordResetCode(email: string) {
-    return await this.sendCode('password-reset', email, 'Password reset verification code', (code) => [
+    return this.sendCode('password-reset', email, 'Password reset verification code', (code) => [
       `Your password reset verification code is ${code}.`,
       `This code expires in ${Math.ceil(this.codeExpiresInMs / 60_000)} minutes.`,
       'No action is required if this code was not requested by you.',
     ]);
   }
 
-  verifyRegistrationCode(email: string, code?: string) {
+  async verifyRegistrationCode(email: string, code?: string) {
     if (!this.sender) {
       return;
     }
 
-    this.verifyCode('registration', email, code);
+    await this.verifyCode('registration', email, code);
   }
 
-  verifyPasswordResetCode(email: string, code?: string) {
+  async verifyPasswordResetCode(email: string, code?: string) {
     if (!this.sender) {
       throw new AppError('EMAIL_VERIFICATION_DISABLED', 'Email verification is disabled.', 404);
     }
 
-    this.verifyCode('password-reset', email, code);
+    await this.verifyCode('password-reset', email, code);
   }
 
   private async sendCode(
@@ -120,11 +128,9 @@ export class EmailVerificationService {
       throw new AppError('EMAIL_VERIFICATION_DISABLED', 'Email verification is disabled.', 404);
     }
 
-    this.deleteExpiredRecords();
-
     const normalizedEmail = normalizeEmail(email);
     const recordKey = getRecordKey(purpose, normalizedEmail);
-    const existing = this.records.get(recordKey);
+    const existing = await this.cacheStore.get<VerificationRecord>(recordKey);
     const now = Date.now();
 
     if (existing && existing.nextSendAt > now) {
@@ -141,44 +147,63 @@ export class EmailVerificationService {
       text: createText(code).join('\n'),
     });
 
-    this.records.set(recordKey, {
-      attemptsRemaining: maxVerificationAttempts,
-      codeHash: this.hashVerificationCode(purpose, normalizedEmail, code),
-      expiresAt: now + this.codeExpiresInMs,
-      nextSendAt: now + this.codeCooldownMs,
-    });
+    await this.cacheStore.set(
+      recordKey,
+      {
+        attemptsRemaining: maxVerificationAttempts,
+        codeHash: this.hashVerificationCode(purpose, normalizedEmail, code),
+        expiresAt: now + this.codeExpiresInMs,
+        nextSendAt: now + this.codeCooldownMs,
+      },
+      this.codeExpiresInMs,
+    );
 
     return this.createDeliveryMetadata();
   }
 
-  private verifyCode(purpose: VerificationPurpose, email: string, code?: string) {
-    this.deleteExpiredRecords();
-
+  private async verifyCode(purpose: VerificationPurpose, email: string, code?: string) {
     if (!code) {
       throw new AppError('EMAIL_VERIFICATION_REQUIRED', 'Email verification code is required.', 400);
     }
 
     const normalizedEmail = normalizeEmail(email);
     const recordKey = getRecordKey(purpose, normalizedEmail);
-    const record = this.records.get(recordKey);
-    const now = Date.now();
 
-    if (!record || record.expiresAt <= now) {
-      this.records.delete(recordKey);
-      throwInvalidVerificationCode();
+    for (let attempt = 0; attempt < maxVerificationRecordUpdateAttempts; attempt += 1) {
+      const record = await this.cacheStore.get<VerificationRecord>(recordKey);
+      const now = Date.now();
+
+      if (!record || record.expiresAt <= now) {
+        await this.cacheStore.delete(recordKey);
+        throwInvalidVerificationCode();
+      }
+
+      if (record.attemptsRemaining <= 0) {
+        await this.cacheStore.delete(recordKey);
+        throwInvalidVerificationCode();
+      }
+
+      if (this.isVerificationCodeMatch(record.codeHash, purpose, normalizedEmail, code)) {
+        await this.cacheStore.delete(recordKey);
+        return;
+      }
+
+      const didUpdate = await this.cacheStore.compareAndSet(
+        recordKey,
+        record,
+        {
+          ...record,
+          attemptsRemaining: record.attemptsRemaining - 1,
+        },
+        record.expiresAt - now,
+      );
+
+      if (didUpdate) {
+        throwInvalidVerificationCode();
+      }
     }
 
-    if (record.attemptsRemaining <= 0) {
-      this.records.delete(recordKey);
-      throwInvalidVerificationCode();
-    }
-
-    if (!this.isVerificationCodeMatch(record.codeHash, purpose, normalizedEmail, code)) {
-      record.attemptsRemaining -= 1;
-      throwInvalidVerificationCode();
-    }
-
-    this.records.delete(recordKey);
+    throw new AppError('EMAIL_VERIFICATION_CONFLICT', 'Email verification state changed. Try again.', 409);
   }
 
   private hashVerificationCode(purpose: VerificationPurpose, email: string, code: string) {
@@ -199,16 +224,6 @@ export class EmailVerificationService {
       cooldownSeconds: Math.ceil(this.codeCooldownMs / 1000),
       expiresInSeconds: Math.ceil(this.codeExpiresInMs / 1000),
     };
-  }
-
-  private deleteExpiredRecords() {
-    const now = Date.now();
-
-    for (const [key, record] of this.records) {
-      if (record.expiresAt <= now) {
-        this.records.delete(key);
-      }
-    }
   }
 }
 
@@ -274,16 +289,14 @@ class SmtpClient {
     const response = await this.readResponse();
 
     if (!expectedCodes.includes(response.code)) {
-      throw new AppError('SMTP_RESPONSE_INVALID', 'SMTP server returned an unexpected response.', 502, {
-        response: response.message,
-      });
+      throw new AppError('SMTP_RESPONSE_INVALID', 'SMTP server returned an unexpected response.', 502);
     }
 
     return response;
   }
 
   async ehlo() {
-    await this.command(`EHLO ${getLocalSmtpName()}`, [250]);
+    await this.command('EHLO localhost', [250]);
   }
 
   async startTls() {
@@ -325,7 +338,7 @@ class SmtpClient {
 
   private async command(value: string, expectedCodes: number[]) {
     await this.write(`${value}\r\n`);
-    return await this.expect(expectedCodes);
+    return this.expect(expectedCodes);
   }
 
   private async write(value: string) {
@@ -369,7 +382,7 @@ class SmtpClient {
   }
 
   private async readChunk() {
-    return await new Promise<string>((resolve, reject) => {
+    return new Promise<string>((resolve, reject) => {
       const cleanup = () => {
         this.socket.off('close', handleClose);
         this.socket.off('data', handleData);
@@ -402,7 +415,9 @@ class SmtpClient {
 }
 
 function createVerificationCode() {
-  return randomInt(0, 10 ** verificationCodeLength).toString().padStart(verificationCodeLength, '0');
+  return randomInt(0, 10 ** verificationCodeLength)
+    .toString()
+    .padStart(verificationCodeLength, '0');
 }
 
 function normalizeEmail(email: string) {
@@ -410,7 +425,7 @@ function normalizeEmail(email: string) {
 }
 
 function getRecordKey(purpose: VerificationPurpose, email: string) {
-  return `${purpose}:${email}`;
+  return `email-verification:${purpose}:${email}`;
 }
 
 function throwInvalidVerificationCode(): never {
@@ -442,10 +457,6 @@ function extractEmailAddress(value: string) {
   const match = /<([^<>]+)>/.exec(value);
 
   return sanitizeHeader(match?.[1] ?? value);
-}
-
-function getLocalSmtpName() {
-  return 'localhost';
 }
 
 function waitForSocketEvent(socket: Socket | TLSSocket, event: 'connect' | 'secureConnect') {

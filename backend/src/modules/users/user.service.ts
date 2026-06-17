@@ -1,16 +1,16 @@
 import { UniqueConstraintError } from 'sequelize';
 
 import { AppError } from '../../core/errors';
-import { UserModel } from './user.model';
+import { type UserModel } from './user.model';
 
-export interface CreateUserWithCredentialsInput {
+interface CreateUserWithCredentialsInput {
   username: string;
   email: string;
   passwordHash: string;
   passwordSalt: string;
 }
 
-export interface CreateSsoUserInput {
+interface CreateSsoUserInput {
   username: string;
   email: string;
   passwordHash: string;
@@ -18,7 +18,7 @@ export interface CreateSsoUserInput {
   ssoSubject: string;
 }
 
-export interface UpdateUserPasswordInput {
+interface UpdateUserPasswordInput {
   passwordHash: string;
   passwordSalt: string;
 }
@@ -27,7 +27,7 @@ export class UserService {
   constructor(private readonly userModel: typeof UserModel) {}
 
   async findById(id: string) {
-    return await this.userModel.findOne({
+    return this.userModel.findOne({
       where: {
         id,
         available: true,
@@ -36,15 +36,34 @@ export class UserService {
   }
 
   async findByEmail(email: string) {
-    return await this.userModel.findOne({
+    return this.userModel.findOne({
       where: { email },
     });
   }
 
   async findBySsoSubject(ssoSubject: string) {
-    return await this.userModel.findOne({
+    return this.userModel.findOne({
       where: { ssoSubject },
     });
+  }
+
+  async listUsers() {
+    return this.userModel.findAll({
+      order: [
+        ['createdAt', 'DESC'],
+        ['email', 'ASC'],
+      ],
+    });
+  }
+
+  async hasMultipleAvailableUsers() {
+    return (
+      (await this.userModel.count({
+        where: {
+          available: true,
+        },
+      })) > 1
+    );
   }
 
   async createWithCredentials(input: CreateUserWithCredentialsInput) {
@@ -131,6 +150,13 @@ export class UserService {
     user.passwordHash = input.passwordHash;
     user.passwordSalt = input.passwordSalt;
 
-    return await user.save();
+    return user.save();
+  }
+
+  async updateAvatar(user: UserModel, avatarUrl: string, avatarStorageKey: string) {
+    user.avatarStorageKey = avatarStorageKey;
+    user.avatarUrl = avatarUrl;
+
+    return user.save();
   }
 }

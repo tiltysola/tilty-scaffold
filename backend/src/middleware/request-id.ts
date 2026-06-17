@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
-
-import { Middleware } from 'koa';
+import { type Middleware } from 'koa';
 
 const requestIdHeader = 'X-Request-Id';
+const requestIdPattern = /^[A-Za-z0-9._:-]+$/;
 
 export function requestIdMiddleware(): Middleware {
   return async (ctx, next) => {
@@ -18,7 +18,7 @@ export function requestIdMiddleware(): Middleware {
 function getRequestId(value: string) {
   const requestId = value.trim();
 
-  if (!requestId || requestId.length > 128) {
+  if (!requestId || requestId.length > 128 || !requestIdPattern.test(requestId)) {
     return null;
   }
 

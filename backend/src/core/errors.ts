@@ -23,9 +23,5 @@ export function normalizeError(error: unknown) {
     return new AppError('FIELD_VALIDATE_ERROR', 'Request fields are invalid.', 400, error.flatten());
   }
 
-  if (error instanceof Error) {
-    return new AppError('INTERNAL_ERROR', 'Internal server error.', 500);
-  }
-
   return new AppError('INTERNAL_ERROR', 'Internal server error.', 500);
 }

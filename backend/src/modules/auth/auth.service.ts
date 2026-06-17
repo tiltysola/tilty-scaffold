@@ -1,10 +1,25 @@
-import { AppError } from '../../core/errors';
-import { UserModel } from '../users/user.model';
-import { UserService } from '../users/user.service';
-import { createAccessToken, hashPassword, verifyAccessToken, verifyPassword } from './auth.crypto';
-import { EmailVerificationService } from './auth.email';
+import { randomUUID } from 'crypto';
 
-export interface RegisterInput {
+import { SystemRole } from '@tilty/shared/access-control';
+
+import { AppError } from '../../core/errors';
+import { type CacheStore } from '../../infra/cache';
+import { type FileStorage } from '../../infra/file-storage';
+import { type AccessControlService, type UserAccess } from '../access-control/access-control.service';
+import { type UserModel } from '../users/user.model';
+import { type UserService } from '../users/user.service';
+import {
+  createAccessToken,
+  createRefreshToken,
+  hashPassword,
+  verifyAccessToken,
+  verifyPassword,
+  verifyRefreshToken,
+} from './auth.crypto';
+import { type EmailVerificationService } from './auth.email';
+import { assertPasswordConfirmation } from './auth.validation';
+
+interface RegisterInput {
   email: string;
   emailVerificationCode?: string | undefined;
   password: string;
@@ -12,23 +27,54 @@ export interface RegisterInput {
   username: string;
 }
 
-export interface ResetPasswordInput {
+interface ResetPasswordInput {
   email: string;
   emailVerificationCode: string;
   password: string;
   confirmPassword: string;
 }
 
-export interface LoginInput {
+interface LoginInput {
   email: string;
   password: string;
 }
 
+interface SendEmailVerificationInput {
+  email: string;
+}
+
+interface AvatarUploadInput {
+  content: Buffer;
+  contentType: string;
+  filename?: string;
+}
+
+export interface AuthTokenConfig {
+  accessTokenTtlSeconds: number;
+  refreshTokenTtlSeconds: number;
+}
+
+interface RefreshTokenRecord {
+  userId: string;
+  used?: boolean;
+}
+
+export const defaultAuthTokenConfig: AuthTokenConfig = {
+  accessTokenTtlSeconds: 15 * 60,
+  refreshTokenTtlSeconds: 30 * 24 * 60 * 60,
+};
+
+const refreshTokenCacheKeyPrefix = 'auth:refresh-token:';
+
 export class AuthService {
   constructor(
     private readonly userService: UserService,
+    private readonly accessControl: AccessControlService,
     private readonly tokenSecret: string,
-    private readonly emailVerification: EmailVerificationService = new EmailVerificationService(),
+    private readonly emailVerification: EmailVerificationService,
+    private readonly fileStorage: FileStorage | undefined,
+    private readonly tokenConfig: AuthTokenConfig,
+    private readonly refreshTokenStore: CacheStore,
   ) {}
 
   getPublicConfig() {
@@ -38,32 +84,30 @@ export class AuthService {
     };
   }
 
-  async sendRegistrationEmailVerification(input: { email: string }) {
+  async sendRegistrationEmailVerification(input: SendEmailVerificationInput) {
     const existing = await this.userService.findByEmail(input.email);
 
     if (existing) {
       throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
     }
 
-    return await this.emailVerification.sendRegistrationCode(input.email);
+    return this.emailVerification.sendRegistrationCode(input.email);
   }
 
-  async sendPasswordResetEmailVerification(input: { email: string }) {
+  async sendPasswordResetEmailVerification(input: SendEmailVerificationInput) {
     const user = await this.userService.findByEmail(input.email);
 
     if (!isPasswordResetEligibleUser(user)) {
       return this.emailVerification.getDeliveryMetadata();
     }
 
-    return await this.emailVerification.sendPasswordResetCode(input.email);
+    return this.emailVerification.sendPasswordResetCode(input.email);
   }
 
   async register(input: RegisterInput) {
-    if (input.password !== input.confirmPassword) {
-      throw new AppError('AUTH_PASSWORD_CONFIRMATION_MISMATCH', 'Password confirmation does not match.', 400);
-    }
+    assertPasswordConfirmation(input);
 
-    this.emailVerification.verifyRegistrationCode(input.email, input.emailVerificationCode);
+    await this.emailVerification.verifyRegistrationCode(input.email, input.emailVerificationCode);
 
     const credentials = await hashPassword(input.password);
     const user = await this.userService.createWithCredentials({
@@ -72,7 +116,9 @@ export class AuthService {
       ...credentials,
     });
 
-    return createAuthSession(user, this.tokenSecret);
+    await this.bootstrapRootRoleForFirstUser(user);
+
+    return createAuthSession(user, this.tokenSecret, this.tokenConfig, this.refreshTokenStore, this.accessControl);
   }
 
   async login(input: LoginInput) {
@@ -88,17 +134,59 @@ export class AuthService {
       throwInvalidCredentials();
     }
 
-    return createAuthSession(user, this.tokenSecret);
+    return createAuthSession(user, this.tokenSecret, this.tokenConfig, this.refreshTokenStore, this.accessControl);
+  }
+
+  async refreshSession(refreshToken: string) {
+    const payload = await this.verifyRefreshToken(refreshToken);
+    const recordKey = getRefreshTokenCacheKey(payload.jti);
+    const record = await this.refreshTokenStore.get<RefreshTokenRecord>(recordKey);
+
+    if (!record || record.userId !== payload.sub || record.used) {
+      throwInvalidRefreshToken();
+    }
+
+    const consumed = await this.refreshTokenStore.compareAndSet(
+      recordKey,
+      record,
+      {
+        ...record,
+        used: true,
+      },
+      Math.max(payload.exp * 1000 - Date.now(), 1),
+    );
+
+    if (!consumed) {
+      throwInvalidRefreshToken();
+    }
+
+    await this.refreshTokenStore.delete(recordKey);
+
+    const user = await this.userService.findById(payload.sub);
+
+    if (!user || !user.available) {
+      throwInvalidRefreshToken();
+    }
+
+    return createAuthSession(user, this.tokenSecret, this.tokenConfig, this.refreshTokenStore, this.accessControl);
+  }
+
+  async revokeRefreshToken(refreshToken: string) {
+    try {
+      const payload = await verifyRefreshToken(refreshToken, this.tokenSecret);
+
+      await this.refreshTokenStore.delete(getRefreshTokenCacheKey(payload.jti));
+    } catch {
+      // Logout should clear client state even when the refresh token is absent or stale.
+    }
   }
 
   async resetPassword(input: ResetPasswordInput) {
-    if (input.password !== input.confirmPassword) {
-      throw new AppError('AUTH_PASSWORD_CONFIRMATION_MISMATCH', 'Password confirmation does not match.', 400);
-    }
+    assertPasswordConfirmation(input);
 
     const user = await this.userService.findByEmail(input.email);
 
-    this.emailVerification.verifyPasswordResetCode(input.email, input.emailVerificationCode);
+    await this.emailVerification.verifyPasswordResetCode(input.email, input.emailVerificationCode);
 
     if (!isPasswordResetEligibleUser(user)) {
       throw new AppError('EMAIL_VERIFICATION_INVALID', 'Email verification code is invalid or expired.', 400);
@@ -111,7 +199,7 @@ export class AuthService {
     return { reset: true } as const;
   }
 
-  async getCurrentUser(token: string) {
+  async authenticate(token: string) {
     const payload = await verifyAccessToken(token, this.tokenSecret);
     const user = await this.userService.findById(payload.sub);
 
@@ -119,34 +207,132 @@ export class AuthService {
       throw new AppError('AUTH_INVALID_TOKEN', 'Authentication token is invalid.', 401);
     }
 
-    return toAuthUser(user);
+    const access = await this.accessControl.getUserAccess(user.id);
+
+    return {
+      user,
+      access,
+      authUser: toAuthUser(user, access),
+    };
+  }
+
+  async getCurrentUser(token: string) {
+    return (await this.authenticate(token)).authUser;
+  }
+
+  async uploadAvatar(token: string, input: AvatarUploadInput) {
+    if (!this.fileStorage) {
+      throw new AppError('FILE_STORAGE_DISABLED', 'File storage is not configured.', 500);
+    }
+
+    const { user } = await this.authenticate(token);
+
+    const image = validateAvatarImage(input);
+    const savedFile = await this.fileStorage.save({
+      cacheControl: 'public, max-age=31536000, immutable',
+      content: input.content,
+      contentType: image.contentType,
+      key: `avatars/${user.id}/${randomUUID()}.${image.extension}`,
+    });
+    const previousAvatarStorageKey = user.avatarStorageKey;
+    let updatedUser: UserModel;
+
+    try {
+      updatedUser = await this.userService.updateAvatar(user, savedFile.url, savedFile.key);
+    } catch (error) {
+      await this.deleteStoredFile(savedFile.key);
+      throw error;
+    }
+
+    if (previousAvatarStorageKey) {
+      await this.deleteStoredFile(previousAvatarStorageKey);
+    }
+
+    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+  }
+
+  private async bootstrapRootRoleForFirstUser(user: UserModel) {
+    if (await this.userService.hasMultipleAvailableUsers()) {
+      return;
+    }
+
+    await this.accessControl.assignSystemRoleToUser(user.id, SystemRole.Root);
+  }
+
+  private async deleteStoredFile(key: string) {
+    if (!this.fileStorage) {
+      return;
+    }
+
+    try {
+      await this.fileStorage.delete(key);
+    } catch {
+      // Object cleanup is best-effort and must not mask the primary profile operation.
+    }
+  }
+
+  private async verifyRefreshToken(refreshToken: string) {
+    try {
+      return await verifyRefreshToken(refreshToken, this.tokenSecret);
+    } catch {
+      throwInvalidRefreshToken();
+    }
   }
 }
 
-export async function createAuthSession(user: UserModel, tokenSecret: string) {
-  const authUser = toAuthUser(user);
-  const token = await createAccessToken(
+export async function createAuthSession(
+  user: UserModel,
+  tokenSecret: string,
+  tokenConfig: AuthTokenConfig,
+  refreshTokenStore: CacheStore,
+  accessControl: AccessControlService,
+) {
+  const authUser = toAuthUser(user, await accessControl.getUserAccess(user.id));
+  const refreshTokenId = randomUUID();
+  const accessToken = await createAccessToken(
     {
       sub: authUser.id,
       email: authUser.email,
       username: authUser.username,
     },
     tokenSecret,
+    tokenConfig.accessTokenTtlSeconds,
+  );
+  const refreshToken = await createRefreshToken(
+    {
+      jti: refreshTokenId,
+      sub: authUser.id,
+    },
+    tokenSecret,
+    tokenConfig.refreshTokenTtlSeconds,
+  );
+
+  await refreshTokenStore.set(
+    getRefreshTokenCacheKey(refreshTokenId),
+    {
+      userId: authUser.id,
+      used: false,
+    },
+    tokenConfig.refreshTokenTtlSeconds * 1000,
   );
 
   return {
-    accessToken: token.accessToken,
-    expiresAt: token.expiresAt,
-    tokenType: 'Bearer',
+    accessToken: accessToken.accessToken,
+    accessTokenExpiresAt: accessToken.expiresAt,
+    refreshToken: refreshToken.refreshToken,
+    refreshTokenExpiresAt: refreshToken.expiresAt,
     user: authUser,
   } as const;
 }
 
-export function toAuthUser(user: UserModel) {
+export function toAuthUser(user: UserModel, access: UserAccess) {
   return {
     id: user.id,
     username: user.username,
     email: user.email,
+    roles: access.roles,
+    permissions: access.permissions,
+    ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
   };
 }
 
@@ -154,6 +340,76 @@ function throwInvalidCredentials(): never {
   throw new AppError('AUTH_INVALID_CREDENTIALS', 'The email address or password is invalid.', 401);
 }
 
+function throwInvalidRefreshToken(): never {
+  throw new AppError('AUTH_REFRESH_TOKEN_INVALID', 'Refresh token is invalid or expired.', 401);
+}
+
+function getRefreshTokenCacheKey(tokenId: string) {
+  return `${refreshTokenCacheKeyPrefix}${tokenId}`;
+}
+
 function isPasswordResetEligibleUser(user: UserModel | null): user is UserModel {
   return Boolean(user?.available && user.passwordHash && user.passwordSalt);
+}
+
+function validateAvatarImage(input: AvatarUploadInput) {
+  const detected = detectImageType(input.content);
+  const contentType = input.contentType.toLowerCase();
+
+  if (!detected) {
+    throw new AppError('AVATAR_FILE_INVALID', 'Avatar must be a JPEG, PNG, WebP, or GIF image.', 400);
+  }
+
+  if (contentType && contentType !== detected.contentType) {
+    throw new AppError('AVATAR_FILE_INVALID', 'Avatar file content type does not match the uploaded image.', 400);
+  }
+
+  return detected;
+}
+
+function detectImageType(content: Buffer) {
+  if (content.length >= 3 && content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff) {
+    return {
+      contentType: 'image/jpeg',
+      extension: 'jpg',
+    };
+  }
+
+  if (
+    content.length >= 8 &&
+    content[0] === 0x89 &&
+    content.subarray(1, 4).toString('ascii') === 'PNG' &&
+    content[4] === 0x0d &&
+    content[5] === 0x0a &&
+    content[6] === 0x1a &&
+    content[7] === 0x0a
+  ) {
+    return {
+      contentType: 'image/png',
+      extension: 'png',
+    };
+  }
+
+  if (
+    content.length >= 12 &&
+    content.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    content.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    return {
+      contentType: 'image/webp',
+      extension: 'webp',
+    };
+  }
+
+  if (
+    content.length >= 6 &&
+    (content.subarray(0, 6).toString('ascii') === 'GIF87a' || content.subarray(0, 6).toString('ascii') === 'GIF89a')
+  ) {
+    return {
+      contentType: 'image/gif',
+      extension: 'gif',
+    };
+  }
+
+  return null;
 }

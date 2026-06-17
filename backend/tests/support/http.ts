@@ -1,7 +1,13 @@
 import { Middleware } from 'koa';
 
+import { type RouteDefinition } from '../../src/core/module';
+
 interface TestContext {
   body?: unknown;
+  cookies: {
+    get: (name: string) => string | undefined;
+    set: (name: string, value: string, options?: Record<string, unknown>) => void;
+  };
   get: (name: string) => string;
   ip: string;
   method: string;
@@ -14,6 +20,7 @@ interface TestContext {
     body?: unknown;
   };
   responseHeaders: Record<string, string>;
+  secure: boolean;
   set: (name: string, value: string) => void;
   status?: number;
   state: Record<string, unknown>;
@@ -21,10 +28,12 @@ interface TestContext {
 }
 
 interface TestContextOptions {
+  cookies?: Record<string, string>;
   ip?: string;
   method?: string;
   path?: string;
   query?: Record<string, string | undefined>;
+  secure?: boolean;
 }
 
 export function createTestContext(
@@ -37,8 +46,19 @@ export function createTestContext(
     Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]),
   );
   const responseHeaders: Record<string, string> = {};
+  const cookies = new Map(Object.entries(options.cookies ?? {}));
 
   return {
+    cookies: {
+      get: (name: string) => cookies.get(name),
+      set: (name: string, value: string, cookieOptions?: Record<string, unknown>) => {
+        cookies.set(name, value);
+        responseHeaders[`set-cookie:${name}`] = JSON.stringify({
+          value,
+          ...(cookieOptions ?? {}),
+        });
+      },
+    },
     get: (name: string) => normalizedHeaders[name.toLowerCase()] ?? '',
     ip: options.ip ?? '127.0.0.1',
     method: options.method ?? 'GET',
@@ -52,6 +72,7 @@ export function createTestContext(
       body,
     },
     responseHeaders,
+    secure: options.secure ?? false,
     set: (name: string, value: string) => {
       responseHeaders[name.toLowerCase()] = value;
     },
@@ -88,4 +109,18 @@ export async function runMiddlewares(handlers: Middleware[], ctx: TestContext) {
   await dispatch(0);
 
   return ctx;
+}
+
+export function getTestRoute(routes: RouteDefinition[], method: RouteDefinition['method'], path: string) {
+  const route = routes.find((item) => item.method === method && item.path === path);
+
+  if (!route) {
+    throw new Error(`Missing route ${method.toUpperCase()} ${path}`);
+  }
+
+  return route;
+}
+
+export function getTestRouteHandler(routes: RouteDefinition[], method: RouteDefinition['method'], path: string) {
+  return getTestRoute(routes, method, path).handlers[0]!;
 }

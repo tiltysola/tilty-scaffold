@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+.env
+.env.*
+*.log
+package-lock.json
+backend/data
+backend/logs
+frontend/src/shadcn

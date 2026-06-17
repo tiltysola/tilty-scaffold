@@ -1,6 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm } from 'fs/promises';
 import { join } from 'path';
-
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { configureLogger, flushLogger, logger } from '../src/core/logger';
@@ -31,6 +30,43 @@ describe('logger', () => {
         level: 'info',
         message: 'local log',
       });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it('redacts sensitive log data before writing local JSON lines', async () => {
+    const baseDirectory = join(process.cwd(), 'logs');
+    await mkdir(baseDirectory, { recursive: true });
+
+    const directory = await mkdtemp(join(baseDirectory, 'test-'));
+    const filePath = join(directory, 'backend.log');
+
+    try {
+      configureLogger({ localPath: filePath, targets: ['local'] });
+
+      logger.info('auth token=plain-text-token', {
+        authorization: 'Bearer header-token',
+        nested: {
+          accessKeyId: 'access-key-id',
+          refreshToken: 'refresh-token',
+        },
+        password: 'password-value',
+        safe: 'visible-value',
+      });
+      logger.error('failed', new Error('client_secret=client-secret-value'));
+      await flushLogger();
+
+      const content = await readFile(filePath, 'utf8');
+
+      expect(content).toContain('[REDACTED]');
+      expect(content).toContain('visible-value');
+      expect(content).not.toContain('plain-text-token');
+      expect(content).not.toContain('header-token');
+      expect(content).not.toContain('access-key-id');
+      expect(content).not.toContain('refresh-token');
+      expect(content).not.toContain('password-value');
+      expect(content).not.toContain('client-secret-value');
     } finally {
       await rm(directory, { force: true, recursive: true });
     }

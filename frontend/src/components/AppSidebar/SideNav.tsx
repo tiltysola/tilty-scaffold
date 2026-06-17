@@ -1,4 +1,5 @@
 import type { ComponentPropsWithoutRef, ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 
 import {
   SidebarGroup,
@@ -37,14 +38,17 @@ const NavGroup = ({
           {items.map((item) => (
             <SidebarMenuItem key={item.title}>
               <SidebarMenuButton asChild>
-                <a
-                  href={item.url}
-                  rel={item.external ? 'noopener noreferrer' : undefined}
-                  target={item.external ? '_blank' : undefined}
-                >
-                  {item.icon}
-                  <span>{item.title}</span>
-                </a>
+                {item.external ? (
+                  <a href={item.url} rel="noopener noreferrer" target="_blank">
+                    {item.icon}
+                    <span>{item.title}</span>
+                  </a>
+                ) : (
+                  <Link to={item.url}>
+                    {item.icon}
+                    <span>{item.title}</span>
+                  </Link>
+                )}
               </SidebarMenuButton>
             </SidebarMenuItem>
           ))}
@@ -54,7 +58,7 @@ const NavGroup = ({
   );
 };
 
-const SideNav = ({ main, secondary }: SideNavProps) => {
+const Index = ({ main, secondary }: SideNavProps) => {
   return (
     <>
       <NavGroup items={main} label="Application" />
@@ -63,4 +67,4 @@ const SideNav = ({ main, secondary }: SideNavProps) => {
   );
 };
 
-export default SideNav;
+export default Index;

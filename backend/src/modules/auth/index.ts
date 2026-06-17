@@ -1,19 +1,25 @@
-import { Middleware } from 'koa';
+import { type Middleware } from 'koa';
 
-import { BackendModule } from '../../core/module';
-import { AuthController } from './auth.controller';
-import { AuthService } from './auth.service';
-import { SsoService } from './auth.sso';
+import { type BackendModule } from '../../core/module';
+import { AuthController, type AuthCookieConfig } from './auth.controller';
+import { type AuthService } from './auth.service';
+import { type SsoService } from './auth.sso';
 
-export interface AuthModuleOptions {
+interface AuthModuleOptions {
+  avatarUploadMaxBytes?: number;
+  cookies: AuthCookieConfig;
   rateLimit?: Middleware;
   ssoService: SsoService;
 }
 
 export function createAuthModule(authService: AuthService, options: AuthModuleOptions): BackendModule {
-  const controller = new AuthController(authService, options.ssoService);
-  const rateLimitedHandlers = (handler: Middleware) =>
-    options.rateLimit ? [options.rateLimit, handler] : [handler];
+  const controller = new AuthController(
+    authService,
+    options.ssoService,
+    options.avatarUploadMaxBytes ?? 2 * 1024 * 1024,
+    options.cookies,
+  );
+  const rateLimitedHandlers = (handler: Middleware) => (options.rateLimit ? [options.rateLimit, handler] : [handler]);
 
   return {
     name: 'auth',
@@ -53,6 +59,21 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
         method: 'get',
         path: '/me',
         handlers: [controller.me],
+      },
+      {
+        method: 'post',
+        path: '/refresh',
+        handlers: [controller.refresh],
+      },
+      {
+        method: 'post',
+        path: '/logout',
+        handlers: [controller.logout],
+      },
+      {
+        method: 'post',
+        path: '/avatar',
+        handlers: rateLimitedHandlers(controller.avatar),
       },
       {
         method: 'get',

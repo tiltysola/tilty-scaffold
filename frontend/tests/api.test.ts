@@ -33,31 +33,37 @@ describe('apiRequest', () => {
 
     expect(url).toBe('http://localhost:3000/api/auth/login');
     expect(init?.body).toBe(JSON.stringify({ email: 'user@example.com', password: 'password123' }));
+    expect(init?.credentials).toBe('include');
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
     expect(headers.get('Content-Type')).toBe('application/json');
   });
 
-  it('adds bearer token headers', async () => {
+  it('sends FormData requests without JSON content headers', async () => {
     const fetchMock = vi.fn(async () => {
       return new Response(
         JSON.stringify({
           code: 200,
           error: null,
-          data: { id: 'user-id', username: 'Test User', email: 'user@example.com' },
+          data: { ok: true },
         }),
         { status: 200 },
       );
     });
+    const form = new FormData();
 
+    form.append('avatar', new Blob(['avatar'], { type: 'image/png' }), 'avatar.png');
     vi.stubGlobal('fetch', fetchMock);
 
-    await apiRequest('/api/auth/me', {
-      token: 'access-token',
+    await apiRequest<{ ok: boolean }>('/api/auth/avatar', {
+      body: form,
+      method: 'POST',
     });
 
     const [, init] = fetchMock.mock.calls[0]!;
     const headers = init?.headers as Headers;
 
-    expect(headers.get('Authorization')).toBe('Bearer access-token');
+    expect(init?.body).toBe(form);
+    expect(headers.has('Content-Type')).toBe(false);
   });
 
   it('throws ApiError for API failure payloads', async () => {

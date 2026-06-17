@@ -1,42 +1,55 @@
-import type { ChangeEvent, FormEvent } from 'react';
+import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import { z } from 'zod';
+import type { z } from 'zod';
 
+import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { useEmailVerification } from '@/hooks/useEmailVerification';
+import { useFormState } from '@/hooks/useFormState';
 import { getApiErrorMessage } from '@/lib/api';
 import { fetchAuthConfig, register, sendRegistrationEmailVerification } from '@/lib/auth';
+import {
+  createPasswordFormSchema,
+  emailSchema,
+  optionalVerificationCodeSchema,
+  usernameSchema,
+} from '@/lib/auth-validation';
 import { Button } from '@/shadcn/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/shadcn/components/ui/card';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
 
-const emailSchema = z.string().trim().email('Provide a valid email address.');
-const registerSchema = z.object({
-  username: z.string().trim().min(2, 'Name must contain at least 2 characters.').max(32),
+import FormMessage from '@/components/FormMessage';
+
+const registerSchema = createPasswordFormSchema({
+  username: usernameSchema,
   email: emailSchema,
-  password: z.string().min(8, 'Password must contain at least 8 characters.').max(128),
-  confirmPassword: z.string().min(8, 'Confirm password.'),
-  emailVerificationCode: z.string().trim(),
+  emailVerificationCode: optionalVerificationCodeSchema,
 });
 
 type RegisterFormState = z.input<typeof registerSchema>;
 
 const Index = () => {
+  const [configLoading, setConfigLoading] = useState(true);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [emailVerificationRequired, setEmailVerificationRequired] = useState(false);
   const navigate = useNavigate();
-  const [form, setForm] = useState<RegisterFormState>({
+  const submitAction = useAsyncAction();
+  const emailVerification = useEmailVerification({
+    sendCode: sendRegistrationEmailVerification,
+  });
+  const { form, handleChange } = useFormState<RegisterFormState>({
     username: '',
     email: '',
     password: '',
     confirmPassword: '',
     emailVerificationCode: '',
   });
-  const [configLoading, setConfigLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [emailVerificationRequired, setEmailVerificationRequired] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [sendingCode, setSendingCode] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const error = submitAction.error ?? emailVerification.error ?? configError;
+  const notice = emailVerification.notice;
+  const sendingCode = emailVerification.sending;
+  const submitting = submitAction.pending;
 
   useEffect(() => {
     let active = true;
@@ -50,7 +63,7 @@ const Index = () => {
         }
       } catch (requestError) {
         if (active) {
-          setError(getApiErrorMessage(requestError, 'Registration configuration could not be loaded.'));
+          setConfigError(getApiErrorMessage(requestError, 'Registration configuration could not be loaded.'));
         }
       } finally {
         if (active) {
@@ -66,91 +79,65 @@ const Index = () => {
     };
   }, []);
 
-  const handleChange = (field: keyof RegisterFormState) => (event: ChangeEvent<HTMLInputElement>) => {
-    setForm((current) => ({
-      ...current,
-      [field]: event.target.value,
-    }));
-  };
-
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setError(null);
-    setNotice(null);
+    submitAction.clearError();
+    emailVerification.clearMessages();
 
     const parsed = registerSchema.safeParse(form);
 
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? 'Account registration details are invalid.');
-      return;
-    }
-
-    if (parsed.data.password !== parsed.data.confirmPassword) {
-      setError('Password confirmation does not match.');
+      submitAction.setError(parsed.error.issues[0]?.message ?? 'Account registration details are invalid.');
       return;
     }
 
     if (emailVerificationRequired && !parsed.data.emailVerificationCode) {
-      setError('Email verification code is required.');
+      submitAction.setError('Email verification code is required.');
       return;
     }
 
-    setSubmitting(true);
+    const session = await submitAction.run(
+      () =>
+        register({
+          email: parsed.data.email,
+          emailVerificationCode: emailVerificationRequired ? parsed.data.emailVerificationCode : undefined,
+          password: parsed.data.password,
+          confirmPassword: parsed.data.confirmPassword,
+          username: parsed.data.username,
+        }),
+      'Account creation could not be completed.',
+    );
 
-    try {
-      await register({
-        email: parsed.data.email,
-        emailVerificationCode: emailVerificationRequired ? parsed.data.emailVerificationCode : undefined,
-        password: parsed.data.password,
-        confirmPassword: parsed.data.confirmPassword,
-        username: parsed.data.username,
-      });
+    if (session) {
       navigate('/dashboard', { replace: true });
-    } catch (requestError) {
-      setError(getApiErrorMessage(requestError, 'Account creation could not be completed.'));
-    } finally {
-      setSubmitting(false);
     }
   };
 
   const handleSendEmailVerification = async () => {
-    setError(null);
-    setNotice(null);
+    submitAction.clearError();
+    emailVerification.clearMessages();
 
     const parsed = emailSchema.safeParse(form.email);
 
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? 'Provide a valid email address.');
+      emailVerification.setError(parsed.error.issues[0]?.message ?? 'Provide a valid email address.');
       return;
     }
 
-    setSendingCode(true);
-
-    try {
-      const result = await sendRegistrationEmailVerification({
-        email: parsed.data,
-      });
-      const expiresInMinutes = Math.ceil(result.expiresInSeconds / 60);
-
-      setNotice(`Verification code sent. It expires in ${expiresInMinutes} minutes.`);
-    } catch (requestError) {
-      setError(getApiErrorMessage(requestError, 'Verification code could not be sent.'));
-    } finally {
-      setSendingCode(false);
-    }
+    await emailVerification.requestCode(parsed.data, 'Verification code could not be sent.');
   };
 
   return (
     <main className="flex min-h-svh w-full items-center justify-center bg-muted px-4 py-10 text-foreground sm:px-6">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Account Registration</CardTitle>
+          <CardTitle>Account registration</CardTitle>
           <CardDescription>Register an account to access the dashboard.</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="grid gap-4" onSubmit={handleSubmit}>
             <div className="grid gap-2">
-              <Label htmlFor="username">Display Name</Label>
+              <Label htmlFor="username">Display name</Label>
               <Input
                 autoComplete="name"
                 disabled={submitting}
@@ -179,14 +166,14 @@ const Index = () => {
                     type="button"
                     variant="outline"
                   >
-                    {sendingCode ? 'Sending' : 'Send Code'}
+                    {sendingCode ? 'Sending' : 'Send code'}
                   </Button>
                 ) : null}
               </div>
             </div>
             {emailVerificationRequired ? (
               <div className="grid gap-2">
-                <Label htmlFor="emailVerificationCode">Verification Code</Label>
+                <Label htmlFor="emailVerificationCode">Verification code</Label>
                 <Input
                   autoComplete="one-time-code"
                   disabled={submitting}
@@ -224,25 +211,17 @@ const Index = () => {
                 value={form.confirmPassword}
               />
             </div>
-            {error ? (
-              <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
-              </p>
-            ) : null}
-            {notice ? (
-              <p className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary">
-                {notice}
-              </p>
-            ) : null}
+            <FormMessage message={error} variant="error" />
+            <FormMessage message={notice} variant="notice" />
             <Button className="w-full" disabled={configLoading || submitting} type="submit">
-              {submitting ? 'Creating Account' : configLoading ? 'Loading' : 'Create Account'}
+              {submitting ? 'Creating account' : configLoading ? 'Loading' : 'Create account'}
             </Button>
           </form>
         </CardContent>
         <CardFooter className="justify-center gap-2 text-sm text-muted-foreground">
           <span>Already have an account?</span>
           <Link className="font-medium text-primary hover:underline" to="/login">
-            Log In
+            Log in
           </Link>
         </CardFooter>
       </Card>

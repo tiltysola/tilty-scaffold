@@ -1,4 +1,4 @@
-import { Middleware } from 'koa';
+import { type Middleware } from 'koa';
 
 const securityHeaders = {
   'Content-Security-Policy': [

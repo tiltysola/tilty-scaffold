@@ -2,6 +2,8 @@ import { loadEnv } from '../config/env';
 import { configureLogger, flushLogger, logger } from '../core/logger';
 import { createSequelize } from '../infra/database';
 import { createMigrator } from '../infra/migrator';
+import { initModels } from '../modules';
+import { AccessControlService } from '../modules/access-control/access-control.service';
 
 type DatabaseCommand = 'down' | 'status' | 'up';
 
@@ -19,6 +21,8 @@ async function run(command: DatabaseCommand) {
   configureLogger(env.logger);
 
   const sequelize = createSequelize(env.database);
+  const models = initModels(sequelize);
+  const accessControl = new AccessControlService(models);
   const migrator = createMigrator(sequelize);
 
   try {
@@ -26,6 +30,7 @@ async function run(command: DatabaseCommand) {
 
     if (command === 'up') {
       const migrations = await migrator.up();
+      await accessControl.syncSystemAccessControl();
       logger.info(`Applied ${migrations.length} migration(s).`);
       return;
     }

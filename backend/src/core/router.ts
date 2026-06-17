@@ -1,6 +1,6 @@
 import Router from '@koa/router';
 
-import { BackendModule, RouteDefinition } from './module';
+import { type BackendModule, type RouteDefinition } from './module';
 
 export function createRouter(modules: BackendModule[]) {
   const router = new Router();

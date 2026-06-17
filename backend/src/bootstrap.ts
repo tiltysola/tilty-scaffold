@@ -1,25 +1,37 @@
-import { createServer, Server } from 'http';
+import { createServer, type Server } from 'http';
 
 import { createApp } from './app';
 import { loadEnv } from './config/env';
 import { configureLogger, flushLogger, logger } from './core/logger';
 import { collectJobs, startScheduler, stopScheduler } from './core/scheduler';
+import { createCacheStore } from './infra/cache';
 import { connectDatabase, createSequelize } from './infra/database';
+import { createFileStorage } from './infra/file-storage';
 import { createModules, createServices, initModels } from './modules';
 
 export async function bootstrap() {
   const env = loadEnv();
   configureLogger(env.logger);
 
+  const cacheStore = createCacheStore(env.cache);
+  const fileStorage = createFileStorage(env.fileStorage);
   const sequelize = createSequelize(env.database);
   const models = initModels(sequelize);
   const services = createServices(models, {
+    authTokens: env.authTokens,
     authTokenSecret: env.authTokenSecret,
+    cacheStore,
+    fileStorage,
     ...(env.email ? { email: env.email } : {}),
     ...(env.sso ? { sso: env.sso } : {}),
   });
   const modules = createModules(services, {
-    authRateLimit: env.authRateLimit,
+    authCookies: env.authCookies,
+    authRateLimit: {
+      ...env.authRateLimit,
+      cacheStore,
+    },
+    avatarUploadMaxBytes: env.fileUpload.maxBytes,
     readinessChecks: [
       {
         name: 'database',
@@ -31,11 +43,13 @@ export async function bootstrap() {
   });
 
   await connectDatabase(sequelize, env.databaseSync);
+  await services.accessControl.syncSystemAccessControl();
 
   const scheduler = env.scheduleEnabled ? startScheduler(collectJobs(modules)) : undefined;
   const app = createApp(modules, {
     corsOrigins: env.corsOrigins,
     requestLogEnabled: env.requestLogEnabled,
+    ...(env.localFiles ? { staticFiles: env.localFiles } : {}),
     trustProxy: env.trustProxy,
   });
   const server = createServer(app.callback());
@@ -47,6 +61,7 @@ export async function bootstrap() {
     logger.info(`Received ${signal}; shutting down.`);
     await closeServer(server);
     await stopScheduler(scheduler);
+    await cacheStore.close();
     await sequelize.close();
     logger.info('Shutdown complete.');
     await flushLogger();

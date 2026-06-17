@@ -1,6 +1,6 @@
 {
-  "name": "@tilty/scaffold-frontend",
-  "version": "0.1.0",
+  "name": "@tilty/frontend",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,14 +11,16 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "prettier": "prettier --write .",
-    "fix": "npm run prettier && npm run lint:fix",
+    "format": "prettier --write . --ignore-unknown",
+    "format:check": "prettier --check . --ignore-unknown",
+    "fix": "npm run format && npm run lint:fix",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
     "@fontsource-variable/geist": "^5.2.9",
     "@tailwindcss/vite": "^4.3.1",
+    "@tilty/shared": "file:../shared",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -52,7 +54,7 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "globals": "^16.5.0",
-    "prettier": "^3.7.4",
+    "prettier": "^3.8.4",
     "shadcn": "^4.11.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",

@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { RouteDefinition } from '../src/core/module';
 import { createHealthModule } from '../src/modules/health';
-import { createTestContext, runMiddleware } from './support/http';
+import { createTestContext, getTestRoute, runMiddleware } from './support/http';
 
 describe('health API', () => {
   it('returns service health', async () => {
-    const context = await runMiddleware(getRoute(createHealthModule().routes, '').handlers[0]!, createTestContext());
+    const context = await runMiddleware(
+      getTestRoute(createHealthModule().routes, 'get', '').handlers[0]!,
+      createTestContext(),
+    );
 
     expect(context.body).toMatchObject({
       code: 200,
@@ -27,7 +29,7 @@ describe('health API', () => {
         },
       ],
     }).routes;
-    const context = await runMiddleware(getRoute(routes, '/ready').handlers[0]!, createTestContext());
+    const context = await runMiddleware(getTestRoute(routes, 'get', '/ready').handlers[0]!, createTestContext());
 
     expect(context.body).toMatchObject({
       code: 200,
@@ -52,7 +54,7 @@ describe('health API', () => {
         },
       ],
     }).routes;
-    const context = await runMiddleware(getRoute(routes, '/ready').handlers[0]!, createTestContext());
+    const context = await runMiddleware(getTestRoute(routes, 'get', '/ready').handlers[0]!, createTestContext());
 
     expect(context.status).toBe(503);
     expect(context.body).toMatchObject({
@@ -66,13 +68,3 @@ describe('health API', () => {
     });
   });
 });
-
-function getRoute(routes: RouteDefinition[], path: string) {
-  const route = routes.find((item) => item.method === 'get' && item.path === path);
-
-  if (!route) {
-    throw new Error(`Missing health route ${path}`);
-  }
-
-  return route;
-}

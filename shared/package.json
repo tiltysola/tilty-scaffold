@@ -1,0 +1,52 @@
+{
+  "name": "@tilty/shared",
+  "version": "0.1.1",
+  "private": true,
+  "type": "commonjs",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.mjs",
+      "require": "./dist/cjs/index.js",
+      "default": "./dist/esm/index.mjs"
+    },
+    "./paths": {
+      "development": "./src/paths.ts",
+      "types": "./dist/esm/paths.d.ts",
+      "import": "./dist/esm/paths.mjs",
+      "require": "./dist/cjs/paths.js",
+      "default": "./dist/esm/paths.mjs"
+    },
+    "./access-control": {
+      "development": "./src/access-control.ts",
+      "types": "./dist/esm/access-control.d.ts",
+      "import": "./dist/esm/access-control.mjs",
+      "require": "./dist/cjs/access-control.js",
+      "default": "./dist/esm/access-control.mjs"
+    },
+    "./validation": {
+      "development": "./src/validation.ts",
+      "types": "./dist/esm/validation.d.ts",
+      "import": "./dist/esm/validation.mjs",
+      "require": "./dist/cjs/validation.js",
+      "default": "./dist/esm/validation.mjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run clean && npm run build:esm && node scripts/prepare-esm.cjs && npm run build:cjs && node scripts/write-cjs-package.cjs",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "clean": "rm -rf dist",
+    "format": "prettier --write . --ignore-unknown",
+    "format:check": "prettier --check . --ignore-unknown",
+    "fix": "npm run format",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

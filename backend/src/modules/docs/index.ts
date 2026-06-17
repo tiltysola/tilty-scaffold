@@ -1,12 +1,11 @@
 import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
+import { type Middleware } from 'koa';
 import { join } from 'path';
-
-import { Middleware } from 'koa';
 import { getAbsoluteFSPath } from 'swagger-ui-dist';
 
 import { AppError } from '../../core/errors';
-import { BackendModule } from '../../core/module';
+import { type BackendModule } from '../../core/module';
 import { openApiDocument } from './openapi';
 
 const swaggerUiPath = getAbsoluteFSPath();
