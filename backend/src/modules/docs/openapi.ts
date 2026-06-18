@@ -648,6 +648,27 @@ export const openApiDocument = {
             accessCookieAuth: [],
           },
         ],
+        parameters: [
+          {
+            name: 'page',
+            in: 'query',
+            schema: {
+              type: 'integer',
+              minimum: 1,
+              default: 1,
+            },
+          },
+          {
+            name: 'pageSize',
+            in: 'query',
+            schema: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 100,
+              default: 20,
+            },
+          },
+        ],
         responses: {
           '200': {
             description: 'User directory',
@@ -1163,8 +1184,11 @@ export const openApiDocument = {
             properties: {
               data: {
                 type: 'object',
-                required: ['roles', 'users'],
+                required: ['pagination', 'roles', 'users'],
                 properties: {
+                  pagination: {
+                    $ref: '#/components/schemas/PaginationMetadata',
+                  },
                   roles: {
                     type: 'array',
                     items: {
@@ -1182,6 +1206,29 @@ export const openApiDocument = {
             },
           },
         ],
+      },
+      PaginationMetadata: {
+        type: 'object',
+        required: ['page', 'pageSize', 'total', 'totalPages'],
+        properties: {
+          page: {
+            type: 'integer',
+            minimum: 1,
+          },
+          pageSize: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 100,
+          },
+          total: {
+            type: 'integer',
+            minimum: 0,
+          },
+          totalPages: {
+            type: 'integer',
+            minimum: 0,
+          },
+        },
       },
       UpdateUserRolesRequest: {
         type: 'object',

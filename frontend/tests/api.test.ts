@@ -8,7 +8,7 @@ describe('apiRequest', () => {
   });
 
   it('sends JSON requests and returns response data', async () => {
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
       return new Response(
         JSON.stringify({
           code: 200,
@@ -39,7 +39,7 @@ describe('apiRequest', () => {
   });
 
   it('sends FormData requests without JSON content headers', async () => {
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
       return new Response(
         JSON.stringify({
           code: 200,

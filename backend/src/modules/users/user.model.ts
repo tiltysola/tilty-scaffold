@@ -4,8 +4,8 @@ export class UserModel extends Model<InferAttributes<UserModel>, InferCreationAt
   declare id: CreationOptional<string>;
   declare username: string;
   declare email: string;
-  declare avatarStorageKey: CreationOptional<string | null>;
   declare avatarUrl: CreationOptional<string | null>;
+  declare avatarStorageKey: CreationOptional<string | null>;
   declare passwordHash: CreationOptional<string | null>;
   declare passwordSalt: CreationOptional<string | null>;
   declare ssoSubject: CreationOptional<string | null>;
@@ -68,6 +68,19 @@ export function initUserModel(sequelize: Sequelize) {
         {
           name: 'users_available_created_at',
           fields: ['available', 'createdAt'],
+        },
+        {
+          name: 'users_created_at_email',
+          fields: [
+            {
+              name: 'createdAt',
+              order: 'DESC',
+            },
+            {
+              name: 'email',
+              order: 'ASC',
+            },
+          ],
         },
       ],
     },

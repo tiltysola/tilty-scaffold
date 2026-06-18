@@ -6,6 +6,7 @@ import { type BackendModule } from './core/module';
 import { createRouter } from './core/router';
 import { csrfProtectionMiddleware } from './middleware/csrf';
 import { errorMiddleware } from './middleware/error';
+import { rateLimitMiddleware, type RateLimitOptions } from './middleware/rate-limit';
 import { requestIdMiddleware } from './middleware/request-id';
 import { requestLogMiddleware } from './middleware/request-log';
 import { securityHeadersMiddleware } from './middleware/security-headers';
@@ -13,6 +14,7 @@ import { type StaticFilesConfig, staticFilesMiddleware } from './middleware/stat
 
 interface AppConfig {
   corsOrigins: string[];
+  globalRateLimit?: RateLimitOptions;
   requestLogEnabled: boolean;
   staticFiles?: StaticFilesConfig;
   trustProxy: boolean;
@@ -40,6 +42,9 @@ export function createApp(modules: BackendModule[], config: AppConfig = defaultA
       origin: (ctx) => getCorsOrigin(ctx.get('origin'), config.corsOrigins),
     }),
   );
+  if (config.globalRateLimit) {
+    app.use(rateLimitMiddleware(config.globalRateLimit));
+  }
   app.use(csrfProtectionMiddleware({ allowedOrigins: config.corsOrigins }));
   if (config.staticFiles) {
     app.use(staticFilesMiddleware(config.staticFiles));
@@ -49,6 +54,10 @@ export function createApp(modules: BackendModule[], config: AppConfig = defaultA
   app.use(router.allowedMethods());
 
   return app;
+}
+
+export function shouldSkipGlobalRateLimit(ctx: Parameters<NonNullable<RateLimitOptions['skip']>>[0]) {
+  return ctx.method.toUpperCase() === 'OPTIONS' || ctx.path === '/api/health' || ctx.path === '/api/health/ready';
 }
 
 function getCorsOrigin(requestOrigin: string, allowedOrigins: string[]) {

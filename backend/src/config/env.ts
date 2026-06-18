@@ -29,6 +29,7 @@ const envSchema = z
     SERVER_HOST: z.string().default('0.0.0.0'),
     SERVER_PORT: z.coerce.number().int().positive().default(3000),
     TRUST_PROXY: z.enum(['true', 'false']).default('false'),
+    MULTI_INSTANCE_ENABLED: z.enum(['true', 'false']).default('false'),
     CORS_ORIGINS: z.string().min(1).default(defaultCorsOrigins),
     LOG_REQUEST_ENABLED: z.enum(['true', 'false']).default('true'),
     LOG_TARGETS: z.string().min(1).default('console'),
@@ -61,6 +62,8 @@ const envSchema = z
     FILE_OSS_REGION: z.string().min(1).optional(),
     AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+    GLOBAL_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+    GLOBAL_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(1000),
     DATABASE_DIALECT: databaseDialectSchema.default('sqlite'),
     DATABASE_STORAGE: z.string().min(1).default('./data/database.sqlite'),
     DATABASE_URL: z.string().optional(),
@@ -72,6 +75,7 @@ const envSchema = z
     DATABASE_SSL: z.enum(['true', 'false']).default('false'),
     DATABASE_SYNC: z.enum(['off', 'alter', 'force']).default('off'),
     SCHEDULER_ENABLED: z.enum(['true', 'false']).default('true'),
+    SCHEDULER_LOCK_TTL_MS: z.coerce.number().int().min(1000).default(300_000),
     AUTH_TOKEN_SECRET: z.string().min(32).optional(),
     AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce
       .number()
@@ -103,11 +107,11 @@ const envSchema = z
     SMTP_PASSWORD: z.string().min(1).optional(),
     SMTP_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
     SSO_ENABLED: z.enum(['true', 'false']).default('false'),
-    SSO_ISSUER_URL: z.string().url().optional(),
+    SSO_ISSUER_URL: z.url().optional(),
     SSO_CLIENT_ID: z.string().min(1).optional(),
     SSO_CLIENT_SECRET: z.string().min(1).optional(),
-    SSO_REDIRECT_URI: z.string().url().optional(),
-    SSO_FRONTEND_CALLBACK_URL: z.string().url().default('http://localhost:8011/login'),
+    SSO_REDIRECT_URI: z.url().optional(),
+    SSO_FRONTEND_CALLBACK_URL: z.url().default('http://localhost:8011/login'),
     SSO_SCOPES: z.string().min(1).default(defaultSsoScopes),
     SSO_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   })
@@ -150,6 +154,30 @@ const envSchema = z
           });
         }
       }
+    }
+
+    if (env.MULTI_INSTANCE_ENABLED === 'true' && env.CACHE_STORE !== 'redis') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['CACHE_STORE'],
+        message: 'Must be redis when MULTI_INSTANCE_ENABLED is true',
+      });
+    }
+
+    if (env.MULTI_INSTANCE_ENABLED === 'true' && env.DATABASE_DIALECT === 'sqlite') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DATABASE_DIALECT'],
+        message: 'Must be mysql or postgres when MULTI_INSTANCE_ENABLED is true',
+      });
+    }
+
+    if (env.MULTI_INSTANCE_ENABLED === 'true' && env.FILE_STORAGE_DRIVER !== 'oss') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['FILE_STORAGE_DRIVER'],
+        message: 'Must be oss when MULTI_INSTANCE_ENABLED is true',
+      });
     }
 
     if (env.CACHE_STORE === 'redis') {
@@ -403,6 +431,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
     host: parsed.SERVER_HOST,
     port: parsed.SERVER_PORT,
     trustProxy: parsed.TRUST_PROXY === 'true',
+    multiInstanceEnabled: parsed.MULTI_INSTANCE_ENABLED === 'true',
     cache:
       parsed.CACHE_STORE === 'redis'
         ? {
@@ -443,6 +472,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
       max: parsed.AUTH_RATE_LIMIT_MAX,
       windowMs: parsed.AUTH_RATE_LIMIT_WINDOW_MS,
     },
+    globalRateLimit: {
+      max: parsed.GLOBAL_RATE_LIMIT_MAX,
+      windowMs: parsed.GLOBAL_RATE_LIMIT_WINDOW_MS,
+    },
     corsOrigins: parseCommaSeparatedValues(parsed.CORS_ORIGINS),
     database,
     databaseSync: parsed.DATABASE_SYNC,
@@ -467,6 +500,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
     },
     requestLogEnabled: parsed.LOG_REQUEST_ENABLED === 'true',
     scheduleEnabled: parsed.SCHEDULER_ENABLED === 'true',
+    schedulerLock:
+      parsed.MULTI_INSTANCE_ENABLED === 'true' && parsed.SCHEDULER_ENABLED === 'true'
+        ? {
+            ttlMs: parsed.SCHEDULER_LOCK_TTL_MS,
+          }
+        : undefined,
     authTokenSecret: parsed.AUTH_TOKEN_SECRET ?? developmentAuthTokenSecret,
     authTokens: {
       accessTokenTtlSeconds: parsed.AUTH_ACCESS_TOKEN_TTL_SECONDS,

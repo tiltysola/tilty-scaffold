@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'http';
 
-import { createApp } from './app';
+import { createApp, shouldSkipGlobalRateLimit } from './app';
 import { loadEnv } from './config/env';
 import { configureLogger, flushLogger, logger } from './core/logger';
 import { collectJobs, startScheduler, stopScheduler } from './core/scheduler';
@@ -39,15 +39,43 @@ export async function bootstrap() {
           await sequelize.authenticate();
         },
       },
+      ...(env.cache.store === 'redis'
+        ? [
+            {
+              name: 'cache',
+              check: async () => {
+                await cacheStore.check();
+              },
+            },
+          ]
+        : []),
     ],
   });
 
   await connectDatabase(sequelize, env.databaseSync);
   await services.accessControl.syncSystemAccessControl();
 
-  const scheduler = env.scheduleEnabled ? startScheduler(collectJobs(modules)) : undefined;
+  const scheduler = env.scheduleEnabled
+    ? startScheduler(
+        collectJobs(modules),
+        env.schedulerLock
+          ? {
+              lock: {
+                cacheStore,
+                ttlMs: env.schedulerLock.ttlMs,
+              },
+            }
+          : undefined,
+      )
+    : undefined;
   const app = createApp(modules, {
     corsOrigins: env.corsOrigins,
+    globalRateLimit: {
+      ...env.globalRateLimit,
+      cacheStore,
+      scope: 'ip',
+      skip: shouldSkipGlobalRateLimit,
+    },
     requestLogEnabled: env.requestLogEnabled,
     ...(env.localFiles ? { staticFiles: env.localFiles } : {}),
     trustProxy: env.trustProxy,

@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'crypto';
+import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'crypto';
 import { once } from 'events';
 import { connect as connectSocket, type Socket } from 'net';
 import { connect as connectTlsSocket, type TLSSocket } from 'tls';
@@ -130,6 +130,8 @@ export class EmailVerificationService {
 
     const normalizedEmail = normalizeEmail(email);
     const recordKey = getRecordKey(purpose, normalizedEmail);
+    const sendLockKey = getSendLockKey(purpose, normalizedEmail);
+    const sendLockOwner = `${process.pid}:${randomUUID()}`;
     const existing = await this.cacheStore.get<VerificationRecord>(recordKey);
     const now = Date.now();
 
@@ -139,24 +141,41 @@ export class EmailVerificationService {
       });
     }
 
+    const sendLockAcquired = await this.cacheStore.acquireLock(sendLockKey, sendLockOwner, this.codeCooldownMs);
+
+    if (!sendLockAcquired) {
+      const current = await this.cacheStore.get<VerificationRecord>(recordKey);
+      const retryAfterMs =
+        current?.nextSendAt && current.nextSendAt > Date.now() ? current.nextSendAt - Date.now() : this.codeCooldownMs;
+
+      throw new AppError('EMAIL_VERIFICATION_COOLDOWN', 'Email verification code was sent recently.', 429, {
+        retryAfterSeconds: Math.ceil(retryAfterMs / 1000),
+      });
+    }
+
     const code = createVerificationCode();
 
-    await this.sender.send({
-      to: normalizedEmail,
-      subject,
-      text: createText(code).join('\n'),
-    });
+    try {
+      await this.sender.send({
+        to: normalizedEmail,
+        subject,
+        text: createText(code).join('\n'),
+      });
 
-    await this.cacheStore.set(
-      recordKey,
-      {
-        attemptsRemaining: maxVerificationAttempts,
-        codeHash: this.hashVerificationCode(purpose, normalizedEmail, code),
-        expiresAt: now + this.codeExpiresInMs,
-        nextSendAt: now + this.codeCooldownMs,
-      },
-      this.codeExpiresInMs,
-    );
+      await this.cacheStore.set(
+        recordKey,
+        {
+          attemptsRemaining: maxVerificationAttempts,
+          codeHash: this.hashVerificationCode(purpose, normalizedEmail, code),
+          expiresAt: now + this.codeExpiresInMs,
+          nextSendAt: now + this.codeCooldownMs,
+        },
+        this.codeExpiresInMs,
+      );
+    } catch (error) {
+      await this.releaseSendLock(sendLockKey, sendLockOwner);
+      throw error;
+    }
 
     return this.createDeliveryMetadata();
   }
@@ -224,6 +243,14 @@ export class EmailVerificationService {
       cooldownSeconds: Math.ceil(this.codeCooldownMs / 1000),
       expiresInSeconds: Math.ceil(this.codeExpiresInMs / 1000),
     };
+  }
+
+  private async releaseSendLock(sendLockKey: string, owner: string) {
+    try {
+      await this.cacheStore.releaseLock(sendLockKey, owner);
+    } catch {
+      // The send lock has a short TTL; do not mask the original delivery operation failure.
+    }
   }
 }
 
@@ -426,6 +453,10 @@ function normalizeEmail(email: string) {
 
 function getRecordKey(purpose: VerificationPurpose, email: string) {
   return `email-verification:${purpose}:${email}`;
+}
+
+function getSendLockKey(purpose: VerificationPurpose, email: string) {
+  return `email-verification-send-lock:${purpose}:${email}`;
 }
 
 function throwInvalidVerificationCode(): never {

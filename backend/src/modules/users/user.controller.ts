@@ -7,7 +7,13 @@ import { type AccessControlService, type UserAccess } from '../access-control/ac
 import { type UserModel } from './user.model';
 import { type UserService } from './user.service';
 
-const userIdSchema = z.string().uuid();
+const userIdSchema = z.uuid();
+const defaultUserPageSize = 20;
+const maxUserPageSize = 100;
+const listUsersQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(maxUserPageSize).default(defaultUserPageSize),
+});
 const updateUserRolesSchema = z.object({
   roleKeys: z.array(z.string().trim().min(1).max(64)).max(50),
 });
@@ -19,10 +25,18 @@ export class UserController {
   ) {}
 
   list: Middleware = async (ctx) => {
-    const users = await this.userService.listUsers();
+    const pagination = listUsersQuerySchema.parse(ctx.query);
+    const result = await this.userService.listUsers(pagination);
+    const users = result.users;
     const accessByUserId = await this.accessControl.getUsersAccess(users.map((user) => user.id));
 
     ctx.body = ok({
+      pagination: {
+        page: pagination.page,
+        pageSize: pagination.pageSize,
+        total: result.total,
+        totalPages: Math.ceil(result.total / pagination.pageSize),
+      },
       roles: await this.accessControl.listRoles(),
       users: users.map((user) => toUserListItem(user, accessByUserId.get(user.id))),
     });

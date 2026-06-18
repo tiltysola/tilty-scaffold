@@ -55,20 +55,26 @@ export const up: MigrationFn<QueryInterface> = async ({ context: queryInterface 
     },
   });
 
-  const indexes = (await queryInterface.showIndex('users')) as Array<{ name?: string }>;
-
-  if (!indexes.some((index) => index.name === 'users_available_created_at')) {
-    await queryInterface.addIndex('users', ['available', 'createdAt'], {
-      name: 'users_available_created_at',
-    });
-  }
-
-  if (!indexes.some((index) => index.name === 'users_sso_subject')) {
-    await queryInterface.addIndex('users', ['ssoSubject'], {
-      name: 'users_sso_subject',
-      unique: true,
-    });
-  }
+  await queryInterface.addIndex('users', ['available', 'createdAt'], {
+    name: 'users_available_created_at',
+  });
+  await queryInterface.addIndex('users', {
+    fields: [
+      {
+        name: 'createdAt',
+        order: 'DESC',
+      },
+      {
+        name: 'email',
+        order: 'ASC',
+      },
+    ],
+    name: 'users_created_at_email',
+  });
+  await queryInterface.addIndex('users', ['ssoSubject'], {
+    name: 'users_sso_subject',
+    unique: true,
+  });
 
   await queryInterface.createTable('permissions', {
     key: {

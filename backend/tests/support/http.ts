@@ -1,4 +1,4 @@
-import { Middleware } from 'koa';
+import { type Middleware } from 'koa';
 
 import { type RouteDefinition } from '../../src/core/module';
 
@@ -41,7 +41,7 @@ export function createTestContext(
   headers: Record<string, string> = {},
   params?: Record<string, string>,
   options: TestContextOptions = {},
-) {
+): TestContext {
   const normalizedHeaders = Object.fromEntries(
     Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]),
   );

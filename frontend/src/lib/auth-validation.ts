@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { hasMatchingPasswordConfirmation } from '@tilty/shared/validation';
 
-export const emailSchema = z.string().trim().email('Provide a valid email address.');
+export const emailSchema = z.string().trim().pipe(z.email('Provide a valid email address.'));
 export const passwordSchema = z.string().min(8, 'Password must contain at least 8 characters.').max(128);
 export const confirmPasswordSchema = z.string().min(8, 'Confirm password.').max(128);
 export const usernameSchema = z.string().trim().min(2, 'Display name must contain at least 2 characters.').max(32);

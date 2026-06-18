@@ -15,8 +15,8 @@ const usernameSchema = z.string().trim().min(2).max(32);
 const emailSchema = z
   .string()
   .trim()
-  .email()
   .max(255)
+  .pipe(z.email())
   .transform((email) => email.toLowerCase());
 const emailVerificationCodeSchema = z.preprocess(
   (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),

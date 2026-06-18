@@ -5,16 +5,11 @@ import { createMigrator } from '../src/infra/migrator';
 import { initModels } from '../src/modules';
 import { AccessControlService } from '../src/modules/access-control/access-control.service';
 
-describe('database migrations', () => {
-  it('rejects sqlite storage paths outside the application directory', () => {
-    expect(() => createSequelize({ dialect: 'sqlite', storage: '../database.sqlite' })).toThrow(
-      'DATABASE_STORAGE must resolve inside the application directory.',
-    );
-    expect(() => createSequelize({ dialect: 'sqlite', storage: 'file:../database.sqlite' })).toThrow(
-      'SQLite URI storage paths are not supported.',
-    );
-  });
+interface DatabaseIndex {
+  name?: string;
+}
 
+describe('database migrations', () => {
   it('applies and rolls back migrations', async () => {
     const sequelize = createSequelize({ dialect: 'sqlite', storage: ':memory:' });
     const migrator = createMigrator(sequelize);
@@ -27,10 +22,10 @@ describe('database migrations', () => {
       const roles = await queryInterface.describeTable('roles');
       const rolePermissions = await queryInterface.describeTable('role_permissions');
       const userRoles = await queryInterface.describeTable('user_roles');
-      const userIndexes = await queryInterface.showIndex('users');
-      const roleIndexes = await queryInterface.showIndex('roles');
-      const rolePermissionIndexes = await queryInterface.showIndex('role_permissions');
-      const userRoleIndexes = await queryInterface.showIndex('user_roles');
+      const userIndexes = (await queryInterface.showIndex('users')) as unknown as DatabaseIndex[];
+      const roleIndexes = (await queryInterface.showIndex('roles')) as unknown as DatabaseIndex[];
+      const rolePermissionIndexes = (await queryInterface.showIndex('role_permissions')) as unknown as DatabaseIndex[];
+      const userRoleIndexes = (await queryInterface.showIndex('user_roles')) as unknown as DatabaseIndex[];
 
       expect(applied.map((migration) => migration.name)).toEqual(['0001-initial']);
       expect(users.avatarStorageKey).toBeDefined();
@@ -38,6 +33,7 @@ describe('database migrations', () => {
       expect(users.email).toBeDefined();
       expect(users.ssoSubject).toBeDefined();
       expect(userIndexes.some((index) => index.name === 'users_available_created_at')).toBe(true);
+      expect(userIndexes.some((index) => index.name === 'users_created_at_email')).toBe(true);
       expect(userIndexes.some((index) => index.name === 'users_sso_subject')).toBe(true);
       expect(permissions.key).toBeDefined();
       expect(roles.key).toBeDefined();

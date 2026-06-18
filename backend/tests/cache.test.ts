@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import { MemoryCacheStore, RedisCacheStore } from '../src/infra/cache';
-import { EmailSender, EmailVerificationService } from '../src/modules/auth/auth.email';
 
 describe('cache stores', () => {
   it('stores JSON values with a TTL in memory', async () => {
@@ -38,59 +37,15 @@ describe('cache stores', () => {
     await expect(cacheStore.get('test:cas')).resolves.toEqual({ count: 2 });
   });
 
-  it('shares email verification records through the configured cache store', async () => {
-    let sentCode = '';
+  it('coordinates memory locks by owner token', async () => {
     const cacheStore = new MemoryCacheStore();
-    const sender: EmailSender = {
-      send: async (input) => {
-        sentCode = /code is (\d{6})/.exec(input.text)?.[1] ?? '';
-      },
-    };
-    const config = {
-      cacheStore,
-      codeCooldownMs: 60_000,
-      codeExpiresInMs: 10 * 60_000,
-      sender,
-      verificationSecret: 'test-auth-token-secret-minimum-32-characters',
-    };
-    const senderService = new EmailVerificationService(config);
-    const verifierService = new EmailVerificationService(config);
 
-    await senderService.sendRegistrationCode('shared@example.com');
-    await expect(verifierService.verifyRegistrationCode('shared@example.com', sentCode)).resolves.toBeUndefined();
-    await expect(verifierService.verifyRegistrationCode('shared@example.com', sentCode)).rejects.toMatchObject({
-      code: 'EMAIL_VERIFICATION_INVALID',
-    });
-  });
-
-  it('retries email verification attempt updates when the cache record changes concurrently', async () => {
-    let sentCode = '';
-    const cacheStore = new ConflictingCompareAndSetCacheStore();
-    const sender: EmailSender = {
-      send: async (input) => {
-        sentCode = /code is (\d{6})/.exec(input.text)?.[1] ?? '';
-      },
-    };
-    const service = new EmailVerificationService({
-      cacheStore,
-      codeCooldownMs: 60_000,
-      codeExpiresInMs: 10 * 60_000,
-      sender,
-      verificationSecret: 'test-auth-token-secret-minimum-32-characters',
-    });
-
-    await service.sendRegistrationCode('cas@example.com');
-
-    await expect(
-      service.verifyRegistrationCode('cas@example.com', sentCode === '000000' ? '000001' : '000000'),
-    ).rejects.toMatchObject({
-      code: 'EMAIL_VERIFICATION_INVALID',
-    });
-
-    await expect(cacheStore.get('email-verification:registration:cas@example.com')).resolves.toMatchObject({
-      attemptsRemaining: 4,
-    });
-    expect(cacheStore.compareAndSetCalls).toBe(2);
+    await expect(cacheStore.acquireLock('test:lock', 'owner-1', 60_000)).resolves.toBe(true);
+    await expect(cacheStore.acquireLock('test:lock', 'owner-2', 60_000)).resolves.toBe(false);
+    await expect(cacheStore.renewLock('test:lock', 'owner-2', 60_000)).resolves.toBe(false);
+    await expect(cacheStore.releaseLock('test:lock', 'owner-2')).resolves.toBe(false);
+    await expect(cacheStore.releaseLock('test:lock', 'owner-1')).resolves.toBe(true);
+    await expect(cacheStore.acquireLock('test:lock', 'owner-2', 60_000)).resolves.toBe(true);
   });
 
   it('rejects invalid Redis cache configuration', () => {
@@ -103,17 +58,3 @@ describe('cache stores', () => {
     );
   });
 });
-
-class ConflictingCompareAndSetCacheStore extends MemoryCacheStore {
-  compareAndSetCalls = 0;
-
-  override async compareAndSet<T>(key: string, expected: T, value: T, ttlMs: number) {
-    this.compareAndSetCalls += 1;
-
-    if (this.compareAndSetCalls === 1) {
-      return false;
-    }
-
-    return await super.compareAndSet(key, expected, value, ttlMs);
-  }
-}

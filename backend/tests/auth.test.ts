@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { RouteDefinition } from '../src/core/module';
+import { type RouteDefinition } from '../src/core/module';
 import { MemoryCacheStore } from '../src/infra/cache';
 import { createSequelize } from '../src/infra/database';
-import { FileStorage, SaveFileInput } from '../src/infra/file-storage';
+import { type FileStorage, type SaveFileInput } from '../src/infra/file-storage';
 import { createMigrator } from '../src/infra/migrator';
 import { errorMiddleware } from '../src/middleware/error';
 import { createServices, initModels } from '../src/modules';
 import { createAuthModule } from '../src/modules/auth';
 import { defaultAuthCookieConfig } from '../src/modules/auth/auth.controller';
-import { EmailSender, EmailVerificationService } from '../src/modules/auth/auth.email';
+import { type EmailSender, EmailVerificationService } from '../src/modules/auth/auth.email';
 import { AuthService, defaultAuthTokenConfig } from '../src/modules/auth/auth.service';
 import { UserService } from '../src/modules/users/user.service';
 import { createTestContext, getTestRouteHandler, runMiddleware, runMiddlewares } from './support/http';

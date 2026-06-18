@@ -1,4 +1,4 @@
-import { ZodError } from 'zod';
+import { flattenError, ZodError } from 'zod';
 
 export class AppError extends Error {
   readonly status: number;
@@ -20,7 +20,7 @@ export function normalizeError(error: unknown) {
   }
 
   if (error instanceof ZodError) {
-    return new AppError('FIELD_VALIDATE_ERROR', 'Request fields are invalid.', 400, error.flatten());
+    return new AppError('FIELD_VALIDATE_ERROR', 'Request fields are invalid.', 400, flattenError(error));
   }
 
   return new AppError('INTERNAL_ERROR', 'Internal server error.', 500);

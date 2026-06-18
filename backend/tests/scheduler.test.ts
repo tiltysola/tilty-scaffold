@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BackendModule, JobDefinition } from '../src/core/module';
+import { type BackendModule, type JobDefinition } from '../src/core/module';
 import { collectJobs, startScheduler, stopScheduler } from '../src/core/scheduler';
+import { MemoryCacheStore } from '../src/infra/cache';
 
 describe('scheduler', () => {
   it('collects jobs from registered modules', () => {
@@ -36,6 +37,67 @@ describe('scheduler', () => {
       expect(handle.jobs).toHaveLength(1);
     } finally {
       stopScheduler(handle);
+    }
+  });
+
+  it('runs locked startup jobs only on the instance that acquires the lock', async () => {
+    const cacheStore = new MemoryCacheStore();
+    let finishFirstJob: (() => void) | undefined;
+    const firstHandler = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFirstJob = resolve;
+        }),
+    );
+    const secondHandler = vi.fn();
+    const firstHandle = startScheduler(
+      [
+        {
+          name: 'test.locked-startup',
+          rule: '0 * * * * *',
+          runOnStart: true,
+          handler: firstHandler,
+        },
+      ],
+      {
+        lock: {
+          cacheStore,
+          ttlMs: 60_000,
+        },
+      },
+    );
+
+    try {
+      await vi.waitFor(() => expect(firstHandler).toHaveBeenCalledTimes(1));
+
+      const secondHandle = startScheduler(
+        [
+          {
+            name: 'test.locked-startup',
+            rule: '0 * * * * *',
+            runOnStart: true,
+            handler: secondHandler,
+          },
+        ],
+        {
+          lock: {
+            cacheStore,
+            ttlMs: 60_000,
+          },
+        },
+      );
+
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(secondHandler).not.toHaveBeenCalled();
+      } finally {
+        await stopScheduler(secondHandle);
+      }
+    } finally {
+      finishFirstJob?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await stopScheduler(firstHandle);
     }
   });
 

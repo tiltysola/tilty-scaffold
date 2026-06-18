@@ -243,8 +243,6 @@ function getInitials(name: string) {
   );
 }
 
-export default Index;
-
 function createNavItems(permissionKeys?: string[]) {
   return {
     main: [
@@ -271,3 +269,5 @@ function createNavItems(permissionKeys?: string[]) {
     ],
   } satisfies SideNavProps;
 }
+
+export default Index;

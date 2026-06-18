@@ -140,15 +140,10 @@ export function getSsoStartUrl(redirectPath: string) {
   return url.toString();
 }
 
-export function getSsoCallbackParams(search: string, hash: string) {
+export function getSsoCallbackParams(hash: string) {
   const fragment = hash.startsWith('#') ? hash.slice(1) : hash;
-  const fragmentParams = new URLSearchParams(fragment);
 
-  if (fragmentParams.has('sso_token') || fragmentParams.has('sso_bind_token')) {
-    return fragmentParams;
-  }
-
-  return new URLSearchParams(search);
+  return new URLSearchParams(fragment);
 }
 
 export async function completeSsoLogin(token: string) {

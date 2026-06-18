@@ -13,9 +13,9 @@ export const systemPermissionKeys = [
 export type SystemPermissionKey = (typeof systemPermissionKeys)[number];
 
 export interface SystemPermissionDefinition {
-  description: string;
   key: SystemPermissionKey;
   name: string;
+  description: string;
 }
 
 export const systemPermissionDefinitions = [
@@ -47,9 +47,9 @@ export const systemRoleKeys = [SystemRole.Root, SystemRole.UserAdmin, SystemRole
 export type SystemRoleKey = (typeof systemRoleKeys)[number];
 
 export interface SystemRoleDefinition {
-  description: string;
   key: SystemRoleKey;
   name: string;
+  description: string;
   permissionKeys: readonly SystemPermissionKey[];
 }
 

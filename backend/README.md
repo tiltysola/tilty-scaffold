@@ -41,18 +41,24 @@ backend application directory. Production may use platform environment variables
 without a local `.env` file. Relative runtime paths such as `DATABASE_STORAGE`,
 `LOG_LOCAL_PATH`, and `FILE_LOCAL_ROOT` must resolve inside that directory.
 
-Local defaults use SQLite, `DATABASE_SYNC=off`, and migrations for schema
-changes. `db:migrate` applies schema migrations and then synchronizes built-in
-permissions and system roles. Backend startup also synchronizes those records
-after the database is connected. Production requires `DATABASE_SYNC=off`,
-`AUTH_COOKIE_SECURE=true`, a non-example `AUTH_TOKEN_SECRET`, and a CORS
-allowlist that does not include `*`. MySQL and PostgreSQL deployments should
-configure `DATABASE_POOL_*`, `DATABASE_CONNECT_TIMEOUT_MS`, and `DATABASE_SSL`
-according to the runtime database service.
+Local defaults use SQLite, `DATABASE_SYNC=off`, and schema migrations.
+`db:migrate` applies migrations and synchronizes built-in permissions and roles.
+Startup also synchronizes those records after database connection. Production
+requires `DATABASE_SYNC=off`, `AUTH_COOKIE_SECURE=true`, a non-example
+`AUTH_TOKEN_SECRET`, and a CORS allowlist without `*`. Use MySQL or PostgreSQL
+for multi-instance deployments. Keep total pooled database connections across
+all backend instances below the database connection limit.
 
 `TRUST_PROXY=false` is the default. Enable `TRUST_PROXY=true` only when the
 backend is deployed behind a trusted reverse proxy that controls forwarded
 client headers.
+
+`MULTI_INSTANCE_ENABLED=true` enables multi-instance validation. It requires
+Redis cache, MySQL or PostgreSQL, and OSS file storage. When scheduled jobs are
+enabled in multi-instance mode, Redis locks select one executor for each job
+trigger. Configure the lock TTL with `SCHEDULER_LOCK_TTL_MS`. Scheduled jobs
+must remain idempotent because distributed locks do not guarantee strict
+exactly-once execution.
 
 `LOG_TARGETS` controls logging destinations. Supported targets are `console`,
 `local`, and `sls`; combine them with commas when multiple destinations are
@@ -63,23 +69,24 @@ redact common password, secret, token, authorization, cookie, and access-key
 fields before writing records. Request access logs are controlled by
 `LOG_REQUEST_ENABLED`.
 
-`CACHE_STORE` controls cross-request cache storage for authentication rate
-limits, email verification records, and OIDC discovery metadata. Supported
-values are `memory` and `redis`. The default `memory` store keeps data inside
-the backend process. Set `CACHE_STORE=redis` and `CACHE_REDIS_URL` to use Redis;
-the Redis URL must use `redis://` or `rediss://`. Redis connection and command
-timeouts are controlled by `CACHE_REDIS_REQUEST_TIMEOUT_MS`.
+`CACHE_STORE` controls shared transient state: rate limits, refresh tokens,
+email verification, SSO tokens, OIDC metadata, and scheduler locks. Use
+`memory` for single-instance deployments and `redis` for multi-instance
+deployments. Redis URLs must use `redis://` or `rediss://`; request timeouts are
+controlled by `CACHE_REDIS_REQUEST_TIMEOUT_MS`.
 
-`FILE_STORAGE_DRIVER` controls uploaded file storage. Supported values are
-`local` and `oss`. The default `local` driver stores files under
-`FILE_LOCAL_ROOT`; returned URLs use `FILE_PUBLIC_BASE_URL`, and the backend
-serves local files from that URL path. Set `FILE_STORAGE_DRIVER=oss` with
-`FILE_OSS_ACCESS_KEY_ID`, `FILE_OSS_ACCESS_KEY_SECRET`, `FILE_OSS_BUCKET`,
-`FILE_OSS_ENDPOINT`, and `FILE_OSS_REGION` to store files in Aliyun OSS. When
-`FILE_OSS_PUBLIC_BASE_URL` is unset, returned OSS URLs use
-`https://<bucket>.<endpoint>`. Absolute public file URLs must use HTTPS in
-production. Avatar uploads are limited by `FILE_UPLOAD_MAX_BYTES`; replacing an
-avatar removes the previously stored avatar object on a best-effort basis.
+Global per-IP rate limits are controlled by `GLOBAL_RATE_LIMIT_WINDOW_MS` and
+`GLOBAL_RATE_LIMIT_MAX`. Health checks and CORS preflight requests are excluded.
+Authentication-sensitive routes also use the stricter `AUTH_RATE_LIMIT_*`
+settings.
+
+`FILE_STORAGE_DRIVER` controls uploaded file storage. Use `local` for
+single-instance deployments and `oss` for multi-instance deployments. Local
+files are stored under `FILE_LOCAL_ROOT` and served from `FILE_PUBLIC_BASE_URL`.
+OSS requires `FILE_OSS_ACCESS_KEY_ID`, `FILE_OSS_ACCESS_KEY_SECRET`,
+`FILE_OSS_BUCKET`, `FILE_OSS_ENDPOINT`, and `FILE_OSS_REGION`. Absolute public
+file URLs must use HTTPS in production. Avatar uploads are limited by
+`FILE_UPLOAD_MAX_BYTES`.
 
 Authentication uses short-lived access tokens and longer-lived refresh tokens.
 Browser sessions store both tokens in HttpOnly cookies. Token lifetimes are
@@ -158,7 +165,7 @@ logout use the configured refresh-token cookie.
 | `POST` | `/api/auth/sso/session`                       | Exchange an SSO handoff token for a session    |
 | `POST` | `/api/auth/sso/account`                       | Create an account from an unbound SSO identity |
 | `POST` | `/api/auth/sso/bind`                          | Bind an SSO identity to an existing account    |
-| `GET`  | `/api/users/`                                 | List users and available roles                 |
+| `GET`  | `/api/users/`                                 | List paginated users and available roles       |
 | `PUT`  | `/api/users/:id/roles`                        | Replace a user's role assignments              |
 | `GET`  | `/api/health`                                 | Return service health                          |
 | `GET`  | `/api/health/ready`                           | Return service readiness                       |

@@ -18,12 +18,16 @@ interface CacheIncrementResult {
 }
 
 export interface CacheStore {
+  check(): Promise<void>;
   close(): Promise<void>;
+  get<T>(key: string): Promise<T | undefined>;
+  set<T>(key: string, value: T, ttlMs: number): Promise<void>;
   compareAndSet<T>(key: string, expected: T, value: T, ttlMs: number): Promise<boolean>;
   delete(key: string): Promise<void>;
-  get<T>(key: string): Promise<T | undefined>;
   increment(key: string, windowMs: number): Promise<CacheIncrementResult>;
-  set<T>(key: string, value: T, ttlMs: number): Promise<void>;
+  acquireLock(key: string, owner: string, ttlMs: number): Promise<boolean>;
+  renewLock(key: string, owner: string, ttlMs: number): Promise<boolean>;
+  releaseLock(key: string, owner: string): Promise<boolean>;
 }
 
 interface MemoryCacheRecord {
@@ -40,6 +44,27 @@ const redisCompareAndSetScript = [
   '  return 0',
   'end',
   "redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])",
+  'return 1',
+].join('\n');
+const redisAcquireLockScript = [
+  "local didSet = redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2])",
+  'if didSet then',
+  '  return 1',
+  'end',
+  'return 0',
+].join('\n');
+const redisRenewLockScript = [
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then",
+  '  return 0',
+  'end',
+  "redis.call('PEXPIRE', KEYS[1], ARGV[2])",
+  'return 1',
+].join('\n');
+const redisReleaseLockScript = [
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then",
+  '  return 0',
+  'end',
+  "redis.call('DEL', KEYS[1])",
   'return 1',
 ].join('\n');
 const redisRateLimitScript = [
@@ -61,6 +86,10 @@ export function createCacheStore(config: CacheConfig): CacheStore {
 
 export class MemoryCacheStore implements CacheStore {
   private readonly records = new Map<string, MemoryCacheRecord>();
+
+  async check() {
+    return undefined;
+  }
 
   async close() {
     this.records.clear();
@@ -144,6 +173,59 @@ export class MemoryCacheStore implements CacheStore {
       expiresInMs: Math.max(existing.expiresAt - now, 0),
     };
   }
+
+  async acquireLock(key: string, owner: string, ttlMs: number) {
+    validateTtl(ttlMs);
+
+    const record = this.records.get(key);
+    const now = Date.now();
+
+    if (record && record.expiresAt > now) {
+      return false;
+    }
+
+    this.records.set(key, {
+      expiresAt: now + ttlMs,
+      value: JSON.stringify(owner),
+    });
+
+    return true;
+  }
+
+  async renewLock(key: string, owner: string, ttlMs: number) {
+    validateTtl(ttlMs);
+
+    const record = this.records.get(key);
+    const now = Date.now();
+
+    if (!record || record.expiresAt <= now) {
+      this.records.delete(key);
+      return false;
+    }
+
+    if (record.value !== JSON.stringify(owner)) {
+      return false;
+    }
+
+    record.expiresAt = now + ttlMs;
+    return true;
+  }
+
+  async releaseLock(key: string, owner: string) {
+    const record = this.records.get(key);
+
+    if (!record || record.expiresAt <= Date.now()) {
+      this.records.delete(key);
+      return false;
+    }
+
+    if (record.value !== JSON.stringify(owner)) {
+      return false;
+    }
+
+    this.records.delete(key);
+    return true;
+  }
 }
 
 export class RedisCacheStore implements CacheStore {
@@ -168,6 +250,10 @@ export class RedisCacheStore implements CacheStore {
       },
     });
     this.client.on('error', () => undefined);
+  }
+
+  async check() {
+    await this.command(() => this.client.ping());
   }
 
   async close() {
@@ -221,11 +307,7 @@ export class RedisCacheStore implements CacheStore {
       }),
     );
 
-    if (result !== 0 && result !== 1) {
-      throw new AppError('CACHE_RESPONSE_INVALID', 'Cache backend returned an invalid response.', 502);
-    }
-
-    return result === 1;
+    return parseBooleanResponse(result);
   }
 
   async delete(key: string) {
@@ -258,6 +340,43 @@ export class RedisCacheStore implements CacheStore {
       count,
       expiresInMs: Math.max(expiresInMs, 0),
     };
+  }
+
+  async acquireLock(key: string, owner: string, ttlMs: number) {
+    validateTtl(ttlMs);
+
+    const result = await this.command(() =>
+      this.client.eval(redisAcquireLockScript, {
+        keys: [this.cacheKey(key)],
+        arguments: [JSON.stringify(owner), String(ttlMs)],
+      }),
+    );
+
+    return parseBooleanResponse(result);
+  }
+
+  async renewLock(key: string, owner: string, ttlMs: number) {
+    validateTtl(ttlMs);
+
+    const result = await this.command(() =>
+      this.client.eval(redisRenewLockScript, {
+        keys: [this.cacheKey(key)],
+        arguments: [JSON.stringify(owner), String(ttlMs)],
+      }),
+    );
+
+    return parseBooleanResponse(result);
+  }
+
+  async releaseLock(key: string, owner: string) {
+    const result = await this.command(() =>
+      this.client.eval(redisReleaseLockScript, {
+        keys: [this.cacheKey(key)],
+        arguments: [JSON.stringify(owner)],
+      }),
+    );
+
+    return parseBooleanResponse(result);
   }
 
   private cacheKey(key: string) {
@@ -308,6 +427,14 @@ function validateRedisUrl(value: string) {
   if (!Number.isInteger(database) || database < 0) {
     throw new AppError('CACHE_REDIS_URL_INVALID', 'Redis cache URL database must be a non-negative integer.', 500);
   }
+}
+
+function parseBooleanResponse(result: unknown) {
+  if (result !== 0 && result !== 1) {
+    throw new AppError('CACHE_RESPONSE_INVALID', 'Cache backend returned an invalid response.', 502);
+  }
+
+  return result === 1;
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {

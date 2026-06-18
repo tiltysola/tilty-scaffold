@@ -3,6 +3,21 @@ import { describe, expect, it } from 'vitest';
 import { getEnvValidationMessage, loadEnv } from '../src/config/env';
 
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
+const validMultiInstanceEnv = {
+  AUTH_TOKEN_SECRET: authTokenSecret,
+  CACHE_REDIS_URL: 'redis://localhost:6379/0',
+  CACHE_STORE: 'redis',
+  DATABASE_DIALECT: 'postgres',
+  DATABASE_URL: 'postgres://postgres:password@localhost:5432/app',
+  FILE_OSS_ACCESS_KEY_ID: 'test-access-key-id',
+  FILE_OSS_ACCESS_KEY_SECRET: 'test-access-key-secret',
+  FILE_OSS_BUCKET: 'tilty-scaffold',
+  FILE_OSS_ENDPOINT: 'oss-cn-hangzhou.aliyuncs.com',
+  FILE_OSS_REGION: 'oss-cn-hangzhou',
+  FILE_STORAGE_DRIVER: 'oss',
+  MULTI_INSTANCE_ENABLED: 'true',
+  SCHEDULER_ENABLED: 'false',
+} as const;
 
 describe('environment configuration', () => {
   it('loads sqlite configuration by default', () => {
@@ -17,6 +32,10 @@ describe('environment configuration', () => {
     });
     expect(env.authRateLimit).toEqual({
       max: 10,
+      windowMs: 60_000,
+    });
+    expect(env.globalRateLimit).toEqual({
+      max: 1000,
       windowMs: 60_000,
     });
     expect(env.authTokens).toEqual({
@@ -49,7 +68,9 @@ describe('environment configuration', () => {
     });
     expect(env.email).toBeUndefined();
     expect(env.requestLogEnabled).toBe(true);
+    expect(env.multiInstanceEnabled).toBe(false);
     expect(env.scheduleEnabled).toBe(true);
+    expect(env.schedulerLock).toBeUndefined();
     expect(env.sso).toBeUndefined();
     expect(env.trustProxy).toBe(false);
   });
@@ -168,6 +189,20 @@ describe('environment configuration', () => {
     });
   });
 
+  it('loads configurable global rate limit settings', () => {
+    const env = loadEnv({
+      AUTH_TOKEN_SECRET: authTokenSecret,
+      DATABASE_DIALECT: 'sqlite',
+      GLOBAL_RATE_LIMIT_MAX: '250',
+      GLOBAL_RATE_LIMIT_WINDOW_MS: '30000',
+    } as NodeJS.ProcessEnv);
+
+    expect(env.globalRateLimit).toEqual({
+      max: 250,
+      windowMs: 30_000,
+    });
+  });
+
   it('rejects invalid authentication token and cookie settings', () => {
     const message = getEnvValidationMessage({
       AUTH_ACCESS_TOKEN_COOKIE_NAME: 'tilty_token',
@@ -218,6 +253,67 @@ describe('environment configuration', () => {
     } as NodeJS.ProcessEnv);
 
     expect(message).toContain('CACHE_REDIS_URL');
+  });
+
+  it('requires Redis cache storage for multi-instance deployments', () => {
+    const message = getEnvValidationMessage({
+      ...validMultiInstanceEnv,
+      CACHE_STORE: 'memory',
+    } as NodeJS.ProcessEnv);
+
+    expect(message).toContain('CACHE_STORE');
+  });
+
+  it('loads Redis-backed scheduler lock settings for multi-instance scheduler processes', () => {
+    const env = loadEnv({
+      ...validMultiInstanceEnv,
+      SCHEDULER_ENABLED: 'true',
+      SCHEDULER_LOCK_TTL_MS: '120000',
+    } as NodeJS.ProcessEnv);
+
+    expect(env.scheduleEnabled).toBe(true);
+    expect(env.schedulerLock).toEqual({
+      ttlMs: 120_000,
+    });
+  });
+
+  it('rejects invalid scheduler lock TTL settings', () => {
+    const message = getEnvValidationMessage({
+      ...validMultiInstanceEnv,
+      SCHEDULER_ENABLED: 'true',
+      SCHEDULER_LOCK_TTL_MS: '999',
+    } as NodeJS.ProcessEnv);
+
+    expect(message).toContain('SCHEDULER_LOCK_TTL_MS');
+  });
+
+  it('rejects SQLite for multi-instance deployments', () => {
+    const message = getEnvValidationMessage({
+      ...validMultiInstanceEnv,
+      DATABASE_DIALECT: 'sqlite',
+    } as NodeJS.ProcessEnv);
+
+    expect(message).toContain('DATABASE_DIALECT');
+  });
+
+  it('rejects local file storage for multi-instance deployments', () => {
+    const message = getEnvValidationMessage({
+      ...validMultiInstanceEnv,
+      FILE_STORAGE_DRIVER: 'local',
+    } as NodeJS.ProcessEnv);
+
+    expect(message).toContain('FILE_STORAGE_DRIVER');
+  });
+
+  it('loads valid multi-instance configuration', () => {
+    const env = loadEnv(validMultiInstanceEnv as NodeJS.ProcessEnv);
+
+    expect(env.multiInstanceEnabled).toBe(true);
+    expect(env.cache.store).toBe('redis');
+    expect(env.database.dialect).toBe('postgres');
+    expect(env.fileStorage.driver).toBe('oss');
+    expect(env.scheduleEnabled).toBe(false);
+    expect(env.schedulerLock).toBeUndefined();
   });
 
   it('loads Redis cache configuration', () => {

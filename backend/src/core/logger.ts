@@ -39,11 +39,6 @@ interface LogSink {
   write: (record: LogRecord) => Promise<void> | void;
 }
 
-const pendingWrites = new Set<Promise<void>>();
-let maxPendingWrites = 1000;
-let sinks: LogSink[];
-let writeTimeoutMs = 5000;
-
 interface SerializedError {
   message: string;
   name: string;
@@ -52,6 +47,11 @@ interface SerializedError {
 
 type RedactedLogArg = boolean | null | number | string | object | undefined;
 type SerializedLogArg = boolean | null | number | string | SerializedError;
+
+const pendingWrites = new Set<Promise<void>>();
+let maxPendingWrites = 1000;
+let sinks: LogSink[];
+let writeTimeoutMs = 5000;
 
 const redactedValue = '[REDACTED]';
 const sensitiveAssignmentPattern =
@@ -100,6 +100,13 @@ export async function flushLogger() {
   await Promise.allSettled([...pendingWrites]);
   await Promise.allSettled(sinks.map((sink) => sink.flush?.()).filter(isPromise));
 }
+
+export const logger = {
+  debug: (...args: LogArg[]) => write('debug', args),
+  error: (...args: LogArg[]) => write('error', args),
+  info: (...args: LogArg[]) => write('info', args),
+  warn: (...args: LogArg[]) => write('warn', args),
+};
 
 function write(level: LogLevel, args: LogArg[]) {
   const redactedArgs = args.map((arg) => redactArg(arg));
@@ -348,10 +355,3 @@ function redactText(value: string) {
     .replace(authorizationHeaderPattern, (_, scheme: string) => `${scheme} ${redactedValue}`)
     .replace(sensitiveAssignmentPattern, (_, prefix: string) => `${prefix}${redactedValue}`);
 }
-
-export const logger = {
-  debug: (...args: LogArg[]) => write('debug', args),
-  error: (...args: LogArg[]) => write('error', args),
-  info: (...args: LogArg[]) => write('info', args),
-  warn: (...args: LogArg[]) => write('warn', args),
-};

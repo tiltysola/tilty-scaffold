@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { RefreshCwIcon, SaveIcon, ShieldCheckIcon } from 'lucide-react';
+import { ChevronLeftIcon, ChevronRightIcon, RefreshCwIcon, SaveIcon, ShieldCheckIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { getApiErrorMessage } from '@/lib/api';
 import { getStoredSession } from '@/lib/auth';
-import { fetchUsers, type RoleSummary, updateUserRoles, type UserListItem } from '@/lib/users';
+import { fetchUsers, type RoleSummary, updateUserRoles, type UserListItem, type UserListPagination } from '@/lib/users';
 import { Badge } from '@/shadcn/components/ui/badge';
 import { Button } from '@/shadcn/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shadcn/components/ui/card';
@@ -13,11 +13,21 @@ import { Checkbox } from '@/shadcn/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shadcn/components/ui/table';
 import { hasPermission, SystemPermission } from '@tilty/shared/access-control';
 
+const userPageSize = 20;
+const defaultPagination: UserListPagination = {
+  page: 1,
+  pageSize: userPageSize,
+  total: 0,
+  totalPages: 0,
+};
+
 const Index = () => {
   const session = getStoredSession();
   const canManageUsers = hasPermission(session?.user.permissions, SystemPermission.UserAdmin);
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [roles, setRoles] = useState<RoleSummary[]>([]);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<UserListPagination>(defaultPagination);
   const [roleDrafts, setRoleDrafts] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
@@ -26,27 +36,32 @@ const Index = () => {
   const applyUserList = useCallback((result: Awaited<ReturnType<typeof fetchUsers>>) => {
     setUsers(result.users);
     setRoles(result.roles);
+    setPagination(result.pagination);
     setRoleDrafts(Object.fromEntries(result.users.map((user) => [user.id, user.roles])));
   }, []);
 
-  const loadUsers = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const loadUsers = useCallback(
+    async (targetPage = page) => {
+      setLoading(true);
+      setError(null);
 
-    try {
-      applyUserList(await fetchUsers());
-    } catch (loadError) {
-      setError(getApiErrorMessage(loadError, 'Users could not be loaded.'));
-    } finally {
-      setLoading(false);
-    }
-  }, [applyUserList]);
+      try {
+        applyUserList(await fetchUsers({ page: targetPage, pageSize: userPageSize }));
+      } catch (loadError) {
+        setError(getApiErrorMessage(loadError, 'Users could not be loaded.'));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyUserList, page],
+  );
   const availableRoles = useMemo(() => roles.filter((role) => role.available), [roles]);
+  const displayTotalPages = Math.max(pagination.totalPages, 1);
 
   useEffect(() => {
     let active = true;
 
-    fetchUsers()
+    fetchUsers({ page, pageSize: userPageSize })
       .then((result) => {
         if (active) {
           applyUserList(result);
@@ -66,7 +81,13 @@ const Index = () => {
     return () => {
       active = false;
     };
-  }, [applyUserList]);
+  }, [applyUserList, page]);
+
+  const handlePageChange = (nextPage: number) => {
+    setLoading(true);
+    setError(null);
+    setPage(nextPage);
+  };
 
   const handleRoleToggle = (userId: string, roleKey: string, enabled: boolean) => {
     setRoleDrafts((current) => {
@@ -125,77 +146,104 @@ const Index = () => {
               </Button>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Roles</TableHead>
-                  <TableHead>Permissions</TableHead>
-                  <TableHead>Created</TableHead>
-                  {canManageUsers ? <TableHead className="w-24 text-right">Action</TableHead> : null}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
+            <div className="grid gap-4">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={canManageUsers ? 6 : 5} className="h-24 text-center text-muted-foreground">
-                      Loading users
-                    </TableCell>
+                    <TableHead>User</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Roles</TableHead>
+                    <TableHead>Permissions</TableHead>
+                    <TableHead>Created</TableHead>
+                    {canManageUsers ? <TableHead className="w-24 text-right">Action</TableHead> : null}
                   </TableRow>
-                ) : users.length ? (
-                  users.map((user) => (
-                    <TableRow key={user.id}>
-                      <TableCell>
-                        <div className="grid gap-1">
-                          <span className="font-medium">{user.username}</span>
-                          <span className="text-xs text-muted-foreground">{user.email}</span>
-                        </div>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={canManageUsers ? 6 : 5} className="h-24 text-center text-muted-foreground">
+                        Loading users
                       </TableCell>
-                      <TableCell>
-                        <Badge variant={user.available ? 'secondary' : 'destructive'}>
-                          {user.available ? 'Available' : 'Disabled'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {canManageUsers ? (
-                          <RoleEditor
-                            roles={availableRoles}
-                            selectedRoleKeys={roleDrafts[user.id] ?? user.roles}
-                            disabled={savingUserId === user.id}
-                            onToggle={(roleKey, enabled) => handleRoleToggle(user.id, roleKey, enabled)}
-                          />
-                        ) : (
-                          <KeyBadges keys={user.roles} emptyText="No roles" />
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <KeyBadges keys={user.permissions} emptyText="No permissions" />
-                      </TableCell>
-                      <TableCell>{formatDate(user.createdAt)}</TableCell>
-                      {canManageUsers ? (
-                        <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            onClick={() => void handleSaveRoles(user)}
-                            disabled={savingUserId === user.id || arraysEqual(roleDrafts[user.id] ?? [], user.roles)}
-                          >
-                            {savingUserId === user.id ? <ShieldCheckIcon /> : <SaveIcon />}
-                            Save
-                          </Button>
-                        </TableCell>
-                      ) : null}
                     </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={canManageUsers ? 6 : 5} className="h-24 text-center text-muted-foreground">
-                      No users found.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+                  ) : users.length ? (
+                    users.map((user) => (
+                      <TableRow key={user.id}>
+                        <TableCell>
+                          <div className="grid gap-1">
+                            <span className="font-medium">{user.username}</span>
+                            <span className="text-xs text-muted-foreground">{user.email}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={user.available ? 'secondary' : 'destructive'}>
+                            {user.available ? 'Available' : 'Disabled'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {canManageUsers ? (
+                            <RoleEditor
+                              roles={availableRoles}
+                              selectedRoleKeys={roleDrafts[user.id] ?? user.roles}
+                              disabled={savingUserId === user.id}
+                              onToggle={(roleKey, enabled) => handleRoleToggle(user.id, roleKey, enabled)}
+                            />
+                          ) : (
+                            <KeyBadges keys={user.roles} emptyText="No roles" />
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <KeyBadges keys={user.permissions} emptyText="No permissions" />
+                        </TableCell>
+                        <TableCell>{formatDate(user.createdAt)}</TableCell>
+                        {canManageUsers ? (
+                          <TableCell className="text-right">
+                            <Button
+                              size="sm"
+                              onClick={() => void handleSaveRoles(user)}
+                              disabled={savingUserId === user.id || arraysEqual(roleDrafts[user.id] ?? [], user.roles)}
+                            >
+                              {savingUserId === user.id ? <ShieldCheckIcon /> : <SaveIcon />}
+                              Save
+                            </Button>
+                          </TableCell>
+                        ) : null}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={canManageUsers ? 6 : 5} className="h-24 text-center text-muted-foreground">
+                        No users found.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="text-sm text-muted-foreground">
+                  Page {pagination.page} of {displayTotalPages} - {pagination.total} users
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loading || pagination.page <= 1}
+                    onClick={() => handlePageChange(Math.max(1, page - 1))}
+                  >
+                    <ChevronLeftIcon />
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loading || pagination.page >= displayTotalPages}
+                    onClick={() => handlePageChange(page + 1)}
+                  >
+                    Next
+                    <ChevronRightIcon />
+                  </Button>
+                </div>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>

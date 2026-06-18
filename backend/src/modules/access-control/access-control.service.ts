@@ -25,18 +25,18 @@ interface AccessControlModels {
 }
 
 export interface RoleSummary {
-  available: boolean;
-  description: string;
   id: string;
   key: string;
   name: string;
-  permissionKeys: string[];
+  description: string;
   system: boolean;
+  available: boolean;
+  permissionKeys: string[];
 }
 
 export interface UserAccess {
-  permissions: string[];
   roles: string[];
+  permissions: string[];
 }
 
 export class AccessControlService {

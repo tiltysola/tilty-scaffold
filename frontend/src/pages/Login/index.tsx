@@ -1,9 +1,8 @@
-import type { FormEvent } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { type SubmitEventHandler, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import { KeyRoundIcon, LinkIcon, UserPlusIcon } from 'lucide-react';
-import type { z } from 'zod';
+import { type z } from 'zod';
 
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { useFormState } from '@/hooks/useFormState';
@@ -86,7 +85,7 @@ const Index = () => {
   }, []);
 
   useEffect(() => {
-    const params = getSsoCallbackParams(location.search, location.hash);
+    const params = getSsoCallbackParams(location.hash);
     const token = params.get('sso_token');
     const bindToken = params.get('sso_bind_token');
 
@@ -141,7 +140,7 @@ const Index = () => {
     setError(null);
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit: SubmitEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
     setError(null);
 
@@ -159,7 +158,7 @@ const Index = () => {
     }
   };
 
-  const handleCreateSsoAccount = async (event: FormEvent<HTMLFormElement>) => {
+  const handleCreateSsoAccount: SubmitEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
 
     if (!ssoBind) {
@@ -189,7 +188,7 @@ const Index = () => {
     }
   };
 
-  const handleBindSsoAccount = async (event: FormEvent<HTMLFormElement>) => {
+  const handleBindSsoAccount: SubmitEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
 
     if (!ssoBind) {

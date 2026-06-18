@@ -1,8 +1,7 @@
-import type { FormEvent } from 'react';
-import { useEffect, useState } from 'react';
+import { type SubmitEventHandler, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import type { z } from 'zod';
+import { type z } from 'zod';
 
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { useEmailVerification } from '@/hooks/useEmailVerification';
@@ -79,7 +78,7 @@ const Index = () => {
     };
   }, []);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit: SubmitEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
     submitAction.clearError();
     emailVerification.clearMessages();

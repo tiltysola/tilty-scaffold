@@ -26,6 +26,10 @@ describe('logger', () => {
       const content = await readFile(filePath, 'utf8');
       const line = content.trim().split('\n')[0];
 
+      if (!line) {
+        throw new Error('Missing local log line.');
+      }
+
       expect(JSON.parse(line)).toMatchObject({
         level: 'info',
         message: 'local log',

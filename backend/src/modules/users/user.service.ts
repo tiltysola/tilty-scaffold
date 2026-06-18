@@ -23,6 +23,11 @@ interface UpdateUserPasswordInput {
   passwordSalt: string;
 }
 
+interface ListUsersInput {
+  page: number;
+  pageSize: number;
+}
+
 export class UserService {
   constructor(private readonly userModel: typeof UserModel) {}
 
@@ -47,13 +52,20 @@ export class UserService {
     });
   }
 
-  async listUsers() {
-    return this.userModel.findAll({
+  async listUsers(input: ListUsersInput) {
+    const result = await this.userModel.findAndCountAll({
+      limit: input.pageSize,
+      offset: (input.page - 1) * input.pageSize,
       order: [
         ['createdAt', 'DESC'],
         ['email', 'ASC'],
       ],
     });
+
+    return {
+      total: result.count,
+      users: result.rows,
+    };
   }
 
   async hasMultipleAvailableUsers() {
