@@ -39,6 +39,7 @@ export async function bootstrapSetup() {
       skip: shouldSkipGlobalRateLimit,
     },
     requestLogEnabled: env.LOG_REQUEST_ENABLED === 'true',
+    setupRedirect: { mode: 'setup' },
     trustProxy: env.TRUST_PROXY === 'true',
   });
   const server = createServer(app.callback());

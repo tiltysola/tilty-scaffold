@@ -109,36 +109,6 @@ export const openApiDocument = {
     },
   ],
   paths: {
-    '/api/setup/status': {
-      get: {
-        tags: ['Setup'],
-        summary: 'Return setup lock status',
-        responses: {
-          '200': {
-            description: 'Setup status',
-            content: {
-              'application/json': {
-                schema: {
-                  allOf: [
-                    {
-                      $ref: '#/components/schemas/ApiSuccess',
-                    },
-                    {
-                      type: 'object',
-                      properties: {
-                        data: {
-                          $ref: '#/components/schemas/SetupStatus',
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-        },
-      },
-    },
     '/api/setup/defaults': {
       get: {
         tags: ['Setup'],
@@ -556,7 +526,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/SetupLocked',
           },
           '409': {
-            description: 'Setup is already running or users already exist',
+            description: 'Setup is already running',
             content: {
               'application/json': {
                 schema: {
@@ -1579,21 +1549,6 @@ export const openApiDocument = {
           data: {},
         },
       },
-      SetupStatus: {
-        type: 'object',
-        required: ['envFilePath', 'locked', 'required'],
-        properties: {
-          envFilePath: {
-            type: 'string',
-          },
-          locked: {
-            type: 'boolean',
-          },
-          required: {
-            type: 'boolean',
-          },
-        },
-      },
       SetupEnvironment: {
         type: 'object',
         description:
@@ -1642,10 +1597,11 @@ export const openApiDocument = {
       },
       SetupCompleteRequest: {
         type: 'object',
-        required: ['administrator', 'environment'],
+        required: ['environment'],
         properties: {
           administrator: {
             $ref: '#/components/schemas/SetupAdministrator',
+            description: 'Required only when the selected database does not already contain available users.',
           },
           environment: {
             $ref: '#/components/schemas/SetupEnvironment',
@@ -1671,11 +1627,14 @@ export const openApiDocument = {
             properties: {
               data: {
                 type: 'object',
-                required: ['connected'],
+                required: ['connected', 'hasExistingUsers'],
                 properties: {
                   connected: {
                     type: 'boolean',
                     const: true,
+                  },
+                  hasExistingUsers: {
+                    type: 'boolean',
                   },
                 },
               },
@@ -1822,8 +1781,11 @@ export const openApiDocument = {
             properties: {
               data: {
                 type: 'object',
-                required: ['completed', 'restartRequired'],
+                required: ['administratorCreated', 'completed', 'restartRequired'],
                 properties: {
+                  administratorCreated: {
+                    type: 'boolean',
+                  },
                   completed: {
                     type: 'boolean',
                     const: true,

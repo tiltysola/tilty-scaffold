@@ -102,6 +102,74 @@ describe('apiRequest', () => {
     });
   });
 
+  it('navigates when an API request requires setup', async () => {
+    const replace = vi.fn();
+
+    vi.stubGlobal('window', {
+      location: {
+        hash: '',
+        href: 'http://localhost:8011/login',
+        origin: 'http://localhost:8011',
+        pathname: '/login',
+        replace,
+        search: '',
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            code: 503,
+            error: 'SETUP_REQUIRED',
+            message: 'Setup is required before this API can be used.',
+          }),
+          { status: 503 },
+        );
+      }),
+    );
+
+    await expect(apiRequest('/api/auth/config')).rejects.toMatchObject({
+      code: 'SETUP_REQUIRED',
+      status: 503,
+    });
+    expect(replace).toHaveBeenCalledWith('/setup');
+  });
+
+  it('does not navigate when setup is complete but backend restart is required', async () => {
+    const replace = vi.fn();
+
+    vi.stubGlobal('window', {
+      location: {
+        hash: '',
+        href: 'http://localhost:8011/login',
+        origin: 'http://localhost:8011',
+        pathname: '/login',
+        replace,
+        search: '',
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            code: 503,
+            error: 'SETUP_RESTART_REQUIRED',
+            message: 'Setup is complete. Restart the backend service before using this API.',
+          }),
+          { status: 503 },
+        );
+      }),
+    );
+
+    await expect(apiRequest('/api/auth/config')).rejects.toMatchObject({
+      code: 'SETUP_RESTART_REQUIRED',
+      status: 503,
+    });
+    expect(replace).not.toHaveBeenCalled();
+  });
+
   it('returns normalized API error messages', () => {
     expect(getApiErrorMessage(new ApiError(400, 'FIELD_VALIDATE_ERROR', 'Invalid.'), 'Fallback.')).toBe('Invalid.');
     expect(getApiErrorMessage(new Error('plain'), 'Fallback.')).toBe('Fallback.');

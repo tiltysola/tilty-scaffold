@@ -36,12 +36,16 @@ cp .env.example .env
 
 Use `.env.example` as the source of supported variables and defaults when
 configuring the backend manually. When `.env` is absent, server startup enters
-setup-only mode and exposes only `/api/setup/*`. Complete `/setup` in the
-frontend to write `.env`, apply migrations, seed built-in access control, and
-create the root administrator. Restart the backend after setup completes so the
-full application loads the generated environment. Relative runtime paths such
-as `DATABASE_STORAGE`, `LOG_LOCAL_PATH`, and `FILE_LOCAL_ROOT` must resolve
-inside the backend application directory.
+setup-only mode: `/api/setup/*` remains available, browser navigation redirects
+to `/setup`, and other API requests return `SETUP_REQUIRED`. After setup writes
+`.env`, non-setup API requests return `SETUP_RESTART_REQUIRED` until restart.
+
+Complete `/setup` in the frontend to write `.env`, apply migrations, and seed
+built-in access control. Setup creates the root administrator only when the
+selected database has no available users; otherwise existing users are retained.
+Restart the backend to load the generated environment.
+Relative runtime paths such as `DATABASE_STORAGE`, `LOG_LOCAL_PATH`, and
+`FILE_LOCAL_ROOT` must resolve inside the backend application directory.
 
 Local defaults use SQLite, `DATABASE_SYNC=off`, and schema migrations.
 `db:migrate` applies migrations and synchronizes built-in permissions and roles.
@@ -152,17 +156,16 @@ logout use the configured refresh-token cookie.
 
 | Method | Path                                          | Description                                    |
 | ------ | --------------------------------------------- | ---------------------------------------------- |
-| `GET`  | `/api/setup/status`                           | Return setup availability                      |
 | `GET`  | `/api/setup/defaults`                         | Return generated setup defaults                |
-| `POST` | `/api/setup/validate`                         | Validate setup environment and administrator   |
+| `POST` | `/api/setup/validate`                         | Validate setup input                           |
 | `POST` | `/api/setup/validate/environment`             | Validate setup environment fields              |
-| `POST` | `/api/setup/test/database`                    | Test database connectivity                     |
+| `POST` | `/api/setup/test/database`                    | Test database connectivity and user presence   |
 | `POST` | `/api/setup/test/cache`                       | Test cache connectivity                        |
 | `POST` | `/api/setup/test/file-storage`                | Test file storage configuration                |
 | `POST` | `/api/setup/test/logging`                     | Test logging configuration                     |
 | `POST` | `/api/setup/test/email`                       | Test email configuration                       |
 | `POST` | `/api/setup/test/sso`                         | Test SSO provider discovery                    |
-| `POST` | `/api/setup/complete`                         | Complete setup and create the root admin       |
+| `POST` | `/api/setup/complete`                         | Complete setup                                 |
 | `GET`  | `/api/auth/config`                            | Return public authentication configuration     |
 | `POST` | `/api/auth/register`                          | Create an account                              |
 | `POST` | `/api/auth/register/email-verification`       | Send a registration email verification code    |

@@ -4,6 +4,7 @@ import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createSequelize } from '../src/infra/database';
+import { createMigrator } from '../src/infra/migrator';
 import { initModels } from '../src/modules';
 import { SetupService } from '../src/modules/setup/setup.service';
 
@@ -22,15 +23,10 @@ describe('setup service', () => {
     await rm(temporaryRoot, { force: true, recursive: true });
   });
 
-  it('reports setup requirement and generates defaults when no environment file exists', () => {
+  it('generates defaults when no environment file exists', () => {
     const service = new SetupService('setup');
-    const status = service.getStatus();
     const defaults = service.getDefaults();
 
-    expect(status).toMatchObject({
-      locked: false,
-      required: true,
-    });
     expect(defaults.environment.DATABASE_DIALECT).toBe('sqlite');
     expect(defaults.environment.CACHE_REDIS_URL).toBe('redis://localhost:6379/0');
     expect(defaults.environment.AUTH_TOKEN_SECRET).toHaveLength(64);
@@ -41,10 +37,6 @@ describe('setup service', () => {
 
     const service = new SetupService('setup');
 
-    expect(service.getStatus()).toMatchObject({
-      locked: true,
-      required: false,
-    });
     expect(() => service.getDefaults()).toThrow('Setup is locked');
   });
 
@@ -67,15 +59,13 @@ describe('setup service', () => {
         },
       }),
     ).resolves.toEqual({
+      administratorCreated: true,
       completed: true,
       restartRequired: true,
     });
 
     await expect(readFile('.env', 'utf8')).resolves.toContain('DATABASE_STORAGE=./data/setup.sqlite');
-    expect(service.getStatus()).toMatchObject({
-      locked: true,
-      required: false,
-    });
+    expect(() => service.getDefaults()).toThrow('Setup is locked');
 
     const sequelize = createSequelize({ dialect: 'sqlite', storage: './data/setup.sqlite' });
     const models = initModels(sequelize);
@@ -84,6 +74,54 @@ describe('setup service', () => {
       await expect(models.user.count()).resolves.toBe(1);
     } finally {
       await sequelize.close();
+    }
+  });
+
+  it('writes environment and skips administrator creation when available users already exist', async () => {
+    const sequelize = createSequelize({ dialect: 'sqlite', storage: './data/existing-users.sqlite' });
+    const models = initModels(sequelize);
+
+    try {
+      await createMigrator(sequelize).up();
+      await models.user.create({
+        email: 'existing@example.com',
+        username: 'Existing User',
+      });
+    } finally {
+      await sequelize.close();
+    }
+
+    const service = new SetupService('setup');
+    const environment = {
+      ...service.getDefaults().environment,
+      DATABASE_STORAGE: './data/existing-users.sqlite',
+      SCHEDULER_ENABLED: 'false',
+    };
+
+    await expect(service.testDatabase({ environment })).resolves.toEqual({
+      connected: true,
+      hasExistingUsers: true,
+    });
+    await expect(
+      service.complete({
+        environment,
+      }),
+    ).resolves.toEqual({
+      administratorCreated: false,
+      completed: true,
+      restartRequired: true,
+    });
+
+    await expect(readFile('.env', 'utf8')).resolves.toContain('DATABASE_STORAGE=./data/existing-users.sqlite');
+
+    const verificationSequelize = createSequelize({ dialect: 'sqlite', storage: './data/existing-users.sqlite' });
+    const verificationModels = initModels(verificationSequelize);
+
+    try {
+      await expect(verificationModels.user.count()).resolves.toBe(1);
+      await expect(verificationModels.user.findOne({ where: { email: 'existing@example.com' } })).resolves.toBeTruthy();
+    } finally {
+      await verificationSequelize.close();
     }
   });
 
@@ -96,6 +134,7 @@ describe('setup service', () => {
 
     await expect(service.testDatabase({ environment })).resolves.toEqual({
       connected: true,
+      hasExistingUsers: false,
     });
     await expect(service.testCache({ environment })).resolves.toEqual({
       connected: true,

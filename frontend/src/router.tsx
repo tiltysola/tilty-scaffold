@@ -12,27 +12,24 @@ import UsersPage from '@/pages/Users';
 import Layout from '@/components/Layout';
 import RequireAuth from '@/components/RequireAuth';
 import RequirePermission from '@/components/RequirePermission';
-import SetupGate from '@/components/SetupGate';
 
 const Index = () => {
   return (
     <Routes>
-      <Route element={<SetupGate />}>
-        <Route path="setup" element={<SetupPage />} />
-        <Route element={<RequireAuth />}>
-          <Route element={<Layout />}>
-            <Route index element={<DashboardPage />} />
-            <Route path="dashboard" element={<DashboardPage />} />
-            <Route element={<RequirePermission permission={SystemPermission.UserList} />}>
-              <Route path="users" element={<UsersPage />} />
-            </Route>
+      <Route path="setup" element={<SetupPage />} />
+      <Route element={<RequireAuth />}>
+        <Route element={<Layout />}>
+          <Route index element={<DashboardPage />} />
+          <Route path="dashboard" element={<DashboardPage />} />
+          <Route element={<RequirePermission permission={SystemPermission.UserList} />}>
+            <Route path="users" element={<UsersPage />} />
           </Route>
         </Route>
-        <Route path="login" element={<LoginPage />} />
-        <Route path="forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="register" element={<RegisterPage />} />
-        <Route path="*" element={<NotFoundPage />} />
       </Route>
+      <Route path="login" element={<LoginPage />} />
+      <Route path="forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="register" element={<RegisterPage />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 };

@@ -12,6 +12,8 @@ describe('docs API', () => {
     const body = context.body as OpenApiDocument;
 
     expect(body.openapi).toBe('3.1.0');
+    expect(body.paths['/api/setup/defaults']).toBeDefined();
+    expect(body.paths['/api/setup/status']).toBeUndefined();
     expect(body.paths['/api/auth/login']).toBeDefined();
     expect(body.paths['/api/auth/refresh']).toBeDefined();
     expect(body.paths['/api/auth/register/email-verification']).toBeDefined();

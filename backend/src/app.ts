@@ -10,12 +10,16 @@ import { rateLimitMiddleware, type RateLimitOptions } from './middleware/rate-li
 import { requestIdMiddleware } from './middleware/request-id';
 import { requestLogMiddleware } from './middleware/request-log';
 import { securityHeadersMiddleware } from './middleware/security-headers';
+import { setupRedirectMiddleware } from './middleware/setup-redirect';
 import { type StaticFilesConfig, staticFilesMiddleware } from './middleware/static-files';
 
 interface AppConfig {
   corsOrigins: string[];
   globalRateLimit?: RateLimitOptions;
   requestLogEnabled: boolean;
+  setupRedirect?: {
+    mode: 'locked' | 'setup';
+  };
   staticFiles?: StaticFilesConfig;
   trustProxy: boolean;
 }
@@ -42,6 +46,14 @@ export function createApp(modules: BackendModule[], config: AppConfig = defaultA
       origin: (ctx) => getCorsOrigin(ctx.get('origin'), config.corsOrigins),
     }),
   );
+  if (config.setupRedirect) {
+    app.use(
+      setupRedirectMiddleware({
+        allowedOrigins: config.corsOrigins,
+        mode: config.setupRedirect.mode,
+      }),
+    );
+  }
   if (config.globalRateLimit) {
     app.use(rateLimitMiddleware(config.globalRateLimit));
   }

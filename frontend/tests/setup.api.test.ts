@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   completeSetup,
   fetchSetupDefaults,
-  fetchSetupStatus,
   testCacheConnection,
   testDatabaseConnection,
   testEmailConnection,
@@ -19,18 +18,17 @@ describe('setup API client', () => {
     vi.unstubAllGlobals();
   });
 
-  it('calls setup status and defaults endpoints', async () => {
+  it('calls setup defaults endpoint', async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
-      const data = url.endsWith('/api/setup/status')
-        ? { envFilePath: '/app/backend/.env', locked: false, required: true }
-        : { environment: { NODE_ENV: 'development' } };
+
+      expect(url).toBe('http://localhost:3000/api/setup/defaults');
 
       return new Response(
         JSON.stringify({
           code: 200,
           error: null,
-          data,
+          data: { environment: { NODE_ENV: 'development' } },
         }),
         { status: 200 },
       );
@@ -38,18 +36,16 @@ describe('setup API client', () => {
 
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(fetchSetupStatus()).resolves.toMatchObject({ required: true });
     await expect(fetchSetupDefaults()).resolves.toMatchObject({ environment: { NODE_ENV: 'development' } });
-    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
-      'http://localhost:3000/api/setup/status',
-      'http://localhost:3000/api/setup/defaults',
-    ]);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('posts setup validation and completion payloads', async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
-      const data = url.endsWith('/api/setup/validate') ? { valid: true } : { completed: true, restartRequired: true };
+      const data = url.endsWith('/api/setup/validate')
+        ? { valid: true }
+        : { administratorCreated: true, completed: true, restartRequired: true };
 
       return new Response(
         JSON.stringify({
@@ -75,7 +71,11 @@ describe('setup API client', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(validateSetup(payload)).resolves.toEqual({ valid: true });
-    await expect(completeSetup(payload)).resolves.toEqual({ completed: true, restartRequired: true });
+    await expect(completeSetup(payload)).resolves.toEqual({
+      administratorCreated: true,
+      completed: true,
+      restartRequired: true,
+    });
 
     const [, validateInit] = fetchMock.mock.calls[0]!;
     const [, completeInit] = fetchMock.mock.calls[1]!;
@@ -107,7 +107,7 @@ describe('setup API client', () => {
 
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(testDatabaseConnection(environment)).resolves.toEqual({ connected: true });
+    await expect(testDatabaseConnection(environment)).resolves.toEqual({ connected: true, hasExistingUsers: false });
     await expect(testCacheConnection(environment)).resolves.toEqual({ connected: true, store: 'redis' });
     await expect(testFileStorageConnection(environment)).resolves.toEqual({ connected: true, driver: 'oss' });
     await expect(testLoggingConnection(environment)).resolves.toEqual({ connected: true, target: 'sls' });
@@ -152,5 +152,5 @@ function getConnectivityTestResponse(url: string) {
     return { valid: true };
   }
 
-  return { connected: true };
+  return { connected: true, hasExistingUsers: false };
 }

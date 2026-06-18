@@ -116,7 +116,7 @@ const administratorSchema = z
   });
 
 const setupCompleteSchema = z.object({
-  administrator: administratorSchema,
+  administrator: administratorSchema.optional(),
   environment: setupEnvSchema,
 });
 const setupEnvironmentInputSchema = z.object({
@@ -127,36 +127,12 @@ const setupCacheStoreSchema = z.enum(['memory', 'redis']);
 const setupFileStorageDriverSchema = z.enum(['local', 'oss']);
 
 export type SetupEnvironment = z.infer<typeof setupEnvSchema>;
-export type SetupCompleteInput = z.infer<typeof setupCompleteSchema>;
-
-interface SetupStatus {
-  envFilePath: string;
-  locked: boolean;
-  required: boolean;
-}
+type SetupCompleteInput = z.infer<typeof setupCompleteSchema>;
 
 let setupCompletionInProgress = false;
 
 export class SetupService {
   constructor(private readonly mode: SetupMode) {}
-
-  getStatus(): SetupStatus {
-    if (this.mode === 'locked') {
-      return {
-        envFilePath: getEnvFilePath(),
-        locked: true,
-        required: false,
-      };
-    }
-
-    const envExists = hasEnvFile();
-
-    return {
-      envFilePath: getEnvFilePath(),
-      locked: envExists,
-      required: !envExists,
-    };
-  }
 
   getDefaults() {
     this.assertSetupAvailable();
@@ -201,9 +177,11 @@ export class SetupService {
 
     try {
       await sequelize.authenticate();
+      const hasExistingUsers = await hasAvailableUsers(sequelize);
 
       return {
         connected: true,
+        hasExistingUsers,
       } as const;
     } catch (error) {
       throw new AppError('SETUP_DATABASE_CONNECTION_FAILED', getConnectionErrorMessage(error), 400);
@@ -398,10 +376,11 @@ export class SetupService {
       const parsed = setupCompleteSchema.parse(input);
       const envSource = assertValidEnvironment(parsed.environment);
 
-      await provisionDatabase(envSource, parsed.administrator);
+      const administratorCreated = await provisionDatabase(envSource, parsed.administrator);
       await writeEnvironmentFile(envSource);
 
       return {
+        administratorCreated,
         completed: true,
         restartRequired: true,
       } as const;
@@ -417,7 +396,10 @@ export class SetupService {
   }
 }
 
-async function provisionDatabase(envSource: NodeJS.ProcessEnv, administrator: SetupCompleteInput['administrator']) {
+async function provisionDatabase(
+  envSource: NodeJS.ProcessEnv,
+  administratorInput: SetupCompleteInput['administrator'],
+) {
   const env = loadEnv(envSource);
   const sequelize = createSequelize(env.database);
   const models = {
@@ -438,9 +420,10 @@ async function provisionDatabase(envSource: NodeJS.ProcessEnv, administrator: Se
     });
 
     if (existingUsers > 0) {
-      throw new AppError('SETUP_USERS_EXIST', 'Setup cannot create an administrator when users already exist.', 409);
+      return false;
     }
 
+    const administrator = administratorSchema.parse(administratorInput);
     const credentials = await hashPassword(administrator.password);
     const user = await models.user.create({
       email: administrator.email,
@@ -449,9 +432,47 @@ async function provisionDatabase(envSource: NodeJS.ProcessEnv, administrator: Se
     });
 
     await accessControl.assignSystemRoleToUser(user.id, SystemRole.Root);
+    return true;
   } finally {
     await sequelize.close();
   }
+}
+
+async function hasAvailableUsers(sequelize: ReturnType<typeof createSequelize>) {
+  const tableNames = await sequelize.getQueryInterface().showAllTables();
+  const usersTableExists = tableNames.some((tableName) => normalizeTableName(tableName) === 'users');
+
+  if (!usersTableExists) {
+    return false;
+  }
+
+  const userModel = initUserModel(sequelize);
+
+  return (
+    (await userModel.count({
+      where: {
+        available: true,
+      },
+    })) > 0
+  );
+}
+
+function normalizeTableName(tableName: unknown) {
+  if (typeof tableName === 'string') {
+    return tableName.toLowerCase();
+  }
+
+  if (tableName && typeof tableName === 'object') {
+    if ('tableName' in tableName && typeof tableName.tableName === 'string') {
+      return tableName.tableName.toLowerCase();
+    }
+
+    if ('name' in tableName && typeof tableName.name === 'string') {
+      return tableName.name.toLowerCase();
+    }
+  }
+
+  return '';
 }
 
 function assertValidEnvironment(environment: SetupEnvironment) {

@@ -6,6 +6,7 @@ import { type z } from 'zod';
 
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { useFormState } from '@/hooks/useFormState';
+import { ApiError } from '@/lib/api';
 import {
   bindSsoAccount,
   completeSsoLogin,
@@ -73,16 +74,21 @@ const Index = () => {
           setSsoConfig(config);
         }
       })
-      .catch(() => {
-        if (active) {
-          setSsoConfig({ enabled: false });
+      .catch((requestError: unknown) => {
+        if (!active) {
+          return;
+        }
+
+        setSsoConfig({ enabled: false });
+        if (requestError instanceof ApiError && requestError.code === 'SETUP_RESTART_REQUIRED') {
+          setError(requestError.message);
         }
       });
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [setError]);
 
   useEffect(() => {
     const params = getSsoCallbackParams(location.hash);

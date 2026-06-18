@@ -81,6 +81,7 @@ export async function bootstrap() {
       skip: shouldSkipGlobalRateLimit,
     },
     requestLogEnabled: env.requestLogEnabled,
+    setupRedirect: { mode: 'locked' },
     ...(env.localFiles ? { staticFiles: env.localFiles } : {}),
     trustProxy: env.trustProxy,
   });

@@ -13,11 +13,6 @@ export function createSetupModule(service: SetupService): BackendModule {
     routes: [
       {
         method: 'get',
-        path: '/status',
-        handlers: [controller.status],
-      },
-      {
-        method: 'get',
         path: '/defaults',
         handlers: [controller.defaults],
       },
@@ -80,10 +75,6 @@ export function createSetupOnlyModule() {
 
 class SetupController {
   constructor(private readonly service: SetupService) {}
-
-  status: Middleware = async (ctx) => {
-    ctx.body = ok(this.service.getStatus());
-  };
 
   defaults: Middleware = async (ctx) => {
     ctx.body = ok(this.service.getDefaults());

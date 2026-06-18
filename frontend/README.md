@@ -36,16 +36,18 @@ frontend session metadata.
 
 ## Backend Integration
 
-On startup, the frontend calls `/api/setup/status`. If setup is required, all
-routes redirect to `/setup`; after setup is locked, direct visits to `/setup`
-redirect to `/login`. The setup page writes the backend `.env` file, applies
-migrations, and creates the root administrator through `/api/setup/*`.
+Setup routing is controlled by the backend. While setup is required, browser
+navigation redirects to `/setup`, and non-setup API requests return
+`SETUP_REQUIRED`. After setup writes the backend `.env`, non-setup API requests
+return `SETUP_RESTART_REQUIRED` until restart, and direct `/setup` visits return
+to `/login` after setup is locked.
 
-Setup steps are completed in order. Database, Redis cache, OSS storage, SLS
-logging, SMTP email, and SSO must pass their connection tests when enabled.
-Configuration without a network dependency is validated for required values and
-URL or email format. CORS origins default to the current frontend origin. Restart
-the backend after setup completes.
+The setup page applies migrations through `/api/setup/*`. Database, Redis
+cache, OSS storage, SLS logging, SMTP email, and SSO must pass connection tests
+when enabled. The database step detects available users; setup creates the root
+administrator only when none exist. Existing users are retained. Configuration
+without a network dependency is validated for required values and URL or email
+format. CORS origins default to the current frontend origin.
 
 Access and refresh tokens are stored by the backend in HttpOnly cookies and are
 not stored from API response bodies. localStorage keeps only user and

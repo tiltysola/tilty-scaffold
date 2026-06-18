@@ -2,12 +2,6 @@ import { apiRequest } from './api';
 
 export type SetupEnvironment = Record<string, string>;
 
-export interface SetupStatus {
-  envFilePath: string;
-  locked: boolean;
-  required: boolean;
-}
-
 export interface SetupAdministrator {
   confirmPassword: string;
   email: string;
@@ -16,12 +10,8 @@ export interface SetupAdministrator {
 }
 
 export interface SetupCompleteInput {
-  administrator: SetupAdministrator;
+  administrator?: SetupAdministrator;
   environment: SetupEnvironment;
-}
-
-export async function fetchSetupStatus() {
-  return apiRequest<SetupStatus>('/api/setup/status');
 }
 
 export async function fetchSetupDefaults() {
@@ -43,7 +33,7 @@ export async function validateSetupEnvironment(environment: SetupEnvironment) {
 }
 
 export async function testDatabaseConnection(environment: SetupEnvironment) {
-  return apiRequest<{ connected: true }>('/api/setup/test/database', {
+  return apiRequest<{ connected: true; hasExistingUsers: boolean }>('/api/setup/test/database', {
     body: { environment },
     method: 'POST',
   });
@@ -85,7 +75,7 @@ export async function testSsoConnection(environment: SetupEnvironment) {
 }
 
 export async function completeSetup(input: SetupCompleteInput) {
-  return apiRequest<{ completed: true; restartRequired: true }>('/api/setup/complete', {
+  return apiRequest<{ administratorCreated: boolean; completed: true; restartRequired: true }>('/api/setup/complete', {
     body: input,
     method: 'POST',
   });

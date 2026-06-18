@@ -7,11 +7,13 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-import { CheckCircle2Icon, KeyRoundIcon, type LucideIcon, RefreshCwIcon, SaveIcon } from 'lucide-react';
+import { CheckCircle2Icon, InfoIcon, KeyRoundIcon, type LucideIcon, RefreshCwIcon, SaveIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { ApiError } from '@/lib/api';
 import { appConfig } from '@/lib/config';
 import {
   completeSetup,
@@ -58,11 +60,13 @@ import {
 const Index = () => {
   const [activeStep, setActiveStep] = useState(setupSteps[0]?.id ?? 'runtime');
   const [administrator, setAdministrator] = useState<SetupAdministrator>(administratorDefaults);
-  const [completed, setCompleted] = useState(false);
+  const [completion, setCompletion] = useState<{ administratorCreated: boolean } | null>(null);
+  const [databaseHasExistingUsers, setDatabaseHasExistingUsers] = useState<boolean | null>(null);
   const [environment, setEnvironment] = useState<SetupEnvironment | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [maxUnlockedStepIndex, setMaxUnlockedStepIndex] = useState(0);
   const lastErrorToastRef = useRef<string | null>(null);
+  const navigate = useNavigate();
   const action = useAsyncAction();
   const activeStepDefinition = useMemo(
     () => setupSteps.find((step) => step.id === activeStep) ?? setupSteps[0],
@@ -72,11 +76,14 @@ const Index = () => {
     setupSteps.findIndex((step) => step.id === activeStep),
     0,
   );
-  const primaryActionLabel = environment ? getPrimaryActionLabel(activeStep, environment) : 'Continue';
+  const hasExistingUsers = databaseHasExistingUsers === true;
+  const primaryActionLabel = environment
+    ? getPrimaryActionLabel(activeStep, environment, hasExistingUsers)
+    : 'Continue';
   const setupInput = environment
     ? {
-        administrator,
         environment,
+        ...(hasExistingUsers ? {} : { administrator }),
       }
     : null;
 
@@ -94,8 +101,13 @@ const Index = () => {
           });
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (active) {
+          if (error instanceof ApiError && error.code === 'SETUP_LOCKED') {
+            navigate('/login', { replace: true });
+            return;
+          }
+
           setLoadError('Unable to load setup defaults.');
         }
       });
@@ -103,7 +115,7 @@ const Index = () => {
     return () => {
       active = false;
     };
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     if (!action.error) {
@@ -122,6 +134,9 @@ const Index = () => {
       const value = event.target.value;
 
       setEnvironment((current) => (current ? { ...current, [key]: value } : current));
+      if (isDatabaseEnvironmentField(key)) {
+        setDatabaseHasExistingUsers(null);
+      }
       resetProgressFromCurrentStep();
     };
 
@@ -152,7 +167,7 @@ const Index = () => {
       const result = await action.run(() => completeSetup(setupInput), 'Unable to complete setup.');
 
       if (result) {
-        setCompleted(true);
+        setCompletion(result);
       }
 
       return;
@@ -168,7 +183,12 @@ const Index = () => {
         return;
       }
 
-      goToNextStep('Database connection verified.');
+      setDatabaseHasExistingUsers(result.hasExistingUsers);
+      goToNextStep(
+        result.hasExistingUsers
+          ? 'Database connection verified. Existing users will be retained.'
+          : 'Database connection verified.',
+      );
       return;
     }
 
@@ -242,7 +262,7 @@ const Index = () => {
       return;
     }
 
-    if (activeStep === 'administrator') {
+    if (activeStep === 'administrator' && !hasExistingUsers) {
       const administratorError = getAdministratorValidationError(administrator);
 
       if (administratorError) {
@@ -299,7 +319,7 @@ const Index = () => {
     setActiveStep(nextStep.id);
   };
 
-  if (completed) {
+  if (completion) {
     return (
       <main className="min-h-svh bg-background px-4 py-10 text-foreground sm:px-6">
         <div className="mx-auto flex min-h-[calc(100svh-5rem)] max-w-2xl items-center">
@@ -309,9 +329,10 @@ const Index = () => {
               <div className="grid gap-2">
                 <h1 className="text-xl font-semibold">Setup Complete</h1>
                 <p className="text-sm text-muted-foreground">
-                  The backend environment file has been written, database migrations have been applied, and the root
-                  administrator account has been created. Restart the backend process to apply the generated
-                  configuration.
+                  {completion.administratorCreated
+                    ? 'The backend environment file has been written, database migrations have been applied, and the root administrator account has been created.'
+                    : 'The backend environment file has been written, database migrations have been applied, and existing users have been retained.'}{' '}
+                  Restart the backend process to apply the generated configuration.
                 </p>
               </div>
             </div>
@@ -362,12 +383,19 @@ const Index = () => {
             <div className="min-w-0 flex-1 px-4 py-5 sm:px-6">
               {activeStep === 'administrator' ? (
                 <AdministratorStep
-                  administrator={administrator}
                   disabled={action.pending}
+                  hasExistingUsers={hasExistingUsers}
+                  administrator={administrator}
                   onChange={setAdministratorField}
                 />
               ) : null}
-              {activeStep === 'review' ? <ReviewStep administrator={administrator} environment={environment} /> : null}
+              {activeStep === 'review' ? (
+                <ReviewStep
+                  administrator={administrator}
+                  environment={environment}
+                  hasExistingUsers={hasExistingUsers}
+                />
+              ) : null}
               {activeStepDefinition?.fields ? (
                 <EnvironmentStep
                   disabled={action.pending}
@@ -616,12 +644,33 @@ function ActiveStepIcon({ icon: Icon }: { icon: LucideIcon }) {
 function AdministratorStep({
   administrator,
   disabled,
+  hasExistingUsers,
   onChange,
 }: {
   administrator: SetupAdministrator;
   disabled: boolean;
+  hasExistingUsers: boolean;
   onChange: (field: keyof SetupAdministrator) => (event: ChangeEvent<HTMLInputElement>) => void;
 }) {
+  if (hasExistingUsers) {
+    return (
+      <div className="grid max-w-3xl gap-5">
+        <section className="rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-950">
+          <div className="flex items-start gap-3">
+            <InfoIcon className="mt-0.5 size-5 shrink-0" />
+            <div className="grid gap-1">
+              <h3 className="text-sm font-semibold">Existing Users Detected</h3>
+              <p className="text-sm leading-6">
+                The selected database already contains available users. Setup will retain those users and skip
+                administrator creation.
+              </p>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="grid max-w-5xl gap-5">
       <AdministratorField
@@ -713,9 +762,11 @@ function AdministratorField({
 function ReviewStep({
   administrator,
   environment,
+  hasExistingUsers,
 }: {
   administrator: SetupAdministrator;
   environment: SetupEnvironment;
+  hasExistingUsers: boolean;
 }) {
   const reviewItems = [
     ['Environment', environment.NODE_ENV],
@@ -725,7 +776,7 @@ function ReviewStep({
     ['File Storage', environment.FILE_STORAGE_DRIVER],
     ['Email', environment.EMAIL_VERIFICATION_SERVICE],
     ['SSO', environment.SSO_ENABLED],
-    ['Administrator', administrator.email || 'Not configured'],
+    ['Administrator', hasExistingUsers ? 'Existing users retained' : administrator.email || 'Not configured'],
   ];
   const configuredSecrets = Object.entries(environment).filter(([key, value]) => isSensitiveKey(key) && value.trim());
 
@@ -761,9 +812,13 @@ function ReviewStep({
   );
 }
 
-function getPrimaryActionLabel(stepId: string, environment: SetupEnvironment) {
+function getPrimaryActionLabel(stepId: string, environment: SetupEnvironment, hasExistingUsers: boolean) {
   if (stepId === 'database') {
     return 'Verify Database and Continue';
+  }
+
+  if (stepId === 'administrator' && hasExistingUsers) {
+    return 'Continue';
   }
 
   if (stepId === 'cache' && environment.CACHE_STORE === 'redis') {
@@ -826,6 +881,10 @@ function isSensitiveKey(key: string) {
     key === 'DATABASE_URL' ||
     key === 'CACHE_REDIS_URL'
   );
+}
+
+function isDatabaseEnvironmentField(key: string) {
+  return key.startsWith('DATABASE_');
 }
 
 function generateSecret() {

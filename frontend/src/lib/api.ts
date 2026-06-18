@@ -33,6 +33,7 @@ export interface ApiRequestOptions extends Omit<RequestInit, 'body' | 'headers'>
 }
 
 const defaultRequestTimeoutMs = 15_000;
+const setupPath = '/setup';
 
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}) {
   const { body, headers: inputHeaders, signal: inputSignal, ...requestOptions } = options;
@@ -62,6 +63,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
 
   if (!response.ok) {
     if (isApiFailure(payload)) {
+      handleSetupRequiredFailure(payload);
       throw new ApiError(response.status, payload.error, payload.message, payload.details);
     }
 
@@ -73,6 +75,42 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   }
 
   return payload.data;
+}
+
+function handleSetupRequiredFailure(payload: ApiFailure) {
+  if (payload.error !== 'SETUP_REQUIRED' || typeof window === 'undefined') {
+    return;
+  }
+
+  const navigationTarget = resolveSetupNavigationTarget();
+
+  if (navigationTarget) {
+    window.location.replace(navigationTarget);
+  }
+}
+
+function parseUrlOrNull(value: string) {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+function resolveSetupNavigationTarget() {
+  const currentUrl = parseUrlOrNull(window.location.href);
+
+  if (!currentUrl) {
+    return setupPath;
+  }
+
+  const currentPath = `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
+
+  if (currentPath === setupPath) {
+    return null;
+  }
+
+  return setupPath;
 }
 
 function createRequestBody(body: unknown) {
