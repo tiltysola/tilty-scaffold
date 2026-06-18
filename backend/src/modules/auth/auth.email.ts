@@ -257,6 +257,28 @@ export class EmailVerificationService {
 export class SmtpEmailSender implements EmailSender {
   constructor(private readonly config: SmtpEmailSenderConfig) {}
 
+  async check() {
+    const client = await SmtpClient.connect(this.config);
+
+    try {
+      await client.expect([220]);
+      await client.ehlo();
+
+      if (!this.config.secure && this.config.startTls) {
+        await client.startTls();
+        await client.ehlo();
+      }
+
+      if (this.config.username && this.config.password) {
+        await client.authPlain(this.config.username, this.config.password);
+      }
+
+      await client.quit();
+    } finally {
+      client.close();
+    }
+  }
+
   async send(input: SendEmailInput) {
     const client = await SmtpClient.connect(this.config);
 

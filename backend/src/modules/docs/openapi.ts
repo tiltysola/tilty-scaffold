@@ -1,3 +1,79 @@
+const setupEnvironmentKeys = [
+  'AUTH_ACCESS_TOKEN_COOKIE_NAME',
+  'AUTH_ACCESS_TOKEN_TTL_SECONDS',
+  'AUTH_COOKIE_SAME_SITE',
+  'AUTH_COOKIE_SECURE',
+  'AUTH_RATE_LIMIT_MAX',
+  'AUTH_RATE_LIMIT_WINDOW_MS',
+  'AUTH_REFRESH_TOKEN_COOKIE_NAME',
+  'AUTH_REFRESH_TOKEN_TTL_SECONDS',
+  'AUTH_TOKEN_SECRET',
+  'CACHE_REDIS_REQUEST_TIMEOUT_MS',
+  'CACHE_REDIS_URL',
+  'CACHE_STORE',
+  'CORS_ORIGINS',
+  'DATABASE_CONNECT_TIMEOUT_MS',
+  'DATABASE_DIALECT',
+  'DATABASE_POOL_ACQUIRE_MS',
+  'DATABASE_POOL_IDLE_MS',
+  'DATABASE_POOL_MAX',
+  'DATABASE_POOL_MIN',
+  'DATABASE_SSL',
+  'DATABASE_STORAGE',
+  'DATABASE_SYNC',
+  'DATABASE_URL',
+  'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
+  'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS',
+  'EMAIL_VERIFICATION_SERVICE',
+  'FILE_LOCAL_ROOT',
+  'FILE_OSS_ACCESS_KEY_ID',
+  'FILE_OSS_ACCESS_KEY_SECRET',
+  'FILE_OSS_BUCKET',
+  'FILE_OSS_ENDPOINT',
+  'FILE_OSS_PUBLIC_BASE_URL',
+  'FILE_OSS_REGION',
+  'FILE_PUBLIC_BASE_URL',
+  'FILE_STORAGE_DRIVER',
+  'FILE_UPLOAD_MAX_BYTES',
+  'GLOBAL_RATE_LIMIT_MAX',
+  'GLOBAL_RATE_LIMIT_WINDOW_MS',
+  'LOG_LOCAL_PATH',
+  'LOG_PENDING_WRITE_MAX',
+  'LOG_REQUEST_ENABLED',
+  'LOG_SLS_ACCESS_KEY_ID',
+  'LOG_SLS_ACCESS_KEY_SECRET',
+  'LOG_SLS_ENDPOINT',
+  'LOG_SLS_LOGSTORE',
+  'LOG_SLS_PROJECT',
+  'LOG_SLS_SOURCE',
+  'LOG_SLS_TOPIC',
+  'LOG_TARGETS',
+  'LOG_WRITE_TIMEOUT_MS',
+  'MULTI_INSTANCE_ENABLED',
+  'NODE_ENV',
+  'SCHEDULER_ENABLED',
+  'SCHEDULER_LOCK_TTL_MS',
+  'SERVER_HOST',
+  'SERVER_PORT',
+  'SMTP_FROM',
+  'SMTP_HOST',
+  'SMTP_PASSWORD',
+  'SMTP_PORT',
+  'SMTP_REQUEST_TIMEOUT_MS',
+  'SMTP_SECURE',
+  'SMTP_STARTTLS',
+  'SMTP_USERNAME',
+  'SSO_CLIENT_ID',
+  'SSO_CLIENT_SECRET',
+  'SSO_ENABLED',
+  'SSO_FRONTEND_CALLBACK_URL',
+  'SSO_ISSUER_URL',
+  'SSO_REDIRECT_URI',
+  'SSO_REQUEST_TIMEOUT_MS',
+  'SSO_SCOPES',
+  'TRUST_PROXY',
+] as const;
+
 export const openApiDocument = {
   openapi: '3.1.0',
   info: {
@@ -11,6 +87,10 @@ export const openApiDocument = {
     },
   ],
   tags: [
+    {
+      name: 'Setup',
+      description: 'Setup Wizard endpoints',
+    },
     {
       name: 'Auth',
       description: 'Authentication endpoints',
@@ -29,6 +109,465 @@ export const openApiDocument = {
     },
   ],
   paths: {
+    '/api/setup/status': {
+      get: {
+        tags: ['Setup'],
+        summary: 'Return setup lock status',
+        responses: {
+          '200': {
+            description: 'Setup status',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/SetupStatus',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/setup/defaults': {
+      get: {
+        tags: ['Setup'],
+        summary: 'Return setup defaults',
+        responses: {
+          '200': {
+            description: 'Setup defaults',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/SetupDefaults',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '403': {
+            $ref: '#/components/responses/SetupLocked',
+          },
+        },
+      },
+    },
+    '/api/setup/validate': {
+      post: {
+        tags: ['Setup'],
+        summary: 'Validate setup input',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SetupCompleteRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Setup input is valid',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          type: 'object',
+                          required: ['valid'],
+                          properties: {
+                            valid: {
+                              type: 'boolean',
+                              const: true,
+                            },
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '403': {
+            $ref: '#/components/responses/SetupLocked',
+          },
+        },
+      },
+    },
+    '/api/setup/validate/environment': {
+      post: {
+        tags: ['Setup'],
+        summary: 'Validate setup environment fields',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SetupEnvironmentRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Setup environment is valid',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          type: 'object',
+                          required: ['valid'],
+                          properties: {
+                            valid: {
+                              type: 'boolean',
+                              const: true,
+                            },
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '403': {
+            $ref: '#/components/responses/SetupLocked',
+          },
+        },
+      },
+    },
+    '/api/setup/test/database': {
+      post: {
+        tags: ['Setup'],
+        summary: 'Test setup database connectivity',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SetupEnvironmentRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Database connection succeeded',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SetupConnectionTestResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Database connection failed',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiFailure',
+                },
+              },
+            },
+          },
+          '403': {
+            $ref: '#/components/responses/SetupLocked',
+          },
+        },
+      },
+    },
+    '/api/setup/test/cache': {
+      post: {
+        tags: ['Setup'],
+        summary: 'Test setup cache connectivity',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SetupEnvironmentRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Cache connection succeeded',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SetupCacheConnectionTestResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Cache connection failed',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiFailure',
+                },
+              },
+            },
+          },
+          '403': {
+            $ref: '#/components/responses/SetupLocked',
+          },
+        },
+      },
+    },
+    '/api/setup/test/file-storage': {
+      post: {
+        tags: ['Setup'],
+        summary: 'Test setup file storage connectivity',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SetupEnvironmentRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'File storage test succeeded',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SetupFileStorageConnectionTestResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'File storage test failed',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiFailure',
+                },
+              },
+            },
+          },
+          '403': {
+            $ref: '#/components/responses/SetupLocked',
+          },
+        },
+      },
+    },
+    '/api/setup/test/logging': {
+      post: {
+        tags: ['Setup'],
+        summary: 'Test setup logging connectivity',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SetupEnvironmentRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Logging test succeeded',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SetupLoggingConnectionTestResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Logging test failed',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiFailure',
+                },
+              },
+            },
+          },
+          '403': {
+            $ref: '#/components/responses/SetupLocked',
+          },
+        },
+      },
+    },
+    '/api/setup/test/email': {
+      post: {
+        tags: ['Setup'],
+        summary: 'Test setup email connectivity',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SetupEnvironmentRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Email test succeeded',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SetupEmailConnectionTestResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Email test failed',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiFailure',
+                },
+              },
+            },
+          },
+          '403': {
+            $ref: '#/components/responses/SetupLocked',
+          },
+        },
+      },
+    },
+    '/api/setup/test/sso': {
+      post: {
+        tags: ['Setup'],
+        summary: 'Test setup SSO discovery',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SetupEnvironmentRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'SSO test succeeded',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SetupSsoConnectionTestResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'SSO test failed',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiFailure',
+                },
+              },
+            },
+          },
+          '403': {
+            $ref: '#/components/responses/SetupLocked',
+          },
+        },
+      },
+    },
+    '/api/setup/complete': {
+      post: {
+        tags: ['Setup'],
+        summary: 'Complete setup',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SetupCompleteRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Setup completed',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SetupCompleteResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '403': {
+            $ref: '#/components/responses/SetupLocked',
+          },
+          '409': {
+            description: 'Setup is already running or users already exist',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiFailure',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     '/api/auth/config': {
       get: {
         tags: ['Auth'],
@@ -975,6 +1514,16 @@ export const openApiDocument = {
           },
         },
       },
+      SetupLocked: {
+        description: 'Setup is locked because the backend environment file already exists',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
       RateLimited: {
         description: 'Request rate limit exceeded',
         content: {
@@ -1029,6 +1578,265 @@ export const openApiDocument = {
           },
           data: {},
         },
+      },
+      SetupStatus: {
+        type: 'object',
+        required: ['envFilePath', 'locked', 'required'],
+        properties: {
+          envFilePath: {
+            type: 'string',
+          },
+          locked: {
+            type: 'boolean',
+          },
+          required: {
+            type: 'boolean',
+          },
+        },
+      },
+      SetupEnvironment: {
+        type: 'object',
+        description:
+          'Backend environment variables accepted by the Setup Wizard. All values are submitted as strings; selected providers determine which values must be non-empty.',
+        required: setupEnvironmentKeys,
+        propertyNames: {
+          enum: setupEnvironmentKeys,
+        },
+        additionalProperties: {
+          type: 'string',
+        },
+      },
+      SetupDefaults: {
+        type: 'object',
+        required: ['environment'],
+        properties: {
+          environment: {
+            $ref: '#/components/schemas/SetupEnvironment',
+          },
+        },
+      },
+      SetupAdministrator: {
+        type: 'object',
+        required: ['username', 'email', 'password', 'confirmPassword'],
+        properties: {
+          username: {
+            type: 'string',
+            minLength: 2,
+            maxLength: 32,
+          },
+          email: {
+            type: 'string',
+            format: 'email',
+          },
+          password: {
+            type: 'string',
+            minLength: 8,
+            maxLength: 128,
+          },
+          confirmPassword: {
+            type: 'string',
+            minLength: 8,
+            maxLength: 128,
+          },
+        },
+      },
+      SetupCompleteRequest: {
+        type: 'object',
+        required: ['administrator', 'environment'],
+        properties: {
+          administrator: {
+            $ref: '#/components/schemas/SetupAdministrator',
+          },
+          environment: {
+            $ref: '#/components/schemas/SetupEnvironment',
+          },
+        },
+      },
+      SetupEnvironmentRequest: {
+        type: 'object',
+        required: ['environment'],
+        properties: {
+          environment: {
+            $ref: '#/components/schemas/SetupEnvironment',
+          },
+        },
+      },
+      SetupConnectionTestResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['connected'],
+                properties: {
+                  connected: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      SetupCacheConnectionTestResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['connected', 'store'],
+                properties: {
+                  connected: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                  store: {
+                    type: 'string',
+                    enum: ['memory', 'redis'],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      SetupFileStorageConnectionTestResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['connected', 'driver'],
+                properties: {
+                  connected: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                  driver: {
+                    type: 'string',
+                    enum: ['local', 'oss'],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      SetupLoggingConnectionTestResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['connected', 'target'],
+                properties: {
+                  connected: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                  target: {
+                    type: 'string',
+                    enum: ['console', 'local', 'sls'],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      SetupEmailConnectionTestResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['connected', 'service'],
+                properties: {
+                  connected: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                  service: {
+                    type: 'string',
+                    enum: ['off', 'smtp'],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      SetupSsoConnectionTestResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['connected', 'enabled'],
+                properties: {
+                  connected: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                  enabled: {
+                    type: 'boolean',
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      SetupCompleteResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['completed', 'restartRequired'],
+                properties: {
+                  completed: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                  restartRequired: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                },
+              },
+            },
+          },
+        ],
       },
       AuthSession: {
         type: 'object',

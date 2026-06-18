@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createSequelize } from '../src/infra/database';
-import { createMigrator } from '../src/infra/migrator';
+import { assertDatabaseMigrationsApplied, createMigrator } from '../src/infra/migrator';
 import { initModels } from '../src/modules';
 import { AccessControlService } from '../src/modules/access-control/access-control.service';
 
@@ -16,6 +16,10 @@ describe('database migrations', () => {
     const queryInterface = sequelize.getQueryInterface();
 
     try {
+      await expect(assertDatabaseMigrationsApplied(sequelize)).rejects.toThrow(
+        'Run `npm run db:migrate` from backend/ before starting the backend.',
+      );
+
       const applied = await migrator.up();
       const users = await queryInterface.describeTable('users');
       const permissions = await queryInterface.describeTable('permissions');
@@ -28,6 +32,7 @@ describe('database migrations', () => {
       const userRoleIndexes = (await queryInterface.showIndex('user_roles')) as unknown as DatabaseIndex[];
 
       expect(applied.map((migration) => migration.name)).toEqual(['0001-initial']);
+      await expect(assertDatabaseMigrationsApplied(sequelize)).resolves.toBeUndefined();
       expect(users.avatarStorageKey).toBeDefined();
       expect(users.avatarUrl).toBeDefined();
       expect(users.email).toBeDefined();

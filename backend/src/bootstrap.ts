@@ -7,6 +7,7 @@ import { collectJobs, startScheduler, stopScheduler } from './core/scheduler';
 import { createCacheStore } from './infra/cache';
 import { connectDatabase, createSequelize } from './infra/database';
 import { createFileStorage } from './infra/file-storage';
+import { assertDatabaseMigrationsApplied } from './infra/migrator';
 import { createModules, createServices, initModels } from './modules';
 
 export async function bootstrap() {
@@ -53,6 +54,9 @@ export async function bootstrap() {
   });
 
   await connectDatabase(sequelize, env.databaseSync);
+  if (env.databaseSync === 'off') {
+    await assertDatabaseMigrationsApplied(sequelize);
+  }
   await services.accessControl.syncSystemAccessControl();
 
   const scheduler = env.scheduleEnabled

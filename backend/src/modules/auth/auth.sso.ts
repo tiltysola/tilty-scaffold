@@ -547,6 +547,14 @@ export class SsoService {
   }
 }
 
+export async function testSsoDiscovery(config: SsoConfig) {
+  await fetchDiscovery(config);
+
+  return {
+    connected: true,
+  } as const;
+}
+
 function setCallbackFragment(url: URL, values: Record<string, string>) {
   const params = new URLSearchParams(values);
 

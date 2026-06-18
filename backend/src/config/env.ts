@@ -18,7 +18,6 @@ const cookieNameSchema = z
   .min(1)
   .max(128)
   .regex(/^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$/, 'Must be a valid cookie name');
-const envFilePath = resolve(process.cwd(), '.env');
 const developmentAuthTokenSecret = 'development-auth-token-secret-change-before-production';
 const defaultCorsOrigins = 'http://localhost:8011';
 const defaultSsoScopes = 'openid profile email';
@@ -554,8 +553,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
 }
 
 export function getEnvValidationMessage(source: NodeJS.ProcessEnv = process.env) {
+  const envFilePath = getEnvFilePath();
+
   if (source === process.env && source.NODE_ENV !== 'production' && !existsSync(envFilePath)) {
-    return `Missing environment file: ${envFilePath}\nCopy .env.example to .env before starting the backend.`;
+    return `Missing environment file: ${envFilePath}\nComplete setup before starting the backend.`;
   }
 
   const parsed = envSchema.safeParse(source);
@@ -572,6 +573,14 @@ export function getEnvValidationMessage(source: NodeJS.ProcessEnv = process.env)
   }
 
   return null;
+}
+
+export function getEnvFilePath() {
+  return resolve(process.cwd(), '.env');
+}
+
+export function hasEnvFile() {
+  return existsSync(getEnvFilePath());
 }
 
 function parseLogTargets(value: string) {

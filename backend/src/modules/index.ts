@@ -20,6 +20,7 @@ import { type SsoConfig, SsoService } from './auth/auth.sso';
 import { createDemoModule } from './demo';
 import { createDocsModule } from './docs';
 import { createHealthModule, type ReadinessCheck } from './health';
+import { createLockedSetupModule } from './setup';
 import { createUsersModule } from './users';
 import { initUserModel, type UserModel } from './users/user.model';
 import { UserService } from './users/user.service';
@@ -98,6 +99,7 @@ export function createModules(services: Services, config?: ModuleConfig): Backen
   const healthOptions = config?.readinessChecks ? { readinessChecks: config.readinessChecks } : {};
 
   return [
+    createLockedSetupModule(),
     createHealthModule(healthOptions),
     createAuthModule(services.auth, {
       ...authOptions,

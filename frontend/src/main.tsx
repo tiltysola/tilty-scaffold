@@ -21,7 +21,7 @@ createRoot(container).render(
       <BrowserRouter>
         <Router />
       </BrowserRouter>
-      <Toaster richColors />
+      <Toaster position="top-center" richColors />
     </TooltipProvider>
   </StrictMode>,
 );

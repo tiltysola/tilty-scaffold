@@ -1,5 +1,3 @@
-import { $OpenApiUtil } from '@alicloud/openapi-core';
-import SlsClient, { LogContent, LogGroup, LogItem, PutLogsRequest } from '@alicloud/sls20201230';
 import { appendFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 
@@ -39,10 +37,27 @@ interface LogSink {
   write: (record: LogRecord) => Promise<void> | void;
 }
 
+interface OpenApiUtilRuntime {
+  Config: new (config: { accessKeyId: string; accessKeySecret: string; endpoint: string }) => unknown;
+}
+
 interface SerializedError {
   message: string;
   name: string;
   stack?: string;
+}
+
+interface SlsClientRuntime {
+  putLogs(project: string, logstore: string, request: unknown): Promise<unknown>;
+}
+
+interface SlsRuntime {
+  Client: new (config: unknown) => SlsClientRuntime;
+  LogContent: new (input: { key: string; value: string }) => unknown;
+  LogGroup: new (input: { logItems: unknown[]; source: string; topic: string }) => unknown;
+  LogItem: new (input: { contents: unknown[]; time: number }) => unknown;
+  OpenApiUtil: OpenApiUtilRuntime;
+  PutLogsRequest: new (input: { body: unknown }) => unknown;
 }
 
 type RedactedLogArg = boolean | null | number | string | object | undefined;
@@ -149,27 +164,23 @@ class LocalFileLogSink implements LogSink {
 }
 
 class SlsLogSink implements LogSink {
-  private readonly client: SlsClient;
+  private client: Promise<SlsClientRuntime> | undefined;
+  private runtime: Promise<SlsRuntime> | undefined;
 
-  constructor(private readonly config: SlsLoggerConfig) {
-    this.client = new SlsClient(
-      new $OpenApiUtil.Config({
-        accessKeyId: config.accessKeyId,
-        accessKeySecret: config.accessKeySecret,
-        endpoint: config.endpoint,
-      }),
-    );
-  }
+  constructor(private readonly config: SlsLoggerConfig) {}
 
   async write(record: LogRecord) {
-    await this.client.putLogs(
+    const runtime = await this.getRuntime();
+    const client = await this.getClient(runtime);
+
+    await client.putLogs(
       this.config.project,
       this.config.logstore,
-      new PutLogsRequest({
-        body: new LogGroup({
+      new runtime.PutLogsRequest({
+        body: new runtime.LogGroup({
           logItems: [
-            new LogItem({
-              contents: toSlsContents(record),
+            new runtime.LogItem({
+              contents: toSlsContents(record, runtime.LogContent),
               time: Math.floor(Date.parse(record.timestamp) / 1000),
             }),
           ],
@@ -178,6 +189,25 @@ class SlsLogSink implements LogSink {
         }),
       }),
     );
+  }
+
+  private async getRuntime() {
+    this.runtime ??= loadSlsRuntime();
+    return this.runtime;
+  }
+
+  private async getClient(runtime: SlsRuntime) {
+    this.client ??= Promise.resolve(
+      new runtime.Client(
+        new runtime.OpenApiUtil.Config({
+          accessKeyId: this.config.accessKeyId,
+          accessKeySecret: this.config.accessKeySecret,
+          endpoint: this.config.endpoint,
+        }),
+      ),
+    );
+
+    return this.client;
   }
 }
 
@@ -245,7 +275,7 @@ function toJsonLine(record: LogRecord) {
   });
 }
 
-function toSlsContents(record: LogRecord) {
+function toSlsContents(record: LogRecord, LogContent: SlsRuntime['LogContent']) {
   const contents = [
     new LogContent({ key: 'timestamp', value: record.timestamp }),
     new LogContent({ key: 'level', value: record.level }),
@@ -258,6 +288,23 @@ function toSlsContents(record: LogRecord) {
   }
 
   return contents;
+}
+
+async function loadSlsRuntime(): Promise<SlsRuntime> {
+  const [openApiModule, slsModule] = await Promise.all([
+    import('@alicloud/openapi-core'),
+    import('@alicloud/sls20201230'),
+  ]);
+  const typedSlsModule = slsModule as unknown as typeof import('@alicloud/sls20201230/dist/client');
+
+  return {
+    Client: typedSlsModule.default as unknown as SlsRuntime['Client'],
+    LogContent: typedSlsModule.LogContent as unknown as SlsRuntime['LogContent'],
+    LogGroup: typedSlsModule.LogGroup as unknown as SlsRuntime['LogGroup'],
+    LogItem: typedSlsModule.LogItem as unknown as SlsRuntime['LogItem'],
+    OpenApiUtil: openApiModule.$OpenApiUtil,
+    PutLogsRequest: typedSlsModule.PutLogsRequest as unknown as SlsRuntime['PutLogsRequest'],
+  };
 }
 
 function serializeArg(arg: RedactedLogArg): SerializedLogArg {

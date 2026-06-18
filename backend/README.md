@@ -8,9 +8,9 @@ RBAC access control, scheduled jobs, Swagger UI, and health checks.
 Install dependencies from the repository root.
 Run commands from `backend/`.
 
-Database commands depend on built `@tilty/shared` outputs; from a fresh
-checkout, run `npm --prefix ../shared run build` before `db:migrate`, or use the
-root setup flow.
+Database commands depend on built `@tilty/shared` outputs. From a fresh
+checkout, run `npm --prefix ../shared run build` before `db:migrate`, or
+complete the Setup Wizard.
 
 | Command                | Description                          |
 | ---------------------- | ------------------------------------ |
@@ -34,17 +34,20 @@ root setup flow.
 cp .env.example .env
 ```
 
-Use `.env.example` as the source of supported variables and defaults. The
-sections below summarize the operational configuration groups; keep the full
-variable catalog in `.env.example`. Local backend commands load `.env` from the
-backend application directory. Production may use platform environment variables
-without a local `.env` file. Relative runtime paths such as `DATABASE_STORAGE`,
-`LOG_LOCAL_PATH`, and `FILE_LOCAL_ROOT` must resolve inside that directory.
+Use `.env.example` as the source of supported variables and defaults when
+configuring the backend manually. When `.env` is absent, server startup enters
+setup-only mode and exposes only `/api/setup/*`. Complete `/setup` in the
+frontend to write `.env`, apply migrations, seed built-in access control, and
+create the root administrator. Restart the backend after setup completes so the
+full application loads the generated environment. Relative runtime paths such
+as `DATABASE_STORAGE`, `LOG_LOCAL_PATH`, and `FILE_LOCAL_ROOT` must resolve
+inside the backend application directory.
 
 Local defaults use SQLite, `DATABASE_SYNC=off`, and schema migrations.
 `db:migrate` applies migrations and synchronizes built-in permissions and roles.
-Startup also synchronizes those records after database connection. Production
-requires `DATABASE_SYNC=off`, `AUTH_COOKIE_SECURE=true`, a non-example
+Startup validates that migrations are fully applied when `DATABASE_SYNC=off`,
+then synchronizes those records after database connection. Production requires
+`DATABASE_SYNC=off`, `AUTH_COOKIE_SECURE=true`, a non-example
 `AUTH_TOKEN_SECRET`, and a CORS allowlist without `*`. Use MySQL or PostgreSQL
 for multi-instance deployments. Keep total pooled database connections across
 all backend instances below the database connection limit.
@@ -149,6 +152,17 @@ logout use the configured refresh-token cookie.
 
 | Method | Path                                          | Description                                    |
 | ------ | --------------------------------------------- | ---------------------------------------------- |
+| `GET`  | `/api/setup/status`                           | Return setup availability                      |
+| `GET`  | `/api/setup/defaults`                         | Return generated setup defaults                |
+| `POST` | `/api/setup/validate`                         | Validate setup environment and administrator   |
+| `POST` | `/api/setup/validate/environment`             | Validate setup environment fields              |
+| `POST` | `/api/setup/test/database`                    | Test database connectivity                     |
+| `POST` | `/api/setup/test/cache`                       | Test cache connectivity                        |
+| `POST` | `/api/setup/test/file-storage`                | Test file storage configuration                |
+| `POST` | `/api/setup/test/logging`                     | Test logging configuration                     |
+| `POST` | `/api/setup/test/email`                       | Test email configuration                       |
+| `POST` | `/api/setup/test/sso`                         | Test SSO provider discovery                    |
+| `POST` | `/api/setup/complete`                         | Complete setup and create the root admin       |
 | `GET`  | `/api/auth/config`                            | Return public authentication configuration     |
 | `POST` | `/api/auth/register`                          | Create an account                              |
 | `POST` | `/api/auth/register/email-verification`       | Send a registration email verification code    |
@@ -185,11 +199,12 @@ Error responses use this shape:
 
 ## Modules
 
-Health, authentication, users, documentation, and demo modules are registered by
-default. The users module provides RBAC-protected administration endpoints. The
-documentation module serves the OpenAPI document and Swagger UI. The demo
-module has no public API routes; it registers a scheduler heartbeat job as an
-example module-owned job.
+Setup, health, authentication, users, documentation, and demo modules are
+registered by default. The setup module locks itself after `.env` exists. The
+users module provides RBAC-protected administration endpoints. The documentation
+module serves the OpenAPI document and Swagger UI. The demo module has no public
+API routes; it registers a scheduler heartbeat job as an example module-owned
+job.
 
 The scheduler core runs module-owned jobs when modules define them and
 `SCHEDULER_ENABLED=true`.
