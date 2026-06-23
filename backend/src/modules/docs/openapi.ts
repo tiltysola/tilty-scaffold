@@ -190,7 +190,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/ValidationError',
           },
           '403': {
-            $ref: '#/components/responses/SetupLocked',
+            $ref: '#/components/responses/SetupForbidden',
           },
         },
       },
@@ -243,7 +243,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/ValidationError',
           },
           '403': {
-            $ref: '#/components/responses/SetupLocked',
+            $ref: '#/components/responses/SetupForbidden',
           },
         },
       },
@@ -284,7 +284,7 @@ export const openApiDocument = {
             },
           },
           '403': {
-            $ref: '#/components/responses/SetupLocked',
+            $ref: '#/components/responses/SetupForbidden',
           },
         },
       },
@@ -325,7 +325,7 @@ export const openApiDocument = {
             },
           },
           '403': {
-            $ref: '#/components/responses/SetupLocked',
+            $ref: '#/components/responses/SetupForbidden',
           },
         },
       },
@@ -366,7 +366,7 @@ export const openApiDocument = {
             },
           },
           '403': {
-            $ref: '#/components/responses/SetupLocked',
+            $ref: '#/components/responses/SetupForbidden',
           },
         },
       },
@@ -407,7 +407,7 @@ export const openApiDocument = {
             },
           },
           '403': {
-            $ref: '#/components/responses/SetupLocked',
+            $ref: '#/components/responses/SetupForbidden',
           },
         },
       },
@@ -448,7 +448,7 @@ export const openApiDocument = {
             },
           },
           '403': {
-            $ref: '#/components/responses/SetupLocked',
+            $ref: '#/components/responses/SetupForbidden',
           },
         },
       },
@@ -489,7 +489,7 @@ export const openApiDocument = {
             },
           },
           '403': {
-            $ref: '#/components/responses/SetupLocked',
+            $ref: '#/components/responses/SetupForbidden',
           },
         },
       },
@@ -523,7 +523,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/ValidationError',
           },
           '403': {
-            $ref: '#/components/responses/SetupLocked',
+            $ref: '#/components/responses/SetupForbidden',
           },
           '409': {
             description: 'Setup is already running',
@@ -596,6 +596,9 @@ export const openApiDocument = {
           '400': {
             $ref: '#/components/responses/ValidationError',
           },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
           '409': {
             $ref: '#/components/responses/AccountIdentifierConflict',
           },
@@ -632,6 +635,9 @@ export const openApiDocument = {
           },
           '400': {
             $ref: '#/components/responses/ValidationError',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
           },
           '404': {
             $ref: '#/components/responses/EmailVerificationDisabled',
@@ -673,6 +679,9 @@ export const openApiDocument = {
           '400': {
             $ref: '#/components/responses/ValidationError',
           },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
           '404': {
             $ref: '#/components/responses/EmailVerificationDisabled',
           },
@@ -709,6 +718,9 @@ export const openApiDocument = {
           },
           '400': {
             $ref: '#/components/responses/ValidationError',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
           },
           '404': {
             $ref: '#/components/responses/EmailVerificationDisabled',
@@ -749,6 +761,9 @@ export const openApiDocument = {
           },
           '401': {
             $ref: '#/components/responses/InvalidCredentials',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
           },
           '429': {
             $ref: '#/components/responses/RateLimited',
@@ -840,6 +855,9 @@ export const openApiDocument = {
           '401': {
             $ref: '#/components/responses/AuthRequired',
           },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
           '429': {
             $ref: '#/components/responses/RateLimited',
           },
@@ -868,6 +886,9 @@ export const openApiDocument = {
           },
           '401': {
             $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
           },
         },
       },
@@ -910,6 +931,9 @@ export const openApiDocument = {
                 },
               },
             },
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
           },
         },
       },
@@ -970,6 +994,9 @@ export const openApiDocument = {
           },
           '401': {
             $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
           },
           '413': {
             description: 'Uploaded file is too large',
@@ -1126,6 +1153,9 @@ export const openApiDocument = {
           '401': {
             $ref: '#/components/responses/SsoFailed',
           },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
           '404': {
             $ref: '#/components/responses/SsoDisabled',
           },
@@ -1162,6 +1192,9 @@ export const openApiDocument = {
           },
           '401': {
             $ref: '#/components/responses/SsoFailed',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
           },
           '404': {
             $ref: '#/components/responses/SsoDisabled',
@@ -1205,6 +1238,9 @@ export const openApiDocument = {
           },
           '401': {
             $ref: '#/components/responses/SsoBindUnauthorized',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
           },
           '404': {
             $ref: '#/components/responses/SsoDisabled',
@@ -1328,7 +1364,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/AuthRequired',
           },
           '403': {
-            $ref: '#/components/responses/Forbidden',
+            $ref: '#/components/responses/CsrfOrPermissionForbidden',
           },
           '404': {
             description: 'User or role was not found',
@@ -1494,6 +1530,26 @@ export const openApiDocument = {
           },
         },
       },
+      CsrfForbidden: {
+        description: 'The unsafe request origin is missing or not allowed',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
+      CsrfOrPermissionForbidden: {
+        description: 'The unsafe request origin is missing or not allowed, or the authenticated user lacks permission',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
       AccountIdentifierConflict: {
         description: 'Email address or username already exists',
         content: {
@@ -1592,6 +1648,16 @@ export const openApiDocument = {
       },
       SetupLocked: {
         description: 'Setup is locked because SETUP_LOCKED is true.',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
+      SetupForbidden: {
+        description: 'Setup is locked, or the unsafe request origin is missing or not allowed',
         content: {
           'application/json': {
             schema: {

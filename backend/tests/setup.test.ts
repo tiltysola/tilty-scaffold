@@ -193,7 +193,7 @@ describe('setup service', () => {
     await expect(readFile('.env', 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('tests sqlite database and memory cache connectivity', async () => {
+  it('verifies sqlite database and memory cache connectivity', async () => {
     const service = new SetupService('setup');
     const environment = {
       ...service.getDefaults().environment,
@@ -210,7 +210,7 @@ describe('setup service', () => {
     });
   });
 
-  it('tests local file storage and non-network setup integrations', async () => {
+  it('verifies local file storage and non-network setup integrations', async () => {
     const service = new SetupService('setup');
     const environment = {
       ...service.getDefaults().environment,

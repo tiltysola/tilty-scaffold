@@ -38,13 +38,31 @@ describe('docs API', () => {
     expect(body.paths['/api/openapi.json']).toBeDefined();
     expect(body.paths['/api/docs']).toBeDefined();
 
+    expectResponseRefs(body, '/api/setup/defaults', 'get', {
+      '403': 'SetupLocked',
+    });
+
+    for (const path of setupUnsafePaths) {
+      expectResponseRefs(body, path, 'post', {
+        '403': 'SetupForbidden',
+      });
+    }
+
+    for (const [path, method] of csrfProtectedOperations) {
+      expectResponseRefs(body, path, method, {
+        '403': 'CsrfForbidden',
+      });
+    }
+
     expectResponseRefs(body, '/api/auth/register', 'post', {
       '400': 'ValidationError',
+      '403': 'CsrfForbidden',
       '409': 'AccountIdentifierConflict',
       '429': 'RateLimited',
     });
     expectResponseRefs(body, '/api/auth/register/email-verification', 'post', {
       '400': 'ValidationError',
+      '403': 'CsrfForbidden',
       '404': 'EmailVerificationDisabled',
       '409': 'AccountIdentifierConflict',
       '429': 'RateLimited',
@@ -52,10 +70,12 @@ describe('docs API', () => {
     expectResponseRefs(body, '/api/auth/login', 'post', {
       '400': 'ValidationError',
       '401': 'InvalidCredentials',
+      '403': 'CsrfForbidden',
       '429': 'RateLimited',
     });
     expectResponseRefs(body, '/api/auth/password-reset', 'post', {
       '400': 'ValidationError',
+      '403': 'CsrfForbidden',
       '404': 'EmailVerificationDisabled',
       '429': 'RateLimited',
     });
@@ -65,14 +85,17 @@ describe('docs API', () => {
     expectResponseRefs(body, '/api/auth/me', 'patch', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
+      '403': 'CsrfForbidden',
       '429': 'RateLimited',
     });
     expectResponseRefs(body, '/api/auth/refresh', 'post', {
       '401': 'AuthRequired',
+      '403': 'CsrfForbidden',
     });
     expectResponseRefs(body, '/api/auth/avatar', 'post', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
+      '403': 'CsrfForbidden',
       '429': 'RateLimited',
     });
     expectResponseRefs(body, '/api/auth/sso/start', 'get', {
@@ -87,11 +110,13 @@ describe('docs API', () => {
     expectResponseRefs(body, '/api/auth/sso/session', 'post', {
       '400': 'ValidationError',
       '401': 'SsoFailed',
+      '403': 'CsrfForbidden',
       '404': 'SsoDisabled',
     });
     expectResponseRefs(body, '/api/auth/sso/account', 'post', {
       '400': 'ValidationError',
       '401': 'SsoFailed',
+      '403': 'CsrfForbidden',
       '404': 'SsoDisabled',
       '409': 'SsoBindConflict',
       '429': 'RateLimited',
@@ -99,9 +124,13 @@ describe('docs API', () => {
     expectResponseRefs(body, '/api/auth/sso/bind', 'post', {
       '400': 'ValidationError',
       '401': 'SsoBindUnauthorized',
+      '403': 'CsrfForbidden',
       '404': 'SsoDisabled',
       '409': 'SsoBindConflict',
       '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/users/{id}/roles', 'put', {
+      '403': 'CsrfOrPermissionForbidden',
     });
 
     const ssoBindUnauthorized = body.components.responses.SsoBindUnauthorized;
@@ -180,6 +209,33 @@ function expectResponseRefs(
   }
 }
 
+const setupUnsafePaths = [
+  '/api/setup/validate',
+  '/api/setup/validate/environment',
+  '/api/setup/test/database',
+  '/api/setup/test/cache',
+  '/api/setup/test/file-storage',
+  '/api/setup/test/logging',
+  '/api/setup/test/email',
+  '/api/setup/test/sso',
+  '/api/setup/complete',
+] as const;
+
+const csrfProtectedOperations = [
+  ['/api/auth/register', 'post'],
+  ['/api/auth/register/email-verification', 'post'],
+  ['/api/auth/password-reset/email-verification', 'post'],
+  ['/api/auth/password-reset', 'post'],
+  ['/api/auth/login', 'post'],
+  ['/api/auth/me', 'patch'],
+  ['/api/auth/refresh', 'post'],
+  ['/api/auth/logout', 'post'],
+  ['/api/auth/avatar', 'post'],
+  ['/api/auth/sso/session', 'post'],
+  ['/api/auth/sso/account', 'post'],
+  ['/api/auth/sso/bind', 'post'],
+] as const satisfies ReadonlyArray<readonly [string, OpenApiMethod]>;
+
 interface OpenApiDocument {
   components: {
     responses: Record<string, OpenApiResponse | undefined>;
@@ -193,11 +249,13 @@ interface OpenApiDocument {
   }>;
 }
 
-type OpenApiMethod = 'get' | 'post';
+type OpenApiMethod = 'get' | 'patch' | 'post' | 'put';
 
 interface OpenApiPathItem {
   get?: OpenApiOperation;
+  patch?: OpenApiOperation;
   post?: OpenApiOperation;
+  put?: OpenApiOperation;
 }
 
 interface OpenApiOperation {
