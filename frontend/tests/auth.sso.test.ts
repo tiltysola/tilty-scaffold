@@ -39,7 +39,7 @@ describe('auth SSO client', () => {
   });
 
   it('builds SSO start URLs with the redirect path', () => {
-    expect(getSsoStartUrl('/reports')).toBe('http://localhost:3000/api/auth/sso/start?redirect=%2Freports');
+    expect(getSsoStartUrl('/reports')).toBe('/api/auth/sso/start?redirect=%2Freports');
   });
 
   it('reads SSO callback tokens from URL fragments', () => {
@@ -82,10 +82,11 @@ describe('auth SSO client', () => {
       vi.fn(async (_url, init?: RequestInit) => {
         expect(init?.body).toBe(
           JSON.stringify({
-            confirmPassword: 'password123',
+            username: 'sso_user',
+            displayName: 'Provider User',
             password: 'password123',
+            confirmPassword: 'password123',
             token: 'bind-token',
-            username: 'SSO User',
           }),
         );
 
@@ -102,10 +103,11 @@ describe('auth SSO client', () => {
 
     await expect(
       createSsoAccount({
-        confirmPassword: 'password123',
+        username: 'sso_user',
+        displayName: 'Provider User',
         password: 'password123',
+        confirmPassword: 'password123',
         token: 'bind-token',
-        username: 'SSO User',
       }),
     ).resolves.toEqual(session);
     expect(getStoredSession()).toEqual(session);
@@ -121,7 +123,7 @@ describe('auth SSO client', () => {
       vi.fn(async (_url, init?: RequestInit) => {
         expect(init?.body).toBe(
           JSON.stringify({
-            email: 'user@example.com',
+            identifier: 'user@example.com',
             password: 'password123',
             token: 'bind-token',
           }),
@@ -140,7 +142,7 @@ describe('auth SSO client', () => {
 
     await expect(
       bindSsoAccount({
-        email: 'user@example.com',
+        identifier: 'user@example.com',
         password: 'password123',
         token: 'bind-token',
       }),

@@ -24,23 +24,16 @@ Run commands from `frontend/`.
 
 ## Environment
 
-The frontend defaults to `http://localhost:3000` for the backend API.
-
-```bash
-cp .env.example .env
-```
-
-Set `VITE_API_BASE_URL` only when the backend is served from a different URL.
-Set `VITE_AUTH_SESSION_STORAGE_KEY` to change the localStorage key used for
-frontend session metadata.
+The frontend uses relative API paths. During development, Vite proxies `/api`
+and `/uploads` to `http://localhost:3000`.
 
 ## Backend Integration
 
 Setup routing is controlled by the backend. While setup is required, browser
 navigation redirects to `/setup`, and non-setup API requests return
-`SETUP_REQUIRED`. After setup writes the backend `.env`, non-setup API requests
-return `SETUP_RESTART_REQUIRED` until restart, and direct `/setup` visits return
-to `/login` after setup is locked.
+`SETUP_REQUIRED`. After setup completes, non-setup API requests return
+`SETUP_RESTART_REQUIRED` until restart, and direct `/setup` visits return to
+`/login`. Backend setup lock configuration is documented in `backend/README.md`.
 
 The setup page applies migrations through `/api/setup/*`. Database, Redis
 cache, OSS storage, SLS logging, SMTP email, and SSO must pass connection tests
@@ -54,9 +47,13 @@ not stored from API response bodies. localStorage keeps only user and
 token-expiration metadata. Stored session metadata is cleared when the frontend
 cannot validate it with the backend.
 
-Authenticated user metadata includes role and permission keys. The sidebar and
-protected routes use those keys for navigation and page access; the backend
+Authenticated user metadata includes role and permission keys. The dashboard
+shows a signed-in greeting and scaffold overview. The sidebar and protected
+routes use role and permission keys for navigation and page access; the backend
 remains the source of truth for API authorization.
+
+The profile page updates the current user's avatar through
+`/api/auth/avatar` and display name through `PATCH /api/auth/me`.
 
 The registration page reads `/api/auth/config` and shows email verification
 only when the backend requires it. The login page reads `/api/auth/sso/config`
@@ -76,16 +73,17 @@ role assignments through `/api/users/:id/roles`.
 
 ## Routes
 
-| Route              | Page              |
-| ------------------ | ----------------- |
-| `/`                | Dashboard         |
-| `/dashboard`       | Dashboard         |
-| `/users`           | Users             |
-| `/setup`           | Setup Wizard      |
-| `/login`           | Login             |
-| `/forgot-password` | Password recovery |
-| `/register`        | Register          |
-| `*`                | Not found         |
+| Route              | Page                 |
+| ------------------ | -------------------- |
+| `/`                | Dashboard            |
+| `/dashboard`       | Dashboard            |
+| `/users`           | Users                |
+| `/profile`         | Profile              |
+| `/setup`           | Setup                |
+| `/login`           | Log in               |
+| `/forgot-password` | Password recovery    |
+| `/register`        | Account registration |
+| `*`                | Not found            |
 
 ## Components
 

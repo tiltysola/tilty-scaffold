@@ -14,7 +14,6 @@ import { toast } from 'sonner';
 
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { ApiError } from '@/lib/api';
-import { appConfig } from '@/lib/config';
 import {
   completeSetup,
   fetchSetupDefaults,
@@ -28,6 +27,7 @@ import {
   testSsoConnection,
   validateSetupEnvironment,
 } from '@/lib/setup';
+import { routePath } from '@/router';
 import { Button } from '@/shadcn/components/ui/button';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
@@ -93,22 +93,29 @@ const Index = () => {
     void fetchSetupDefaults()
       .then((defaults) => {
         if (active) {
-          setEnvironment({
-            ...defaults.environment,
-            CORS_ORIGINS: getCurrentOrigin(defaults.environment.CORS_ORIGINS),
-            SSO_FRONTEND_CALLBACK_URL: getCurrentUrl('/login', defaults.environment.SSO_FRONTEND_CALLBACK_URL),
-            SSO_REDIRECT_URI: getApiUrl('/api/auth/sso/callback', defaults.environment.SSO_REDIRECT_URI),
-          });
+          const setupEnvironmentDefaults = defaults.environmentFileLoaded
+            ? defaults.environment
+            : {
+                ...defaults.environment,
+                CORS_ORIGINS: getCurrentOrigin(defaults.environment.CORS_ORIGINS),
+                SSO_FRONTEND_CALLBACK_URL: getCurrentUrl(
+                  routePath('login'),
+                  defaults.environment.SSO_FRONTEND_CALLBACK_URL,
+                ),
+                SSO_REDIRECT_URI: getCurrentUrl('/api/auth/sso/callback', defaults.environment.SSO_REDIRECT_URI),
+              };
+
+          setEnvironment(setupEnvironmentDefaults);
         }
       })
       .catch((error: unknown) => {
         if (active) {
           if (error instanceof ApiError && error.code === 'SETUP_LOCKED') {
-            navigate('/login', { replace: true });
+            navigate(routePath('login'), { replace: true });
             return;
           }
 
-          setLoadError('Unable to load setup defaults.');
+          setLoadError('Setup defaults could not be loaded.');
         }
       });
 
@@ -164,7 +171,7 @@ const Index = () => {
     }
 
     if (activeStep === 'review') {
-      const result = await action.run(() => completeSetup(setupInput), 'Unable to complete setup.');
+      const result = await action.run(() => completeSetup(setupInput), 'Setup could not be completed.');
 
       if (result) {
         setCompletion(result);
@@ -327,12 +334,10 @@ const Index = () => {
             <div className="flex items-start gap-4">
               <CheckCircle2Icon className="mt-1 size-6 shrink-0 text-emerald-600" />
               <div className="grid gap-2">
-                <h1 className="text-xl font-semibold">Setup Complete</h1>
+                <h1 className="text-xl font-semibold">Setup completed</h1>
                 <p className="text-sm text-muted-foreground">
-                  {completion.administratorCreated
-                    ? 'The backend environment file has been written, database migrations have been applied, and the root administrator account has been created.'
-                    : 'The backend environment file has been written, database migrations have been applied, and existing users have been retained.'}{' '}
-                  Restart the backend process to apply the generated configuration.
+                  The setup process has completed successfully. Restart the backend service for the new configuration to
+                  take effect.
                 </p>
               </div>
             </div>
@@ -659,7 +664,7 @@ function AdministratorStep({
           <div className="flex items-start gap-3">
             <InfoIcon className="mt-0.5 size-5 shrink-0" />
             <div className="grid gap-1">
-              <h3 className="text-sm font-semibold">Existing Users Detected</h3>
+              <h3 className="text-sm font-semibold">Existing users detected</h3>
               <p className="text-sm leading-6">
                 The selected database already contains available users. Setup will retain those users and skip
                 administrator creation.
@@ -674,18 +679,26 @@ function AdministratorStep({
   return (
     <div className="grid max-w-5xl gap-5">
       <AdministratorField
-        autoComplete="name"
+        autoComplete="username"
         disabled={disabled}
         field="username"
-        label="Administrator Display Name"
+        label="Administrator username"
         onChange={onChange('username')}
         value={administrator.username}
+      />
+      <AdministratorField
+        autoComplete="name"
+        disabled={disabled}
+        field="displayName"
+        label="Administrator display name"
+        onChange={onChange('displayName')}
+        value={administrator.displayName}
       />
       <AdministratorField
         autoComplete="email"
         disabled={disabled}
         field="email"
-        label="Administrator Email"
+        label="Administrator email"
         onChange={onChange('email')}
         type="email"
         value={administrator.email}
@@ -694,7 +707,7 @@ function AdministratorStep({
         autoComplete="new-password"
         disabled={disabled}
         field="password"
-        label="Administrator Password"
+        label="Administrator password"
         onChange={onChange('password')}
         type="password"
         value={administrator.password}
@@ -703,7 +716,7 @@ function AdministratorStep({
         autoComplete="new-password"
         disabled={disabled}
         field="confirmPassword"
-        label="Confirm Administrator Password"
+        label="Confirm administrator password"
         onChange={onChange('confirmPassword')}
         type="password"
         value={administrator.confirmPassword}
@@ -773,7 +786,7 @@ function ReviewStep({
     ['HTTP', `${environment.SERVER_HOST}:${environment.SERVER_PORT}`],
     ['Database', environment.DATABASE_DIALECT],
     ['Cache', environment.CACHE_STORE],
-    ['File Storage', environment.FILE_STORAGE_DRIVER],
+    ['File storage', environment.FILE_STORAGE_DRIVER],
     ['Email', environment.EMAIL_VERIFICATION_SERVICE],
     ['SSO', environment.SSO_ENABLED],
     ['Administrator', hasExistingUsers ? 'Existing users retained' : administrator.email || 'Not configured'],
@@ -793,7 +806,7 @@ function ReviewStep({
       <section className="grid gap-3 rounded-md border p-4">
         <div className="flex items-center gap-2 text-sm font-medium">
           <KeyRoundIcon className="size-4 text-muted-foreground" />
-          Sensitive Configuration
+          Sensitive configuration
         </div>
         <div className="grid gap-2 text-sm text-muted-foreground">
           {configuredSecrets.length > 0 ? (
@@ -814,7 +827,7 @@ function ReviewStep({
 
 function getPrimaryActionLabel(stepId: string, environment: SetupEnvironment, hasExistingUsers: boolean) {
   if (stepId === 'database') {
-    return 'Verify Database and Continue';
+    return 'Verify database and continue';
   }
 
   if (stepId === 'administrator' && hasExistingUsers) {
@@ -822,39 +835,55 @@ function getPrimaryActionLabel(stepId: string, environment: SetupEnvironment, ha
   }
 
   if (stepId === 'cache' && environment.CACHE_STORE === 'redis') {
-    return 'Verify Redis and Continue';
+    return 'Verify Redis and continue';
   }
 
   if (stepId === 'file-storage' && environment.FILE_STORAGE_DRIVER === 'oss') {
-    return 'Verify OSS and Continue';
+    return 'Verify OSS and continue';
   }
 
   if (stepId === 'file-storage') {
-    return 'Verify Storage and Continue';
+    return 'Verify storage and continue';
   }
 
   if (stepId === 'logging' && hasLogTarget(environment, 'sls')) {
-    return 'Verify SLS and Continue';
+    return 'Verify SLS and continue';
   }
 
   if (stepId === 'email' && environment.EMAIL_VERIFICATION_SERVICE === 'smtp') {
-    return 'Verify SMTP and Continue';
+    return 'Verify SMTP and continue';
   }
 
   if (stepId === 'sso' && environment.SSO_ENABLED === 'true') {
-    return 'Verify SSO and Continue';
+    return 'Verify SSO and continue';
   }
 
   if (stepId === 'review') {
-    return 'Complete Setup';
+    return 'Complete setup';
   }
 
-  return 'Validate and Continue';
+  return 'Validate and continue';
 }
 
 function getAdministratorValidationError(administrator: SetupAdministrator) {
-  if (administrator.username.trim().length < 2) {
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$/.test(administrator.username.trim())) {
+    return 'The administrator username may contain letters, numbers, underscores, and hyphens.';
+  }
+
+  if (administrator.username.trim().length < 3) {
+    return 'The administrator username must contain at least 3 characters.';
+  }
+
+  if (administrator.username.trim().length > 32) {
+    return 'The administrator username must contain at most 32 characters.';
+  }
+
+  if (administrator.displayName.trim().length < 2) {
     return 'The administrator display name must contain at least 2 characters.';
+  }
+
+  if (administrator.displayName.trim().length > 64) {
+    return 'The administrator display name must contain at most 64 characters.';
   }
 
   if (!administrator.email.trim()) {
@@ -899,17 +928,9 @@ function getCurrentOrigin(fallback: string) {
   return window.location.origin || fallback;
 }
 
-function getCurrentUrl(path: string, fallback: string) {
+function getCurrentUrl(relativePath: string, fallback: string) {
   try {
-    return new URL(path, window.location.origin).toString();
-  } catch {
-    return fallback;
-  }
-}
-
-function getApiUrl(path: string, fallback: string) {
-  try {
-    return new URL(path, appConfig.apiBaseUrl).toString();
+    return new URL(relativePath, window.location.origin).toString();
   } catch {
     return fallback;
   }

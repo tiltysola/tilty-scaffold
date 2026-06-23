@@ -15,6 +15,10 @@ export const up: MigrationFn<QueryInterface> = async ({ context: queryInterface 
       type: DataTypes.STRING(32),
       allowNull: false,
     },
+    displayName: {
+      type: DataTypes.STRING(64),
+      allowNull: false,
+    },
     email: {
       type: DataTypes.STRING(255),
       allowNull: false,
@@ -57,6 +61,10 @@ export const up: MigrationFn<QueryInterface> = async ({ context: queryInterface 
 
   await queryInterface.addIndex('users', ['available', 'createdAt'], {
     name: 'users_available_created_at',
+  });
+  await queryInterface.addIndex('users', ['username'], {
+    name: 'users_username',
+    unique: true,
   });
   await queryInterface.addIndex('users', {
     fields: [

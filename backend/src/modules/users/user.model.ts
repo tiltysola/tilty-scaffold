@@ -3,6 +3,7 @@ import { CreationOptional, DataTypes, InferAttributes, InferCreationAttributes, 
 export class UserModel extends Model<InferAttributes<UserModel>, InferCreationAttributes<UserModel>> {
   declare id: CreationOptional<string>;
   declare username: string;
+  declare displayName: string;
   declare email: string;
   declare avatarUrl: CreationOptional<string | null>;
   declare avatarStorageKey: CreationOptional<string | null>;
@@ -24,6 +25,11 @@ export function initUserModel(sequelize: Sequelize) {
       },
       username: {
         type: DataTypes.STRING(32),
+        allowNull: false,
+        unique: 'users_username',
+      },
+      displayName: {
+        type: DataTypes.STRING(64),
         allowNull: false,
       },
       email: {

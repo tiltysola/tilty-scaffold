@@ -1,79 +1,21 @@
 import { type Middleware } from 'koa';
-import { z } from 'zod';
-
-import { isSafeRelativePath } from '@tilty/shared/paths';
-import { hasMatchingPasswordConfirmation } from '@tilty/shared/validation';
 
 import { AppError } from '../../core/errors';
 import { ok } from '../../core/http';
 import { readMultipartFile } from '../../infra/multipart';
+import {
+  loginSchema,
+  registerSchema,
+  resetPasswordSchema,
+  sendEmailVerificationSchema,
+  ssoBindAccountSchema,
+  ssoCreateAccountSchema,
+  ssoSessionSchema,
+  ssoStartQuerySchema,
+  updateCurrentUserSchema,
+} from './auth.schemas';
 import { type AuthService } from './auth.service';
 import { type SsoCallbackInput, type SsoService } from './auth.sso';
-
-const passwordSchema = z.string().min(8).max(128);
-const usernameSchema = z.string().trim().min(2).max(32);
-const emailSchema = z
-  .string()
-  .trim()
-  .max(255)
-  .pipe(z.email())
-  .transform((email) => email.toLowerCase());
-const emailVerificationCodeSchema = z.preprocess(
-  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
-  z
-    .string()
-    .trim()
-    .regex(/^\d{6}$/)
-    .optional(),
-);
-const passwordConfirmationIssue = {
-  message: 'Password confirmation does not match.',
-  path: ['confirmPassword'],
-};
-
-const registerSchema = createPasswordFormSchema({
-  username: usernameSchema,
-  email: emailSchema,
-  emailVerificationCode: emailVerificationCodeSchema,
-});
-
-const loginSchema = z.object({
-  email: emailSchema,
-  password: passwordSchema,
-});
-
-const sendEmailVerificationSchema = z.object({
-  email: emailSchema,
-});
-
-const resetPasswordSchema = createPasswordFormSchema({
-  email: emailSchema,
-  emailVerificationCode: z
-    .string()
-    .trim()
-    .regex(/^\d{6}$/),
-});
-
-const ssoSessionSchema = z.object({
-  token: z.string().min(1),
-});
-
-const ssoCreateAccountSchema = createPasswordFormSchema({
-  token: z.string().min(1),
-  username: usernameSchema,
-});
-
-const ssoBindAccountSchema = z.object({
-  token: z.string().min(1),
-  email: emailSchema,
-  password: passwordSchema,
-});
-const redirectPathSchema = z.string().refine(isSafeRelativePath, {
-  message: 'Redirect path is invalid.',
-});
-const ssoStartQuerySchema = z.object({
-  redirect: redirectPathSchema.optional(),
-});
 
 type AuthCookieSameSite = 'lax' | 'none' | 'strict';
 type AuthCookieSecurePolicy = 'auto' | 'false' | 'true';
@@ -145,6 +87,14 @@ export class AuthController {
   me: Middleware = async (ctx) => {
     const token = getAuthToken(ctx, this.cookieConfig);
     const user = await this.authService.getCurrentUser(token);
+
+    ctx.body = ok(user);
+  };
+
+  updateMe: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const input = updateCurrentUserSchema.parse(ctx.request.body);
+    const user = await this.authService.updateCurrentUser(token, input);
 
     ctx.body = ok(user);
   };
@@ -233,16 +183,6 @@ export class AuthController {
 }
 
 type AuthenticatedSession = Awaited<ReturnType<AuthService['login']>>;
-
-function createPasswordFormSchema<T extends z.ZodRawShape>(shape: T) {
-  return z
-    .object({
-      ...shape,
-      password: passwordSchema,
-      confirmPassword: passwordSchema,
-    })
-    .refine(hasMatchingPasswordConfirmation, passwordConfirmationIssue);
-}
 
 function toSessionResponse(session: AuthenticatedSession) {
   return {

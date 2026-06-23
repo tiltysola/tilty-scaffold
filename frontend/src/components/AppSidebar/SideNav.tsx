@@ -17,9 +17,13 @@ interface NavItem {
   url: string;
 }
 
+interface NavGroupItem {
+  items: NavItem[];
+  label: string;
+}
+
 export interface SideNavProps {
-  main: NavItem[];
-  secondary?: NavItem[];
+  groups: NavGroupItem[];
 }
 
 const NavGroup = ({
@@ -58,11 +62,12 @@ const NavGroup = ({
   );
 };
 
-const Index = ({ main, secondary }: SideNavProps) => {
+const Index = ({ groups }: SideNavProps) => {
   return (
     <>
-      <NavGroup items={main} label="Application" />
-      {secondary?.length ? <NavGroup items={secondary} label="Support" className="mt-auto" /> : null}
+      {groups.map((group) => (
+        <NavGroup key={group.label} items={group.items} label={group.label} />
+      ))}
     </>
   );
 };

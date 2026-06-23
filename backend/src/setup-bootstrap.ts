@@ -1,10 +1,15 @@
+import { existsSync } from 'fs';
 import { createServer, type Server } from 'http';
+import { resolve } from 'path';
 import { z } from 'zod';
 
 import { createApp, shouldSkipGlobalRateLimit } from './app';
 import { configureLogger, flushLogger, logger } from './core/logger';
 import { createCacheStore } from './infra/cache';
 import { createSetupOnlyModule } from './modules/setup';
+
+const frontendDistDirectory = resolve(__dirname, '../../frontend/dist');
+const frontendEntryFilePath = resolve(frontendDistDirectory, 'index.html');
 
 const setupRuntimeEnvSchema = z.object({
   CORS_ORIGINS: z.string().min(1).default('http://localhost:8011'),
@@ -20,32 +25,38 @@ const setupRuntimeEnvSchema = z.object({
 });
 
 export async function bootstrapSetup() {
-  const env = loadSetupRuntimeEnv();
+  const setupRuntimeConfig = loadSetupRuntimeEnv();
   const cacheStore = createCacheStore({ store: 'memory' });
 
   configureLogger({
-    maxPendingWrites: env.LOG_PENDING_WRITE_MAX,
+    maxPendingWrites: setupRuntimeConfig.LOG_PENDING_WRITE_MAX,
     targets: ['console'],
-    writeTimeoutMs: env.LOG_WRITE_TIMEOUT_MS,
+    writeTimeoutMs: setupRuntimeConfig.LOG_WRITE_TIMEOUT_MS,
   });
+  warnIfFrontendEntryFileMissing();
 
   const app = createApp([createSetupOnlyModule()], {
-    corsOrigins: parseCommaSeparatedValues(env.CORS_ORIGINS),
+    corsOrigins: parseCommaSeparatedValues(setupRuntimeConfig.CORS_ORIGINS),
+    frontendFiles: {
+      root: frontendDistDirectory,
+    },
     globalRateLimit: {
-      max: env.GLOBAL_RATE_LIMIT_MAX,
-      windowMs: env.GLOBAL_RATE_LIMIT_WINDOW_MS,
+      max: setupRuntimeConfig.GLOBAL_RATE_LIMIT_MAX,
+      windowMs: setupRuntimeConfig.GLOBAL_RATE_LIMIT_WINDOW_MS,
       cacheStore,
       scope: 'ip',
       skip: shouldSkipGlobalRateLimit,
     },
-    requestLogEnabled: env.LOG_REQUEST_ENABLED === 'true',
+    requestLogEnabled: setupRuntimeConfig.LOG_REQUEST_ENABLED === 'true',
     setupRedirect: { mode: 'setup' },
-    trustProxy: env.TRUST_PROXY === 'true',
+    trustProxy: setupRuntimeConfig.TRUST_PROXY === 'true',
   });
   const server = createServer(app.callback());
 
-  await listen(server, env.SERVER_PORT, env.SERVER_HOST);
-  logger.warn(`Setup mode enabled. HTTP server listening on ${env.SERVER_HOST}:${env.SERVER_PORT}`);
+  await listen(server, setupRuntimeConfig.SERVER_PORT, setupRuntimeConfig.SERVER_HOST);
+  logger.warn(
+    `Setup mode enabled. HTTP server listening on ${setupRuntimeConfig.SERVER_HOST}:${setupRuntimeConfig.SERVER_PORT}`,
+  );
 
   const shutdown = async (signal: NodeJS.Signals) => {
     logger.info(`Received ${signal}; shutting down setup server.`);
@@ -57,6 +68,14 @@ export async function bootstrapSetup() {
 
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
+}
+
+function warnIfFrontendEntryFileMissing() {
+  if (!existsSync(frontendEntryFilePath)) {
+    logger.warn(
+      `Frontend entry file was not found at ${frontendEntryFilePath}. Backend-served browser routes require npm run build:frontend.`,
+    );
+  }
 }
 
 function loadSetupRuntimeEnv() {

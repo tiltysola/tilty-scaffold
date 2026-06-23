@@ -20,11 +20,12 @@ import { type EmailVerificationService } from './auth.email';
 import { assertPasswordConfirmation } from './auth.validation';
 
 interface RegisterInput {
+  username: string;
+  displayName: string;
   email: string;
   emailVerificationCode?: string | undefined;
   password: string;
   confirmPassword: string;
-  username: string;
 }
 
 interface ResetPasswordInput {
@@ -35,7 +36,7 @@ interface ResetPasswordInput {
 }
 
 interface LoginInput {
-  email: string;
+  identifier: string;
   password: string;
 }
 
@@ -47,6 +48,10 @@ interface AvatarUploadInput {
   content: Buffer;
   contentType: string;
   filename?: string;
+}
+
+interface UpdateCurrentUserInput {
+  displayName: string;
 }
 
 export interface AuthTokenConfig {
@@ -112,6 +117,7 @@ export class AuthService {
     const credentials = await hashPassword(input.password);
     const user = await this.userService.createWithCredentials({
       username: input.username,
+      displayName: input.displayName,
       email: input.email,
       ...credentials,
     });
@@ -122,7 +128,7 @@ export class AuthService {
   }
 
   async login(input: LoginInput) {
-    const user = await this.userService.findByEmail(input.email);
+    const user = await this.userService.findByLoginIdentifier(input.identifier);
 
     if (!user || !user.available || !user.passwordHash || !user.passwordSalt) {
       throwInvalidCredentials();
@@ -220,6 +226,13 @@ export class AuthService {
     return (await this.authenticate(token)).authUser;
   }
 
+  async updateCurrentUser(token: string, input: UpdateCurrentUserInput) {
+    const { user } = await this.authenticate(token);
+    const updatedUser = await this.userService.updateProfile(user, input);
+
+    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+  }
+
   async uploadAvatar(token: string, input: AvatarUploadInput) {
     if (!this.fileStorage) {
       throw new AppError('FILE_STORAGE_DISABLED', 'File storage is not configured.', 500);
@@ -232,7 +245,7 @@ export class AuthService {
       cacheControl: 'public, max-age=31536000, immutable',
       content: input.content,
       contentType: image.contentType,
-      key: `avatars/${user.id}/${randomUUID()}.${image.extension}`,
+      key: `avatars/${randomUUID()}.${image.extension}`,
     });
     const previousAvatarStorageKey = user.avatarStorageKey;
     let updatedUser: UserModel;
@@ -291,9 +304,10 @@ export async function createAuthSession(
   const refreshTokenId = randomUUID();
   const accessToken = await createAccessToken(
     {
-      sub: authUser.id,
-      email: authUser.email,
+      sub: user.id,
       username: authUser.username,
+      displayName: authUser.displayName,
+      email: authUser.email,
     },
     tokenSecret,
     tokenConfig.accessTokenTtlSeconds,
@@ -301,7 +315,7 @@ export async function createAuthSession(
   const refreshToken = await createRefreshToken(
     {
       jti: refreshTokenId,
-      sub: authUser.id,
+      sub: user.id,
     },
     tokenSecret,
     tokenConfig.refreshTokenTtlSeconds,
@@ -310,7 +324,7 @@ export async function createAuthSession(
   await refreshTokenStore.set(
     getRefreshTokenCacheKey(refreshTokenId),
     {
-      userId: authUser.id,
+      userId: user.id,
       used: false,
     },
     tokenConfig.refreshTokenTtlSeconds * 1000,
@@ -327,17 +341,17 @@ export async function createAuthSession(
 
 export function toAuthUser(user: UserModel, access: UserAccess) {
   return {
-    id: user.id,
     username: user.username,
+    displayName: user.displayName,
     email: user.email,
+    ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
     roles: access.roles,
     permissions: access.permissions,
-    ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
   };
 }
 
 function throwInvalidCredentials(): never {
-  throw new AppError('AUTH_INVALID_CREDENTIALS', 'The email address or password is invalid.', 401);
+  throw new AppError('AUTH_INVALID_CREDENTIALS', 'The account identifier or password is invalid.', 401);
 }
 
 function throwInvalidRefreshToken(): never {

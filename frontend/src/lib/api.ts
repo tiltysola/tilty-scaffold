@@ -1,4 +1,4 @@
-import { appConfig } from './config';
+import { routePath } from '@/router';
 
 interface ApiSuccess<T> {
   code: number;
@@ -33,10 +33,10 @@ export interface ApiRequestOptions extends Omit<RequestInit, 'body' | 'headers'>
 }
 
 const defaultRequestTimeoutMs = 15_000;
-const setupPath = '/setup';
 
-export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}) {
+export async function apiRequest<T>(apiRequestPath: string, options: ApiRequestOptions = {}) {
   const { body, headers: inputHeaders, signal: inputSignal, ...requestOptions } = options;
+  const sameOriginApiPath = resolveSameOriginApiPath(apiRequestPath);
   const headers = new Headers(inputHeaders);
   const requestBody = createRequestBody(body);
   const signal = createRequestSignal(inputSignal);
@@ -48,7 +48,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   let response: Response;
 
   try {
-    response = await fetch(`${appConfig.apiBaseUrl}${path}`, {
+    response = await fetch(sameOriginApiPath, {
       credentials: 'include',
       ...requestOptions,
       body: requestBody,
@@ -59,58 +59,38 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     throw new ApiError(0, 'NETWORK_ERROR', 'The server could not be reached.');
   }
 
-  const payload = await readJson(response);
+  const responsePayload = await readJson(response);
 
   if (!response.ok) {
-    if (isApiFailure(payload)) {
-      handleSetupRequiredFailure(payload);
-      throw new ApiError(response.status, payload.error, payload.message, payload.details);
+    if (isApiFailure(responsePayload)) {
+      handleSetupRequiredFailure(responsePayload);
+      throw new ApiError(response.status, responsePayload.error, responsePayload.message, responsePayload.details);
     }
 
     throw new ApiError(response.status, 'API_ERROR', 'The request could not be completed.');
   }
 
-  if (!isApiSuccess<T>(payload)) {
+  if (!isApiSuccess<T>(responsePayload)) {
     throw new ApiError(response.status, 'API_RESPONSE_ERROR', 'The server response is invalid.');
   }
 
-  return payload.data;
+  return responsePayload.data;
 }
 
-function handleSetupRequiredFailure(payload: ApiFailure) {
-  if (payload.error !== 'SETUP_REQUIRED' || typeof window === 'undefined') {
-    return;
+export function getApiErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiError) {
+    return error.message;
   }
 
-  const navigationTarget = resolveSetupNavigationTarget();
-
-  if (navigationTarget) {
-    window.location.replace(navigationTarget);
-  }
+  return fallback;
 }
 
-function parseUrlOrNull(value: string) {
-  try {
-    return new URL(value);
-  } catch {
-    return null;
-  }
-}
-
-function resolveSetupNavigationTarget() {
-  const currentUrl = parseUrlOrNull(window.location.href);
-
-  if (!currentUrl) {
-    return setupPath;
+function resolveSameOriginApiPath(apiRequestPath: string) {
+  if (!apiRequestPath.startsWith('/api/')) {
+    throw new ApiError(0, 'API_PATH_INVALID', 'API requests must use same-origin /api/... paths.');
   }
 
-  const currentPath = `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
-
-  if (currentPath === setupPath) {
-    return null;
-  }
-
-  return setupPath;
+  return apiRequestPath;
 }
 
 function createRequestBody(body: unknown) {
@@ -143,14 +123,6 @@ function createRequestSignal(inputSignal?: AbortSignal | null) {
   return AbortSignal.any([inputSignal, timeoutSignal]);
 }
 
-export function getApiErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) {
-    return error.message;
-  }
-
-  return fallback;
-}
-
 async function readJson(response: Response) {
   const text = await response.text();
 
@@ -179,4 +151,40 @@ function isApiFailure(value: unknown): value is ApiFailure {
   const payload = value as Record<string, unknown>;
 
   return typeof payload.code === 'number' && typeof payload.error === 'string' && typeof payload.message === 'string';
+}
+
+function handleSetupRequiredFailure(payload: ApiFailure) {
+  if (payload.error !== 'SETUP_REQUIRED' || typeof window === 'undefined') {
+    return;
+  }
+
+  const navigationTarget = resolveSetupNavigationTarget();
+
+  if (navigationTarget) {
+    window.location.replace(navigationTarget);
+  }
+}
+
+function resolveSetupNavigationTarget() {
+  const currentUrl = parseUrlOrNull(window.location.href);
+
+  if (!currentUrl) {
+    return routePath('setup');
+  }
+
+  const currentBrowserPath = `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
+
+  if (currentBrowserPath === routePath('setup')) {
+    return null;
+  }
+
+  return routePath('setup');
+}
+
+function parseUrlOrNull(value: string) {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
 }

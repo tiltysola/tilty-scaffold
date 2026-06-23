@@ -61,6 +61,11 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
         handlers: [controller.me],
       },
       {
+        method: 'patch',
+        path: '/me',
+        handlers: rateLimitedHandlers(controller.updateMe),
+      },
+      {
         method: 'post',
         path: '/refresh',
         handlers: [controller.refresh],

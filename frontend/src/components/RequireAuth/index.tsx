@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 
 import { getStoredSession, validateStoredSession } from '@/lib/auth';
+import { routePath } from '@/router';
 import { Spinner } from '@/shadcn/components/ui/spinner';
 
 const Index = () => {
@@ -62,7 +63,7 @@ const Index = () => {
   }
 
   if (!authState.session) {
-    return <Navigate replace state={{ from: `${location.pathname}${location.search}` }} to="/login" />;
+    return <Navigate replace state={{ from: `${location.pathname}${location.search}` }} to={routePath('login')} />;
   }
 
   return <Outlet />;

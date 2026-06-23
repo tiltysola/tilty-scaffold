@@ -170,8 +170,10 @@ const Index = () => {
                       <TableRow key={user.id}>
                         <TableCell>
                           <div className="grid gap-1">
-                            <span className="font-medium">{user.username}</span>
-                            <span className="text-xs text-muted-foreground">{user.email}</span>
+                            <span className="font-medium">{user.displayName}</span>
+                            <span className="text-xs text-muted-foreground">
+                              @{user.username} - {user.email}
+                            </span>
                           </div>
                         </TableCell>
                         <TableCell>

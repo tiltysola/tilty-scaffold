@@ -27,13 +27,48 @@ describe('setup service', () => {
     const service = new SetupService('setup');
     const defaults = service.getDefaults();
 
+    expect(defaults.environmentFileLoaded).toBe(false);
     expect(defaults.environment.DATABASE_DIALECT).toBe('sqlite');
     expect(defaults.environment.CACHE_REDIS_URL).toBe('redis://localhost:6379/0');
     expect(defaults.environment.AUTH_TOKEN_SECRET).toHaveLength(64);
   });
 
-  it('locks setup when the environment file exists', async () => {
-    await writeFile('.env', 'NODE_ENV=development\n', 'utf8');
+  it('loads existing environment values when the setup lock is missing', async () => {
+    await writeFile(
+      '.env',
+      [
+        'NODE_ENV=production',
+        'AUTH_TOKEN_SECRET=existing-auth-token-secret-minimum-32-characters',
+        'DATABASE_STORAGE=./data/existing-env.sqlite',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const service = new SetupService('setup');
+    const defaults = service.getDefaults();
+
+    expect(defaults.environmentFileLoaded).toBe(true);
+    expect(defaults.environment.NODE_ENV).toBe('production');
+    expect(defaults.environment.AUTH_TOKEN_SECRET).toBe('existing-auth-token-secret-minimum-32-characters');
+    expect(defaults.environment.DATABASE_STORAGE).toBe('./data/existing-env.sqlite');
+    expect(defaults.environment.CACHE_STORE).toBe('memory');
+    expect('SETUP_LOCKED' in defaults.environment).toBe(false);
+  });
+
+  it('loads existing environment values when the setup lock is false', async () => {
+    await writeFile('.env', 'SETUP_LOCKED=false\nDATABASE_STORAGE=./data/unlocked.sqlite\n', 'utf8');
+
+    const service = new SetupService('setup');
+
+    const defaults = service.getDefaults();
+
+    expect(defaults.environmentFileLoaded).toBe(true);
+    expect(defaults.environment.DATABASE_STORAGE).toBe('./data/unlocked.sqlite');
+  });
+
+  it('locks setup when the setup lock is true', async () => {
+    await writeFile('.env', 'SETUP_LOCKED=true\nNODE_ENV=development\n', 'utf8');
 
     const service = new SetupService('setup');
 
@@ -47,10 +82,11 @@ describe('setup service', () => {
     await expect(
       service.complete({
         administrator: {
-          confirmPassword: 'password123',
+          username: 'root_user',
+          displayName: 'Root User',
           email: 'root@example.com',
           password: 'password123',
-          username: 'Root User',
+          confirmPassword: 'password123',
         },
         environment: {
           ...environment,
@@ -64,7 +100,9 @@ describe('setup service', () => {
       restartRequired: true,
     });
 
+    await expect(readFile('.env', 'utf8')).resolves.toContain('SETUP_LOCKED=true');
     await expect(readFile('.env', 'utf8')).resolves.toContain('DATABASE_STORAGE=./data/setup.sqlite');
+    await expect(readFile('.env.setup.lock', 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     expect(() => service.getDefaults()).toThrow('Setup is locked');
 
     const sequelize = createSequelize({ dialect: 'sqlite', storage: './data/setup.sqlite' });
@@ -84,8 +122,9 @@ describe('setup service', () => {
     try {
       await createMigrator(sequelize).up();
       await models.user.create({
+        username: 'existing_user',
+        displayName: 'Existing User',
         email: 'existing@example.com',
-        username: 'Existing User',
       });
     } finally {
       await sequelize.close();
@@ -112,6 +151,7 @@ describe('setup service', () => {
       restartRequired: true,
     });
 
+    await expect(readFile('.env', 'utf8')).resolves.toContain('SETUP_LOCKED=true');
     await expect(readFile('.env', 'utf8')).resolves.toContain('DATABASE_STORAGE=./data/existing-users.sqlite');
 
     const verificationSequelize = createSequelize({ dialect: 'sqlite', storage: './data/existing-users.sqlite' });
@@ -123,6 +163,34 @@ describe('setup service', () => {
     } finally {
       await verificationSequelize.close();
     }
+  });
+
+  it('rejects setup completion when another process holds the setup lock', async () => {
+    const service = new SetupService('setup');
+    const environment = {
+      ...service.getDefaults().environment,
+      DATABASE_STORAGE: './data/locked.sqlite',
+      SCHEDULER_ENABLED: 'false',
+    };
+
+    await writeFile('.env.setup.lock', 'another process\n', 'utf8');
+
+    await expect(
+      service.complete({
+        administrator: {
+          username: 'root_user',
+          displayName: 'Root User',
+          email: 'root@example.com',
+          password: 'password123',
+          confirmPassword: 'password123',
+        },
+        environment,
+      }),
+    ).rejects.toMatchObject({
+      code: 'SETUP_IN_PROGRESS',
+      status: 409,
+    });
+    await expect(readFile('.env', 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('tests sqlite database and memory cache connectivity', async () => {

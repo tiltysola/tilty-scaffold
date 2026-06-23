@@ -3,10 +3,16 @@ import { apiRequest } from './api';
 export type SetupEnvironment = Record<string, string>;
 
 export interface SetupAdministrator {
-  confirmPassword: string;
+  username: string;
+  displayName: string;
   email: string;
   password: string;
-  username: string;
+  confirmPassword: string;
+}
+
+export interface SetupDefaults {
+  environment: SetupEnvironment;
+  environmentFileLoaded: boolean;
 }
 
 export interface SetupCompleteInput {
@@ -15,7 +21,7 @@ export interface SetupCompleteInput {
 }
 
 export async function fetchSetupDefaults() {
-  return apiRequest<{ environment: SetupEnvironment }>('/api/setup/defaults');
+  return apiRequest<SetupDefaults>('/api/setup/defaults');
 }
 
 export async function validateSetup(input: SetupCompleteInput) {

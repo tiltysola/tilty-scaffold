@@ -1,11 +1,18 @@
 import { randomBytes, randomUUID } from 'crypto';
-import { writeFile } from 'fs/promises';
+import { open, rename, unlink, writeFile } from 'fs/promises';
 import { z } from 'zod';
 
 import { SystemRole } from '@tilty/shared/access-control';
 import { hasMatchingPasswordConfirmation } from '@tilty/shared/validation';
 
-import { getEnvFilePath, getEnvValidationMessage, hasEnvFile, loadEnv } from '../../config/env';
+import {
+  getEnvFilePath,
+  getEnvValidationMessage,
+  hasEnvFile,
+  isSetupLocked,
+  loadEnv,
+  loadEnvFileSource,
+} from '../../config/env';
 import { AppError } from '../../core/errors';
 import { createCacheStore } from '../../infra/cache';
 import { createSequelize } from '../../infra/database';
@@ -19,6 +26,12 @@ import { testSsoDiscovery } from '../auth/auth.sso';
 import { initUserModel } from '../users/user.model';
 
 type SetupMode = 'locked' | 'setup';
+type SetupCompletionLock = {
+  fileHandle: Awaited<ReturnType<typeof open>>;
+  lockFilePath: string;
+};
+
+const setupLockedMessage = 'Setup is locked because SETUP_LOCKED is true.';
 
 const setupEnvSchema = z
   .object({
@@ -100,7 +113,14 @@ const setupEnvSchema = z
 
 const administratorSchema = z
   .object({
-    confirmPassword: z.string().min(8).max(128),
+    username: z
+      .string()
+      .trim()
+      .min(3)
+      .max(32)
+      .regex(/^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$/)
+      .transform((username) => username.toLowerCase()),
+    displayName: z.string().trim().min(2).max(64),
     email: z
       .string()
       .trim()
@@ -108,7 +128,7 @@ const administratorSchema = z
       .pipe(z.email())
       .transform((email) => email.toLowerCase()),
     password: z.string().min(8).max(128),
-    username: z.string().trim().min(2).max(32),
+    confirmPassword: z.string().min(8).max(128),
   })
   .refine(hasMatchingPasswordConfirmation, {
     message: 'Password confirmation does not match.',
@@ -138,10 +158,8 @@ export class SetupService {
     this.assertSetupAvailable();
 
     return {
-      environment: {
-        ...defaultSetupEnvironment,
-        AUTH_TOKEN_SECRET: generateSecret(),
-      },
+      environment: getDefaultSetupEnvironment(),
+      environmentFileLoaded: hasEnvFile(),
     };
   }
 
@@ -342,9 +360,9 @@ export class SetupService {
     this.assertSetupAvailable();
 
     const { environment } = setupEnvironmentInputSchema.parse(input);
-    const env = loadEnv(assertValidEnvironment(environment));
+    const environmentConfig = loadEnv(assertValidEnvironment(environment));
 
-    if (!env.sso) {
+    if (!environmentConfig.sso) {
       return {
         connected: true,
         enabled: false,
@@ -352,7 +370,7 @@ export class SetupService {
     }
 
     try {
-      await testSsoDiscovery(env.sso);
+      await testSsoDiscovery(environmentConfig.sso);
 
       return {
         connected: true,
@@ -371,13 +389,17 @@ export class SetupService {
     }
 
     setupCompletionInProgress = true;
+    let setupCompletionLock: SetupCompletionLock | undefined;
 
     try {
-      const parsed = setupCompleteSchema.parse(input);
-      const envSource = assertValidEnvironment(parsed.environment);
+      const setupRequest = setupCompleteSchema.parse(input);
+      const setupEnvironmentSource = assertValidEnvironment(setupRequest.environment);
 
-      const administratorCreated = await provisionDatabase(envSource, parsed.administrator);
-      await writeEnvironmentFile(envSource);
+      setupCompletionLock = await acquireSetupCompletionLock();
+      this.assertSetupAvailable();
+
+      const administratorCreated = await provisionDatabase(setupEnvironmentSource, setupRequest.administrator);
+      await writeEnvironmentFile(setupEnvironmentSource);
 
       return {
         administratorCreated,
@@ -386,22 +408,25 @@ export class SetupService {
       } as const;
     } finally {
       setupCompletionInProgress = false;
+      if (setupCompletionLock) {
+        await releaseSetupCompletionLock(setupCompletionLock);
+      }
     }
   }
 
   private assertSetupAvailable() {
-    if (this.mode === 'locked' || hasEnvFile()) {
-      throw new AppError('SETUP_LOCKED', 'Setup is locked because the backend environment file already exists.', 403);
+    if (this.mode === 'locked' || isSetupLocked()) {
+      throw new AppError('SETUP_LOCKED', setupLockedMessage, 403);
     }
   }
 }
 
 async function provisionDatabase(
-  envSource: NodeJS.ProcessEnv,
+  setupEnvironmentSource: NodeJS.ProcessEnv,
   administratorInput: SetupCompleteInput['administrator'],
 ) {
-  const env = loadEnv(envSource);
-  const sequelize = createSequelize(env.database);
+  const environmentConfig = loadEnv(setupEnvironmentSource);
+  const sequelize = createSequelize(environmentConfig.database);
   const models = {
     ...initAccessControlModels(sequelize),
     user: initUserModel(sequelize),
@@ -426,8 +451,9 @@ async function provisionDatabase(
     const administrator = administratorSchema.parse(administratorInput);
     const credentials = await hashPassword(administrator.password);
     const user = await models.user.create({
-      email: administrator.email,
       username: administrator.username,
+      displayName: administrator.displayName,
+      email: administrator.email,
       ...credentials,
     });
 
@@ -478,28 +504,28 @@ function normalizeTableName(tableName: unknown) {
 function assertValidEnvironment(environment: SetupEnvironment) {
   assertRequiredEnvironment(environment);
 
-  const envSource = toEnvSource(environment);
-  const validationMessage = getEnvValidationMessage(envSource);
+  const environmentSource = toEnvironmentSource(environment);
+  const validationMessage = getEnvValidationMessage(environmentSource);
 
   if (validationMessage) {
     throw new AppError('SETUP_ENV_INVALID', validationMessage, 400);
   }
 
-  return envSource;
+  return environmentSource;
 }
 
-function toEnvSource(environment: SetupEnvironment): NodeJS.ProcessEnv {
-  const envSource: NodeJS.ProcessEnv = {};
+function toEnvironmentSource(environment: SetupEnvironment): NodeJS.ProcessEnv {
+  const environmentSource: NodeJS.ProcessEnv = {};
 
   for (const [key, value] of Object.entries(environment)) {
     const normalized = value.trim();
 
     if (normalized) {
-      envSource[key] = normalized;
+      environmentSource[key] = normalized;
     }
   }
 
-  return envSource;
+  return environmentSource;
 }
 
 function toDatabaseConfig(environment: SetupEnvironment) {
@@ -578,13 +604,13 @@ function toFileStorageConfig(environment: SetupEnvironment) {
     'FILE_OSS_REGION',
   ]);
 
-  const env = loadEnv(assertValidEnvironment(environment));
+  const environmentConfig = loadEnv(assertValidEnvironment(environment));
 
-  if (env.fileStorage.driver !== 'oss') {
+  if (environmentConfig.fileStorage.driver !== 'oss') {
     throw new AppError('SETUP_ENV_INVALID', 'OSS file storage configuration is invalid.', 400);
   }
 
-  return env.fileStorage;
+  return environmentConfig.fileStorage;
 }
 
 function parseLogTargets(value: string) {
@@ -734,44 +760,86 @@ function getConnectionErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Connection test could not be completed.';
 }
 
-async function writeEnvironmentFile(envSource: NodeJS.ProcessEnv) {
-  if (hasEnvFile()) {
-    throw new AppError('SETUP_LOCKED', 'Setup is locked because the backend environment file already exists.', 403);
-  }
+async function acquireSetupCompletionLock(): Promise<SetupCompletionLock> {
+  const setupCompletionLockFilePath = `${getEnvFilePath()}.setup.lock`;
+  let setupCompletionLockFileHandle: Awaited<ReturnType<typeof open>> | undefined;
 
   try {
-    await writeFile(getEnvFilePath(), renderEnvironmentFile(envSource), {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600,
-    });
+    setupCompletionLockFileHandle = await open(setupCompletionLockFilePath, 'wx', 0o600);
+    await setupCompletionLockFileHandle.writeFile(`${process.pid}\n${new Date().toISOString()}\n`, 'utf8');
+
+    return {
+      fileHandle: setupCompletionLockFileHandle,
+      lockFilePath: setupCompletionLockFilePath,
+    };
   } catch (error) {
+    if (setupCompletionLockFileHandle) {
+      await setupCompletionLockFileHandle.close().catch(() => undefined);
+      await unlink(setupCompletionLockFilePath).catch(() => undefined);
+    }
+
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new AppError('SETUP_LOCKED', 'Setup is locked because the backend environment file already exists.', 403);
+      throw new AppError('SETUP_IN_PROGRESS', 'Setup is already running.', 409);
     }
 
     throw error;
   }
 }
 
-function renderEnvironmentFile(envSource: NodeJS.ProcessEnv) {
-  const lines = ['# Generated by the setup wizard.', '# Do not commit this file.', ''];
+async function releaseSetupCompletionLock(lock: SetupCompletionLock) {
+  await lock.fileHandle.close().catch(() => undefined);
+  await unlink(lock.lockFilePath).catch(() => undefined);
+}
 
-  for (const group of envGroups) {
-    lines.push(`# ${group.name}`);
+async function writeEnvironmentFile(setupEnvironmentSource: NodeJS.ProcessEnv) {
+  if (isSetupLocked()) {
+    throw new AppError('SETUP_LOCKED', setupLockedMessage, 403);
+  }
 
-    for (const key of group.keys) {
-      const value = envSource[key];
+  const environmentFilePath = getEnvFilePath();
+  const temporaryEnvironmentFilePath = `${environmentFilePath}.${process.pid}.${randomUUID()}.tmp`;
 
-      if (value !== undefined) {
-        lines.push(`${key}=${formatEnvValue(value)}`);
+  try {
+    await writeFile(temporaryEnvironmentFilePath, renderEnvironmentFile(setupEnvironmentSource), {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    if (isSetupLocked()) {
+      throw new AppError('SETUP_LOCKED', setupLockedMessage, 403);
+    }
+    await rename(temporaryEnvironmentFilePath, environmentFilePath);
+  } catch (error) {
+    await unlink(temporaryEnvironmentFilePath).catch(() => undefined);
+    throw error;
+  }
+}
+
+function renderEnvironmentFile(setupEnvironmentSource: NodeJS.ProcessEnv) {
+  const environmentFileLines = [
+    '# Generated by the setup wizard.',
+    '# Do not commit this file.',
+    '',
+    '# Setup',
+    'SETUP_LOCKED=true',
+    '',
+  ];
+
+  for (const environmentGroup of envGroups) {
+    environmentFileLines.push(`# ${environmentGroup.name}`);
+
+    for (const environmentKey of environmentGroup.keys) {
+      const environmentValue = setupEnvironmentSource[environmentKey];
+
+      if (environmentValue !== undefined) {
+        environmentFileLines.push(`${environmentKey}=${formatEnvValue(environmentValue)}`);
       }
     }
 
-    lines.push('');
+    environmentFileLines.push('');
   }
 
-  return `${lines.join('\n').trimEnd()}\n`;
+  return `${environmentFileLines.join('\n').trimEnd()}\n`;
 }
 
 function formatEnvValue(value: string) {
@@ -780,6 +848,34 @@ function formatEnvValue(value: string) {
   }
 
   return JSON.stringify(value);
+}
+
+function getDefaultSetupEnvironment() {
+  const setupEnvironment: SetupEnvironment = {
+    ...defaultSetupEnvironment,
+    ...getExistingSetupEnvironment(),
+  };
+
+  if (!setupEnvironment.AUTH_TOKEN_SECRET.trim()) {
+    setupEnvironment.AUTH_TOKEN_SECRET = generateSecret();
+  }
+
+  return setupEnvironment;
+}
+
+function getExistingSetupEnvironment() {
+  const environmentFileSource = loadEnvFileSource();
+  const existingSetupEnvironment: Partial<SetupEnvironment> = {};
+
+  for (const environmentKey of Object.keys(defaultSetupEnvironment) as Array<keyof SetupEnvironment>) {
+    const environmentValue = environmentFileSource[environmentKey];
+
+    if (environmentValue !== undefined) {
+      existingSetupEnvironment[environmentKey] = environmentValue;
+    }
+  }
+
+  return existingSetupEnvironment;
 }
 
 function generateSecret() {

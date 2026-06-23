@@ -1,6 +1,6 @@
 import { type Middleware } from 'koa';
 
-import { hasEnvFile } from '../config/env';
+import { isSetupLocked as isSetupLockedByEnv } from '../config/env';
 import { fail } from '../core/http';
 
 interface SetupRedirectOptions {
@@ -62,11 +62,11 @@ export function setupRedirectMiddleware(options: SetupRedirectOptions): Middlewa
 }
 
 function isSetupLocked(options: SetupRedirectOptions) {
-  return options.mode === 'locked' || (options.isSetupLocked ?? hasEnvFile)();
+  return options.mode === 'locked' || (options.isSetupLocked ?? isSetupLockedByEnv)();
 }
 
-function isApiRequest(path: string) {
-  return path.startsWith('/api/');
+function isApiRequest(requestPath: string) {
+  return requestPath === '/api' || requestPath.startsWith('/api/');
 }
 
 function isHtmlNavigationRequest(ctx: Parameters<Middleware>[0]) {
@@ -79,18 +79,22 @@ function isHtmlNavigationRequest(ctx: Parameters<Middleware>[0]) {
   );
 }
 
-function isSetupRoutePath(path: string) {
-  return path === setupPagePath || path === setupApiPathPrefix || path.startsWith(`${setupApiPathPrefix}/`);
+function isSetupRoutePath(requestPath: string) {
+  return (
+    requestPath === setupPagePath ||
+    requestPath === setupApiPathPrefix ||
+    requestPath.startsWith(`${setupApiPathPrefix}/`)
+  );
 }
 
-function sendRedirect(ctx: Parameters<Middleware>[0], url: string) {
+function sendRedirect(ctx: Parameters<Middleware>[0], redirectUrl: string) {
   ctx.status = 302;
-  ctx.redirect(url);
+  ctx.redirect(redirectUrl);
 }
 
 function sendSetupRequired(ctx: Parameters<Middleware>[0]) {
   ctx.status = setupRequiredStatus;
-  ctx.body = fail(setupRequiredStatus, 'SETUP_REQUIRED', 'Setup is required before this API can be used.');
+  ctx.body = fail(setupRequiredStatus, 'SETUP_REQUIRED', 'Setup is required before the application can be used.');
 }
 
 function sendSetupRestartRequired(ctx: Parameters<Middleware>[0]) {
@@ -98,43 +102,41 @@ function sendSetupRestartRequired(ctx: Parameters<Middleware>[0]) {
   ctx.body = fail(
     setupRestartRequiredStatus,
     'SETUP_RESTART_REQUIRED',
-    'Setup is complete. Restart the backend service before using this API.',
+    'Setup is complete. Restart the backend service before using the application.',
   );
 }
 
-function buildFrontendRedirectUrl(ctx: Parameters<Middleware>[0], path: string, allowedOrigins: string[]) {
-  const origin =
+function buildFrontendRedirectUrl(ctx: Parameters<Middleware>[0], redirectPath: string, allowedOrigins: string[]) {
+  const frontendOrigin =
     resolveAllowedFrontendOrigin(ctx.get('origin'), allowedOrigins) ??
     resolveFrontendOriginFromReferer(ctx, allowedOrigins);
 
-  return origin ? `${origin}${path}` : path;
+  return frontendOrigin ? `${frontendOrigin}${redirectPath}` : redirectPath;
 }
 
 function resolveAllowedFrontendOrigin(requestOrigin: string, allowedOrigins: string[]) {
-  const normalizedRequestOrigin = normalizeHttpOrigin(requestOrigin);
+  const normalizedFrontendOrigin = normalizeHttpOrigin(requestOrigin);
 
-  if (normalizedRequestOrigin) {
-    const hasAllowedRequestOrigin = allowedOrigins.some(
-      (origin) => origin === '*' || normalizeHttpOrigin(origin) === normalizedRequestOrigin,
-    );
-
-    if (hasAllowedRequestOrigin) {
-      return normalizedRequestOrigin;
-    }
+  if (!normalizedFrontendOrigin) {
+    return undefined;
   }
 
-  return allowedOrigins.map((origin) => normalizeHttpOrigin(origin)).find((origin) => origin !== undefined);
+  const isFrontendOriginAllowed = allowedOrigins.some(
+    (allowedOrigin) => allowedOrigin === '*' || normalizeHttpOrigin(allowedOrigin) === normalizedFrontendOrigin,
+  );
+
+  return isFrontendOriginAllowed ? normalizedFrontendOrigin : undefined;
 }
 
 function resolveFrontendOriginFromReferer(ctx: Parameters<Middleware>[0], allowedOrigins: string[]) {
-  const referer = ctx.get('referer');
+  const refererHeader = ctx.get('referer');
 
-  if (!referer) {
+  if (!refererHeader) {
     return undefined;
   }
 
   try {
-    return resolveAllowedFrontendOrigin(new URL(referer).origin, allowedOrigins);
+    return resolveAllowedFrontendOrigin(new URL(refererHeader).origin, allowedOrigins);
   } catch {
     return undefined;
   }

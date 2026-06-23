@@ -4,7 +4,7 @@ import { createSequelize } from '../src/infra/database';
 import { createMigrator } from '../src/infra/migrator';
 import { createServices, initModels } from '../src/modules';
 import { AccessControlService } from '../src/modules/access-control/access-control.service';
-import { verifySsoBindToken, verifySsoStateToken } from '../src/modules/auth/auth.crypto';
+import { verifySsoBindToken, verifySsoHandoffToken, verifySsoStateToken } from '../src/modules/auth/auth.crypto';
 import { type SsoConfig } from '../src/modules/auth/auth.sso';
 
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
@@ -224,7 +224,7 @@ describe('OIDC SSO service', () => {
     idToken = await new SignJWT({
       email: 'sso@example.com',
       email_verified: true,
-      name: 'SSO User',
+      name: 'Provider User',
       nonce: state.nonce,
     })
       .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
@@ -248,17 +248,19 @@ describe('OIDC SSO service', () => {
     expect(callbackUrl.searchParams.get('sso_bind_token')).toBeNull();
     expect(callbackParams.get('redirect')).toBe('/reports');
     expect(callbackParams.get('sso_email')).toBe('sso@example.com');
-    expect(callbackParams.get('sso_username')).toBe('SSO User');
+    expect(callbackParams.get('sso_display_name')).toBe('Provider User');
+    expect(callbackParams.get('sso_username')).toBe('sso');
     expect(callbackParams.get('sso_token')).toBeNull();
     expect(bindToken).toEqual(expect.any(String));
 
     const bind = await verifySsoBindToken(bindToken!, authTokenSecret);
 
     expect(bind).toMatchObject({
+      ssoSubject: 'provider-user@identity.example.com',
+      username: 'sso',
+      displayName: 'Provider User',
       email: 'sso@example.com',
       redirectPath: '/reports',
-      ssoSubject: 'provider-user@identity.example.com',
-      username: 'SSO User',
     });
 
     await expect(
@@ -273,10 +275,11 @@ describe('OIDC SSO service', () => {
 
     await expect(
       services.sso.createSsoAccount({
+        username: 'chosen_name',
+        displayName: 'Chosen Name',
         password: 'password123',
         confirmPassword: 'different123',
         token: bindToken!,
-        username: 'Chosen Name',
       }),
     ).rejects.toMatchObject({
       code: 'AUTH_PASSWORD_CONFIRMATION_MISMATCH',
@@ -284,24 +287,27 @@ describe('OIDC SSO service', () => {
     });
 
     const session = await services.sso.createSsoAccount({
+      username: 'chosen_name',
+      displayName: 'Chosen Name',
       password: 'password123',
       confirmPassword: 'password123',
       token: bindToken!,
-      username: 'Chosen Name',
     });
 
     expect(session.user).toMatchObject({
+      username: 'chosen_name',
+      displayName: 'Chosen Name',
       email: 'sso@example.com',
-      username: 'Chosen Name',
     });
     expect(session.accessToken).toEqual(expect.any(String));
 
     await expect(
       services.sso.createSsoAccount({
+        username: 'replay_user',
+        displayName: 'Replay User',
         password: 'password123',
         confirmPassword: 'password123',
         token: bindToken!,
-        username: 'Replay User',
       }),
     ).rejects.toMatchObject({
       code: 'AUTH_INVALID_TOKEN',
@@ -310,13 +316,14 @@ describe('OIDC SSO service', () => {
 
     await expect(
       services.auth.login({
-        email: 'sso@example.com',
+        identifier: 'chosen_name',
         password: 'password123',
       }),
     ).resolves.toMatchObject({
       user: {
+        username: 'chosen_name',
+        displayName: 'Chosen Name',
         email: 'sso@example.com',
-        username: 'Chosen Name',
       },
     });
 
@@ -326,8 +333,9 @@ describe('OIDC SSO service', () => {
 
     expect(user).toBeTruthy();
     await user!.update({
+      username: 'changed_user',
+      displayName: 'Changed User',
       email: 'changed@example.com',
-      username: 'Changed User',
     });
 
     const nextLoginUrl = new URL(await services.sso.createLoginUrl('/settings'));
@@ -362,11 +370,22 @@ describe('OIDC SSO service', () => {
     expect(nextCallbackParams.get('redirect')).toBe('/settings');
     expect(handoffToken).toEqual(expect.any(String));
 
+    const handoff = await verifySsoHandoffToken(handoffToken!, authTokenSecret);
+
+    expect(handoff).toMatchObject({
+      type: 'sso_handoff',
+    });
+    expect(handoff).not.toHaveProperty('username');
+    expect(handoff).not.toHaveProperty('displayName');
+    expect(handoff).not.toHaveProperty('email');
+    expect(handoff).not.toHaveProperty('sub');
+
     const nextSession = await services.sso.exchangeHandoffToken(handoffToken!);
 
     expect(nextSession.user).toMatchObject({
+      username: 'changed_user',
+      displayName: 'Changed User',
       email: 'changed@example.com',
-      username: 'Changed User',
     });
 
     await expect(services.sso.exchangeHandoffToken(handoffToken!)).rejects.toMatchObject({
@@ -431,15 +450,17 @@ describe('OIDC SSO service', () => {
       }),
     );
     const session = await services.sso.createSsoAccount({
+      username: 'chosen_hs_user',
+      displayName: 'Chosen HS User',
       password: 'password123',
       confirmPassword: 'password123',
       token: getCallbackParams(callbackUrl).get('sso_bind_token')!,
-      username: 'Chosen HS User',
     });
 
     expect(session.user).toMatchObject({
+      username: 'chosen_hs_user',
+      displayName: 'Chosen HS User',
       email: 'hs256@example.com',
-      username: 'Chosen HS User',
     });
   });
 
@@ -560,6 +581,65 @@ describe('OIDC SSO service', () => {
     });
   });
 
+  it('rejects identity tokens with invalid email addresses', async () => {
+    const { SignJWT } = await import('jose');
+    const services = createServices(models, {
+      authTokenSecret,
+      sso: ssoConfig,
+    });
+    let idToken = '';
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL) => {
+        const url = String(input);
+
+        if (url === `${issuerUrl}/.well-known/openid-configuration`) {
+          return jsonResponse({
+            authorization_endpoint: `${issuerUrl}/oauth2/authorize`,
+            id_token_signing_alg_values_supported: ['HS256'],
+            issuer: issuerUrl,
+            token_endpoint: `${issuerUrl}/oauth2/token`,
+          });
+        }
+
+        if (url === `${issuerUrl}/oauth2/token`) {
+          return jsonResponse({ id_token: idToken });
+        }
+
+        throw new Error(`Unexpected SSO request: ${url}`);
+      }),
+    );
+
+    const loginUrl = new URL(await services.sso.createLoginUrl('/dashboard'));
+    const stateToken = loginUrl.searchParams.get('state');
+    const state = await verifySsoStateToken(stateToken!, authTokenSecret);
+
+    idToken = await new SignJWT({
+      email: 'not-an-email',
+      email_verified: true,
+      name: 'Invalid Email User',
+      nonce: state.nonce,
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuer(issuerUrl)
+      .setAudience(ssoConfig.clientId)
+      .setSubject('invalid-email-provider-user')
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .sign(Buffer.from(ssoConfig.clientSecret, 'utf8'));
+
+    await expect(
+      services.sso.handleCallback({
+        code: 'authorization-code',
+        state: stateToken!,
+      }),
+    ).rejects.toMatchObject({
+      code: 'SSO_EMAIL_INVALID',
+      status: 401,
+    });
+  });
+
   it('rejects identity tokens that do not include the expected nonce', async () => {
     const { SignJWT } = await import('jose');
     const services = createServices(models, {
@@ -618,76 +698,54 @@ describe('OIDC SSO service', () => {
   });
 
   it('binds first-time SSO login to an existing account after password verification', async () => {
-    const { SignJWT } = await import('jose');
     const services = createServices(models, {
       authTokenSecret,
       sso: ssoConfig,
     });
-    let idToken = '';
 
     await services.auth.register({
-      confirmPassword: 'password123',
+      username: 'existing_user',
+      displayName: 'Existing User',
       email: 'existing@example.com',
       password: 'password123',
-      username: 'Existing User',
+      confirmPassword: 'password123',
+    });
+    await services.auth.register({
+      username: 'occupied_user',
+      displayName: 'Occupied User',
+      email: 'occupied@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
     });
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: string | URL, init?: RequestInit) => {
-        const url = String(input);
+    const occupiedUser = await models.user.findOne({
+      where: { email: 'occupied@example.com' },
+    });
 
-        if (url === `${issuerUrl}/.well-known/openid-configuration`) {
-          return jsonResponse({
-            authorization_endpoint: `${issuerUrl}/oauth2/authorize`,
-            id_token_signing_alg_values_supported: ['HS256'],
-            issuer: issuerUrl,
-            token_endpoint: `${issuerUrl}/oauth2/token`,
-          });
-        }
+    await occupiedUser!.update({ ssoSubject: 'other-provider-user@identity.example.com' });
 
-        if (url === `${issuerUrl}/oauth2/token`) {
-          expect(init?.method).toBe('POST');
-          return jsonResponse({ id_token: idToken });
-        }
-
-        throw new Error(`Unexpected SSO request: ${url}`);
-      }),
-    );
-
-    const loginUrl = new URL(await services.sso.createLoginUrl('/dashboard'));
-    const stateToken = loginUrl.searchParams.get('state');
-    const state = await verifySsoStateToken(stateToken!, authTokenSecret);
-
-    idToken = await new SignJWT({
+    const bindToken = await createHsSsoBindToken(services, {
       email: 'provider-existing@example.com',
-      email_verified: true,
       name: 'Provider User',
-      nonce: state.nonce,
-    })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setIssuer(issuerUrl)
-      .setAudience(ssoConfig.clientId)
-      .setSubject('existing-provider-user')
-      .setIssuedAt()
-      .setExpirationTime('5m')
-      .sign(Buffer.from(ssoConfig.clientSecret, 'utf8'));
-
-    const callbackUrl = new URL(
-      await services.sso.handleCallback({
-        code: 'authorization-code',
-        state: stateToken!,
-      }),
-    );
-    const bindToken = getCallbackParams(callbackUrl).get('sso_bind_token');
-
-    expect(bindToken).toEqual(expect.any(String));
+      subject: 'existing-provider-user',
+    });
 
     await expect(
       services.sso.bindSsoAccount({
-        email: 'existing@example.com',
+        identifier: 'occupied_user',
+        password: 'password123',
+        token: bindToken,
+      }),
+    ).rejects.toMatchObject({
+      code: 'USER_SSO_SUBJECT_EXISTS',
+      status: 409,
+    });
+
+    await expect(
+      services.sso.bindSsoAccount({
+        identifier: 'existing_user',
         password: 'wrong-password',
-        token: bindToken!,
+        token: bindToken,
       }),
     ).rejects.toMatchObject({
       code: 'AUTH_INVALID_CREDENTIALS',
@@ -695,21 +753,22 @@ describe('OIDC SSO service', () => {
     });
 
     const session = await services.sso.bindSsoAccount({
-      email: 'existing@example.com',
+      identifier: 'existing_user',
       password: 'password123',
-      token: bindToken!,
+      token: bindToken,
     });
 
     expect(session.user).toMatchObject({
+      username: 'existing_user',
+      displayName: 'Existing User',
       email: 'existing@example.com',
-      username: 'Existing User',
     });
 
     await expect(
       services.sso.bindSsoAccount({
-        email: 'existing@example.com',
+        identifier: 'existing_user',
         password: 'password123',
-        token: bindToken!,
+        token: bindToken,
       }),
     ).rejects.toMatchObject({
       code: 'AUTH_INVALID_TOKEN',
@@ -723,78 +782,81 @@ describe('OIDC SSO service', () => {
     expect(user?.ssoSubject).toBe('existing-provider-user@identity.example.com');
   });
 
-  it('keeps the SSO bind token usable for binding when account creation hits an existing email', async () => {
-    const { SignJWT } = await import('jose');
+  it('keeps the SSO bind token usable when account creation hits an existing username', async () => {
     const services = createServices(models, {
       authTokenSecret,
       sso: ssoConfig,
     });
-    let idToken = '';
 
     await services.auth.register({
-      confirmPassword: 'password123',
-      email: 'conflict@example.com',
+      username: 'taken_name',
+      displayName: 'Taken Name',
+      email: 'taken@example.com',
       password: 'password123',
-      username: 'Existing Conflict User',
+      confirmPassword: 'password123',
     });
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: string | URL, init?: RequestInit) => {
-        const url = String(input);
-
-        if (url === `${issuerUrl}/.well-known/openid-configuration`) {
-          return jsonResponse({
-            authorization_endpoint: `${issuerUrl}/oauth2/authorize`,
-            id_token_signing_alg_values_supported: ['HS256'],
-            issuer: issuerUrl,
-            token_endpoint: `${issuerUrl}/oauth2/token`,
-          });
-        }
-
-        if (url === `${issuerUrl}/oauth2/token`) {
-          expect(init?.method).toBe('POST');
-          return jsonResponse({ id_token: idToken });
-        }
-
-        throw new Error(`Unexpected SSO request: ${url}`);
-      }),
-    );
-
-    const loginUrl = new URL(await services.sso.createLoginUrl('/dashboard'));
-    const stateToken = loginUrl.searchParams.get('state');
-    const state = await verifySsoStateToken(stateToken!, authTokenSecret);
-
-    idToken = await new SignJWT({
-      email: 'conflict@example.com',
-      email_verified: true,
-      name: 'Provider Conflict User',
-      nonce: state.nonce,
-    })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setIssuer(issuerUrl)
-      .setAudience(ssoConfig.clientId)
-      .setSubject('conflict-provider-user')
-      .setIssuedAt()
-      .setExpirationTime('5m')
-      .sign(Buffer.from(ssoConfig.clientSecret, 'utf8'));
-
-    const callbackUrl = new URL(
-      await services.sso.handleCallback({
-        code: 'authorization-code',
-        state: stateToken!,
-      }),
-    );
-    const bindToken = getCallbackParams(callbackUrl).get('sso_bind_token');
-
-    expect(bindToken).toEqual(expect.any(String));
+    const bindToken = await createHsSsoBindToken(services, {
+      email: 'username-conflict@example.com',
+      name: 'Provider Username Conflict User',
+      subject: 'username-conflict-provider-user',
+    });
 
     await expect(
       services.sso.createSsoAccount({
+        username: 'taken_name',
+        displayName: 'Taken Name',
         password: 'password123',
         confirmPassword: 'password123',
-        token: bindToken!,
-        username: 'New Conflict User',
+        token: bindToken,
+      }),
+    ).rejects.toMatchObject({
+      code: 'USER_USERNAME_EXISTS',
+      status: 409,
+    });
+
+    const session = await services.sso.createSsoAccount({
+      username: 'available_name',
+      displayName: 'Available Name',
+      password: 'password123',
+      confirmPassword: 'password123',
+      token: bindToken,
+    });
+
+    expect(session.user).toMatchObject({
+      username: 'available_name',
+      displayName: 'Available Name',
+      email: 'username-conflict@example.com',
+    });
+  });
+
+  it('keeps the SSO bind token usable for binding when account creation hits an existing email', async () => {
+    const services = createServices(models, {
+      authTokenSecret,
+      sso: ssoConfig,
+    });
+
+    await services.auth.register({
+      username: 'existing_conflict_user',
+      displayName: 'Existing Conflict User',
+      email: 'conflict@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+
+    const bindToken = await createHsSsoBindToken(services, {
+      email: 'conflict@example.com',
+      name: 'Provider Conflict User',
+      subject: 'conflict-provider-user',
+    });
+
+    await expect(
+      services.sso.createSsoAccount({
+        username: 'new_conflict_user',
+        displayName: 'New Conflict User',
+        password: 'password123',
+        confirmPassword: 'password123',
+        token: bindToken,
       }),
     ).rejects.toMatchObject({
       code: 'USER_EMAIL_EXISTS',
@@ -802,21 +864,22 @@ describe('OIDC SSO service', () => {
     });
 
     const session = await services.sso.bindSsoAccount({
-      email: 'conflict@example.com',
+      identifier: 'existing_conflict_user',
       password: 'password123',
-      token: bindToken!,
+      token: bindToken,
     });
 
     expect(session.user).toMatchObject({
+      username: 'existing_conflict_user',
+      displayName: 'Existing Conflict User',
       email: 'conflict@example.com',
-      username: 'Existing Conflict User',
     });
 
     await expect(
       services.sso.bindSsoAccount({
-        email: 'conflict@example.com',
+        identifier: 'existing_conflict_user',
         password: 'password123',
-        token: bindToken!,
+        token: bindToken,
       }),
     ).rejects.toMatchObject({
       code: 'AUTH_INVALID_TOKEN',
@@ -824,6 +887,71 @@ describe('OIDC SSO service', () => {
     });
   });
 });
+
+async function createHsSsoBindToken(
+  services: ReturnType<typeof createServices>,
+  input: {
+    email: string;
+    name: string;
+    subject: string;
+  },
+) {
+  const { SignJWT } = await import('jose');
+  let idToken = '';
+
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (request: string | URL, init?: RequestInit) => {
+      const url = String(request);
+
+      if (url === `${issuerUrl}/.well-known/openid-configuration`) {
+        return jsonResponse({
+          authorization_endpoint: `${issuerUrl}/oauth2/authorize`,
+          id_token_signing_alg_values_supported: ['HS256'],
+          issuer: issuerUrl,
+          token_endpoint: `${issuerUrl}/oauth2/token`,
+        });
+      }
+
+      if (url === `${issuerUrl}/oauth2/token`) {
+        expect(init?.method).toBe('POST');
+        return jsonResponse({ id_token: idToken });
+      }
+
+      throw new Error(`Unexpected SSO request: ${url}`);
+    }),
+  );
+
+  const loginUrl = new URL(await services.sso.createLoginUrl('/dashboard'));
+  const stateToken = loginUrl.searchParams.get('state');
+  const state = await verifySsoStateToken(stateToken!, authTokenSecret);
+
+  idToken = await new SignJWT({
+    email: input.email,
+    email_verified: true,
+    name: input.name,
+    nonce: state.nonce,
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuer(issuerUrl)
+    .setAudience(ssoConfig.clientId)
+    .setSubject(input.subject)
+    .setIssuedAt()
+    .setExpirationTime('5m')
+    .sign(Buffer.from(ssoConfig.clientSecret, 'utf8'));
+
+  const callbackUrl = new URL(
+    await services.sso.handleCallback({
+      code: 'authorization-code',
+      state: stateToken!,
+    }),
+  );
+  const bindToken = getCallbackParams(callbackUrl).get('sso_bind_token');
+
+  expect(bindToken).toEqual(expect.any(String));
+
+  return bindToken!;
+}
 
 function jsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), {

@@ -44,7 +44,8 @@ describe('auth API', () => {
 
   it('registers, logs in, and returns the current user', async () => {
     const credentials = {
-      username: 'Test User',
+      username: 'test_user',
+      displayName: 'Test User',
       email: 'user@example.com',
       password: 'password123',
       confirmPassword: 'password123',
@@ -59,8 +60,10 @@ describe('auth API', () => {
     expect(registerContext.status).toBe(201);
     expect(registerBody.data.user).toMatchObject({
       username: credentials.username,
+      displayName: credentials.displayName,
       email: credentials.email,
     });
+    expect(registerBody.data.user).not.toHaveProperty('id');
     expect(registerBody.data).not.toHaveProperty('accessToken');
     expect(registerBody.data).not.toHaveProperty('refreshToken');
     expect(registerContext.responseHeaders['set-cookie:tilty_scaffold_access_token']).toContain('httpOnly');
@@ -69,7 +72,7 @@ describe('auth API', () => {
     const loginContext = await runMiddleware(
       getTestRouteHandler(routes, 'post', '/login'),
       createTestContext({
-        email: credentials.email,
+        identifier: credentials.username,
         password: credentials.password,
       }),
     );
@@ -77,6 +80,7 @@ describe('auth API', () => {
     const authCookie = getAuthCookie(loginContext, 'tilty_scaffold_access_token');
 
     expect(loginBody.data.user.email).toBe(credentials.email);
+    expect(loginBody.data.user).not.toHaveProperty('id');
     expect(loginBody.data).not.toHaveProperty('accessToken');
     expect(loginBody.data).not.toHaveProperty('refreshToken');
     expect(authCookie).toEqual(expect.any(String));
@@ -93,13 +97,16 @@ describe('auth API', () => {
 
     expect(meBody.data).toMatchObject({
       username: credentials.username,
+      displayName: credentials.displayName,
       email: credentials.email,
     });
+    expect(meBody.data).not.toHaveProperty('id');
   });
 
   it('clears the authenticated session cookie on logout', async () => {
     const session = await services.auth.register({
-      username: 'Logout User',
+      username: 'logout_user',
+      displayName: 'Logout User',
       email: 'logout@example.com',
       password: 'password123',
       confirmPassword: 'password123',
@@ -141,7 +148,8 @@ describe('auth API', () => {
 
   it('refreshes authenticated sessions with a refresh token cookie', async () => {
     const session = await services.auth.register({
-      username: 'Refresh User',
+      username: 'refresh_user',
+      displayName: 'Refresh User',
       email: 'refresh@example.com',
       password: 'password123',
       confirmPassword: 'password123',
@@ -158,6 +166,7 @@ describe('auth API', () => {
     const refreshCookie = getAuthCookie(context, 'tilty_scaffold_refresh_token');
 
     expect(body.data.user.email).toBe('refresh@example.com');
+    expect(body.data.user).not.toHaveProperty('id');
     expect(body.data).not.toHaveProperty('accessToken');
     expect(body.data).not.toHaveProperty('refreshToken');
     expect(refreshCookie).toEqual(expect.any(String));
@@ -181,7 +190,8 @@ describe('auth API', () => {
       cacheStore,
     );
     const session = await authService.register({
-      username: 'Refresh Race User',
+      username: 'refresh_race_user',
+      displayName: 'Refresh Race User',
       email: 'refresh-race@example.com',
       password: 'password123',
       confirmPassword: 'password123',
@@ -196,7 +206,8 @@ describe('auth API', () => {
 
   it('sets auto secure cookies only for secure requests', async () => {
     const session = await services.auth.register({
-      username: 'Cookie User',
+      username: 'cookie_user',
+      displayName: 'Cookie User',
       email: 'cookie@example.com',
       password: 'password123',
       confirmPassword: 'password123',
@@ -231,7 +242,8 @@ describe('auth API', () => {
 
   it('uploads the current user avatar', async () => {
     const session = await services.auth.register({
-      username: 'Avatar User',
+      username: 'avatar_user',
+      displayName: 'Avatar User',
       email: 'avatar@example.com',
       password: 'password123',
       confirmPassword: 'password123',
@@ -244,14 +256,51 @@ describe('auth API', () => {
 
     expect(user.avatarUrl).toMatch(/^\/uploads\/avatars\/.+\.png$/);
     expect(fileStorage.saved?.contentType).toBe('image/png');
+    expect(fileStorage.saved?.key).toMatch(/^avatars\/[^/]+\.png$/);
     await expect(services.auth.getCurrentUser(session.accessToken)).resolves.toMatchObject({
       avatarUrl: user.avatarUrl,
     });
   });
 
+  it('updates the current user display name', async () => {
+    const session = await services.auth.register({
+      username: 'profile_user',
+      displayName: 'Profile User',
+      email: 'profile@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const context = await runMiddleware(
+      getTestRouteHandler(routes, 'patch', '/me'),
+      createTestContext(
+        {
+          displayName: 'Updated Profile User',
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+    const body = context.body as AuthUserBody;
+
+    expect(body.data).toMatchObject({
+      username: 'profile_user',
+      displayName: 'Updated Profile User',
+      email: 'profile@example.com',
+    });
+    await expect(services.auth.getCurrentUser(session.accessToken)).resolves.toMatchObject({
+      displayName: 'Updated Profile User',
+    });
+  });
+
   it('removes the previous avatar object after replacement', async () => {
     const session = await services.auth.register({
-      username: 'Avatar Replace User',
+      username: 'avatar_replace_user',
+      displayName: 'Avatar Replace User',
       email: 'avatar-replace@example.com',
       password: 'password123',
       confirmPassword: 'password123',
@@ -283,9 +332,23 @@ describe('auth API', () => {
     expect(avatarRoute?.handlers[0]).toBe(rateLimit);
   });
 
+  it('applies rate limiting middleware to profile updates', () => {
+    const rateLimit = vi.fn(async (_ctx, next) => {
+      await next();
+    });
+    const profileRoute = createAuthModule(services.auth, {
+      cookies: defaultAuthCookieConfig,
+      rateLimit,
+      ssoService: services.sso,
+    }).routes.find((route) => route.method === 'patch' && route.path === '/me');
+
+    expect(profileRoute?.handlers[0]).toBe(rateLimit);
+  });
+
   it('rejects duplicate email registration', async () => {
     const credentials = {
-      username: 'Test User',
+      username: 'duplicate_user',
+      displayName: 'Test User',
       email: 'duplicate@example.com',
       password: 'password123',
       confirmPassword: 'password123',
@@ -296,10 +359,36 @@ describe('auth API', () => {
     await expect(
       runMiddleware(
         getTestRouteHandler(routes, 'post', '/register'),
-        createTestContext({ ...credentials, username: 'Other User' }),
+        createTestContext({ ...credentials, username: 'other_user', displayName: 'Other User' }),
       ),
     ).rejects.toMatchObject({
       code: 'USER_EMAIL_EXISTS',
+      status: 409,
+    });
+  });
+
+  it('rejects duplicate username registration', async () => {
+    const credentials = {
+      username: 'duplicate_username',
+      displayName: 'Duplicate Username',
+      email: 'duplicate-username@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    };
+
+    await runMiddleware(getTestRouteHandler(routes, 'post', '/register'), createTestContext(credentials));
+
+    await expect(
+      runMiddleware(
+        getTestRouteHandler(routes, 'post', '/register'),
+        createTestContext({
+          ...credentials,
+          displayName: 'Other User',
+          email: 'other-duplicate-username@example.com',
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: 'USER_USERNAME_EXISTS',
       status: 409,
     });
   });
@@ -309,7 +398,8 @@ describe('auth API', () => {
       runMiddleware(
         getTestRouteHandler(routes, 'post', '/register'),
         createTestContext({
-          username: 'Test User',
+          username: 'test_user',
+          displayName: 'Test User',
           email: 'mismatch@example.com',
           password: 'password123',
           confirmPassword: 'different123',
@@ -383,7 +473,8 @@ describe('auth API', () => {
       runMiddleware(
         getTestRouteHandler(routes, 'post', '/register'),
         createTestContext({
-          username: 'Verified User',
+          username: 'verified_user',
+          displayName: 'Verified User',
           email: 'verified@example.com',
           password: 'password123',
           confirmPassword: 'password123',
@@ -397,11 +488,12 @@ describe('auth API', () => {
     const registerContext = await runMiddleware(
       getTestRouteHandler(routes, 'post', '/register'),
       createTestContext({
-        username: 'Verified User',
+        username: 'verified_user',
+        displayName: 'Verified User',
         email: 'verified@example.com',
+        emailVerificationCode: sentCode,
         password: 'password123',
         confirmPassword: 'password123',
-        emailVerificationCode: sentCode,
       }),
     );
     const registerBody = registerContext.body as AuthSessionBody;
@@ -437,7 +529,8 @@ describe('auth API', () => {
     }).routes;
 
     await models.user.create({
-      username: 'Reset User',
+      username: 'reset_user',
+      displayName: 'Reset User',
       email: 'reset@example.com',
       passwordHash: 'old-password-hash',
       passwordSalt: 'old-password-salt',
@@ -466,7 +559,7 @@ describe('auth API', () => {
       runMiddleware(
         getTestRouteHandler(routes, 'post', '/login'),
         createTestContext({
-          email: 'reset@example.com',
+          identifier: 'reset@example.com',
           password: 'password123',
         }),
       ),
@@ -478,7 +571,7 @@ describe('auth API', () => {
     const loginContext = await runMiddleware(
       getTestRouteHandler(routes, 'post', '/login'),
       createTestContext({
-        email: 'reset@example.com',
+        identifier: 'reset@example.com',
         password: 'newpassword123',
       }),
     );
@@ -537,8 +630,9 @@ interface AuthSessionBody {
     accessTokenExpiresAt: string;
     refreshTokenExpiresAt: string;
     user: {
-      email: string;
       username: string;
+      displayName: string;
+      email: string;
     };
   };
 }
@@ -552,9 +646,10 @@ function getAuthCookie(context: Awaited<ReturnType<typeof runMiddleware>>, name:
 
 interface AuthUserBody {
   data: {
-    avatarUrl?: string;
-    email: string;
     username: string;
+    displayName: string;
+    email: string;
+    avatarUrl?: string;
   };
 }
 

@@ -20,6 +20,7 @@ import {
   verifySsoHandoffToken,
   verifySsoStateToken,
 } from './auth.crypto';
+import { emailSchema } from './auth.schemas';
 import { type AuthTokenConfig, createAuthSession } from './auth.service';
 import { assertPasswordConfirmation } from './auth.validation';
 
@@ -64,16 +65,17 @@ interface OidcIdTokenPayload {
 }
 
 interface BindSsoAccountInput {
-  email: string;
+  identifier: string;
   password: string;
   token: string;
 }
 
 interface CreateSsoAccountInput {
-  confirmPassword: string;
-  password: string;
-  token: string;
   username: string;
+  displayName: string;
+  password: string;
+  confirmPassword: string;
+  token: string;
 }
 
 interface IdTokenVerifier {
@@ -219,16 +221,13 @@ export class SsoService {
     const claims = await this.verifyIdToken(tokenResponse.id_token, state.nonce);
     const discovery = await this.getDiscovery();
     const ssoSubject = getSsoSubject(claims, discovery.issuer);
-    const email = getClaimString(claims.email)?.toLowerCase();
-
-    if (!email) {
-      throw new AppError('SSO_EMAIL_MISSING', 'SSO profile email is missing.', 401);
-    }
+    const email = getSsoEmail(claims);
 
     if (claims.email_verified !== true) {
       throw new AppError('SSO_EMAIL_UNVERIFIED', 'SSO profile email is not verified.', 401);
     }
 
+    const displayName = getDisplayName(claims, email);
     const username = getUsername(claims, email);
     const user = await this.userService.findBySsoSubject(ssoSubject);
 
@@ -241,10 +240,11 @@ export class SsoService {
     }
 
     return this.createBindCallbackUrl({
-      email,
-      redirectPath: state.redirectPath,
-      ssoSubject,
       username,
+      displayName,
+      email,
+      ssoSubject,
+      redirectPath: state.redirectPath,
     });
   }
 
@@ -252,8 +252,8 @@ export class SsoService {
     this.requireConfig();
 
     const handoff = await verifySsoHandoffToken(token, this.tokenSecret);
-    await this.consumeOneTimeToken(getSsoHandoffCacheKey(handoff.jti), handoff.sub);
-    const user = await this.userService.findById(handoff.sub);
+    const userId = await this.consumeOneTimeToken(getSsoHandoffCacheKey(handoff.jti));
+    const user = await this.userService.findById(userId);
 
     if (!user) {
       throw new AppError('AUTH_INVALID_TOKEN', 'Authentication token is invalid.', 401);
@@ -283,13 +283,20 @@ export class SsoService {
       throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
     }
 
+    const existingByUsername = await this.userService.findByUsername(input.username);
+
+    if (existingByUsername) {
+      throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+    }
+
     await this.consumeOneTimeToken(tokenKey, bind.ssoSubject);
     const credentials = await hashPassword(input.password);
     const user = await this.userService.createWithSso({
+      username: input.username,
+      displayName: input.displayName,
       email: bind.email,
       ...credentials,
       ssoSubject: bind.ssoSubject,
-      username: input.username,
     });
 
     await this.bootstrapRootRoleForFirstUser(user);
@@ -305,7 +312,7 @@ export class SsoService {
 
     await this.requireOneTimeToken(tokenKey, bind.ssoSubject);
 
-    const user = await this.userService.findByEmail(input.email);
+    const user = await this.userService.findByLoginIdentifier(input.identifier);
 
     if (!user || !user.available || !user.passwordHash || !user.passwordSalt) {
       throwInvalidCredentials();
@@ -315,6 +322,10 @@ export class SsoService {
 
     if (!valid) {
       throwInvalidCredentials();
+    }
+
+    if (user.ssoSubject && user.ssoSubject !== bind.ssoSubject) {
+      throw new AppError('USER_SSO_SUBJECT_EXISTS', 'The user is already associated with another SSO identity.', 409);
     }
 
     await this.consumeOneTimeToken(tokenKey, bind.ssoSubject);
@@ -357,12 +368,12 @@ export class SsoService {
     }
   }
 
-  private async consumeOneTimeToken(key: string, subject: string) {
+  private async consumeOneTimeToken(key: string, subject?: string) {
     for (let attempt = 0; attempt < maxTokenConsumeAttempts; attempt += 1) {
       const record = await this.cacheStore.get<OneTimeTokenRecord>(key);
       const now = Date.now();
 
-      if (!record || record.subject !== subject || record.used) {
+      if (!record || record.used || (subject !== undefined && record.subject !== subject)) {
         throwInvalidSsoToken();
       }
 
@@ -382,7 +393,7 @@ export class SsoService {
       );
 
       if (consumed) {
-        return;
+        return record.subject;
       }
     }
 
@@ -504,14 +515,7 @@ export class SsoService {
 
   private async createSessionCallbackUrl(user: UserModel, redirectPath: string) {
     const config = this.requireConfig();
-    const handoffToken = await createSsoHandoffToken(
-      {
-        sub: user.id,
-        email: user.email,
-        username: user.username,
-      },
-      this.tokenSecret,
-    );
+    const handoffToken = await createSsoHandoffToken(this.tokenSecret);
     const callbackUrl = new URL(config.frontendCallbackUrl);
 
     await this.storeOneTimeToken(getSsoHandoffCacheKey(handoffToken.tokenId), user.id, ssoHandoffTtlMs);
@@ -525,10 +529,11 @@ export class SsoService {
   }
 
   private async createBindCallbackUrl(input: {
-    email: string;
-    redirectPath: string;
-    ssoSubject: string;
     username: string;
+    displayName: string;
+    email: string;
+    ssoSubject: string;
+    redirectPath: string;
   }) {
     const config = this.requireConfig();
     const bindToken = await createSsoBindToken(input, this.tokenSecret);
@@ -539,6 +544,7 @@ export class SsoService {
     setCallbackFragment(callbackUrl, {
       redirect: input.redirectPath,
       sso_bind_token: bindToken.token,
+      sso_display_name: input.displayName,
       sso_email: input.email,
       sso_username: input.username,
     });
@@ -647,12 +653,41 @@ async function readJson<T>(response: Response, code: string): Promise<T> {
 }
 
 function getUsername(claims: OidcIdTokenPayload, email: string) {
-  return (
-    getClaimString(claims.name) ??
-    getClaimString(claims.preferred_username) ??
-    email.split('@')[0] ??
-    'SSO User'
-  ).slice(0, 32);
+  return normalizeUsername(getClaimString(claims.preferred_username) ?? email.split('@')[0] ?? '');
+}
+
+function getDisplayName(claims: OidcIdTokenPayload, email: string) {
+  return (getClaimString(claims.name) ?? getClaimString(claims.preferred_username) ?? email.split('@')[0] ?? '')
+    .slice(0, 64)
+    .trim();
+}
+
+function getSsoEmail(claims: OidcIdTokenPayload) {
+  const email = getClaimString(claims.email);
+
+  if (!email) {
+    throw new AppError('SSO_EMAIL_MISSING', 'SSO profile email is missing.', 401);
+  }
+
+  const parsed = emailSchema.safeParse(email);
+
+  if (!parsed.success) {
+    throw new AppError('SSO_EMAIL_INVALID', 'SSO profile email is invalid.', 401);
+  }
+
+  return parsed.data;
+}
+
+function normalizeUsername(value: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')
+    .slice(0, 32)
+    .replace(/[^a-z0-9]+$/g, '');
+
+  return normalized.length >= 3 ? normalized : '';
 }
 
 function getSsoSubject(claims: OidcIdTokenPayload, issuer: string) {
@@ -702,7 +737,7 @@ function loadJose() {
 }
 
 function throwInvalidCredentials(): never {
-  throw new AppError('AUTH_INVALID_CREDENTIALS', 'The email address or password is invalid.', 401);
+  throw new AppError('AUTH_INVALID_CREDENTIALS', 'The account identifier or password is invalid.', 401);
 }
 
 function throwInvalidSsoToken(): never {

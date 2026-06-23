@@ -10,7 +10,7 @@ Run commands from `backend/`.
 
 Database commands depend on built `@tilty/shared` outputs. From a fresh
 checkout, run `npm --prefix ../shared run build` before `db:migrate`, or
-complete the Setup Wizard.
+complete setup.
 
 | Command                | Description                          |
 | ---------------------- | ------------------------------------ |
@@ -28,17 +28,24 @@ complete the Setup Wizard.
 | `npm run clean`        | Remove compiled output               |
 | `npm start`            | Start compiled server                |
 
+In production, the compiled backend serves API routes and the compiled frontend
+files from `../frontend/dist`.
+
 ## Environment
+
+For manual configuration, copy `.env.example` to `.env` and edit supported
+variables there.
 
 ```bash
 cp .env.example .env
 ```
 
-Use `.env.example` as the source of supported variables and defaults when
-configuring the backend manually. When `.env` is absent, server startup enters
-setup-only mode: `/api/setup/*` remains available, browser navigation redirects
-to `/setup`, and other API requests return `SETUP_REQUIRED`. After setup writes
-`.env`, non-setup API requests return `SETUP_RESTART_REQUIRED` until restart.
+Startup enters setup-only mode when `.env` is absent, omits `SETUP_LOCKED`, or
+sets `SETUP_LOCKED=false`. In setup-only mode, `/api/setup/*` remains available,
+browser navigation redirects to `/setup`, and other API requests return
+`SETUP_REQUIRED`. Existing `.env` values are merged into setup defaults. After
+setup writes `SETUP_LOCKED=true`, non-setup API requests return
+`SETUP_RESTART_REQUIRED` until restart.
 
 Complete `/setup` in the frontend to write `.env`, apply migrations, and seed
 built-in access control. Setup creates the root administrator only when the
@@ -126,17 +133,19 @@ SMTP authentication settings to require emailed verification codes during
 account registration and enable password recovery. Verification code records use
 the configured cache store.
 
-OIDC SSO is disabled by default. Set `SSO_ENABLED=true` and configure
-`SSO_ISSUER_URL`, `SSO_CLIENT_ID`, `SSO_CLIENT_SECRET`, and `SSO_REDIRECT_URI`
-to enable authorization-code SSO authentication. `SSO_ISSUER_URL` accepts a
-trailing slash and is normalized before discovery validation. Production SSO
-URLs must use HTTPS. OIDC discovery endpoints must use the configured issuer
-origin. The provider callback should use `/api/auth/sso/callback`; after
-validation, the backend redirects to `SSO_FRONTEND_CALLBACK_URL` with a
-short-lived, one-time handoff token for known SSO identities or a short-lived,
-one-time bind token for first-time SSO identities in the URL fragment. Bound SSO
-identities are stored as `sub@issuer_host`, for example
-`provider-user@passport.mahoutsukai.cn`.
+OIDC SSO is disabled by default. Set `SSO_ENABLED=true`, configure
+`SSO_ISSUER_URL`, `SSO_CLIENT_ID`, `SSO_CLIENT_SECRET`, and `SSO_REDIRECT_URI`,
+and set `SSO_FRONTEND_CALLBACK_URL` to the frontend login URL (default
+`http://localhost:8011/login`) to enable authorization-code SSO authentication.
+`SSO_ISSUER_URL` accepts a trailing slash and is normalized before discovery
+validation. Production SSO URLs must use HTTPS. OIDC discovery endpoints must
+use the configured issuer origin. The provider callback should use
+`/api/auth/sso/callback`; after validation, the backend redirects to
+`SSO_FRONTEND_CALLBACK_URL` with a short-lived, one-time handoff token for known
+SSO identities or a short-lived, one-time bind token for first-time SSO
+identities in the URL fragment. Bound SSO identities are stored as
+`sub@issuer_host`, for example
+`provider-user@identity.example.com`.
 
 First-time SSO users can either create a new account with a local password or
 bind the SSO identity to an existing account. New-account email addresses are
@@ -154,40 +163,41 @@ cookies and return only session metadata in the JSON response. Authenticated
 browser requests use the configured access-token cookie; session refresh and
 logout use the configured refresh-token cookie.
 
-| Method | Path                                          | Description                                    |
-| ------ | --------------------------------------------- | ---------------------------------------------- |
-| `GET`  | `/api/setup/defaults`                         | Return generated setup defaults                |
-| `POST` | `/api/setup/validate`                         | Validate setup input                           |
-| `POST` | `/api/setup/validate/environment`             | Validate setup environment fields              |
-| `POST` | `/api/setup/test/database`                    | Test database connectivity and user presence   |
-| `POST` | `/api/setup/test/cache`                       | Test cache connectivity                        |
-| `POST` | `/api/setup/test/file-storage`                | Test file storage configuration                |
-| `POST` | `/api/setup/test/logging`                     | Test logging configuration                     |
-| `POST` | `/api/setup/test/email`                       | Test email configuration                       |
-| `POST` | `/api/setup/test/sso`                         | Test SSO provider discovery                    |
-| `POST` | `/api/setup/complete`                         | Complete setup                                 |
-| `GET`  | `/api/auth/config`                            | Return public authentication configuration     |
-| `POST` | `/api/auth/register`                          | Create an account                              |
-| `POST` | `/api/auth/register/email-verification`       | Send a registration email verification code    |
-| `POST` | `/api/auth/password-reset/email-verification` | Send a password reset email verification code  |
-| `POST` | `/api/auth/password-reset`                    | Reset an account password                      |
-| `POST` | `/api/auth/login`                             | Authenticate an account                        |
-| `GET`  | `/api/auth/me`                                | Return the authenticated user                  |
-| `POST` | `/api/auth/refresh`                           | Refresh the authenticated session              |
-| `POST` | `/api/auth/logout`                            | Clear the authenticated session                |
-| `POST` | `/api/auth/avatar`                            | Upload the authenticated user's avatar         |
-| `GET`  | `/api/auth/sso/config`                        | Return public SSO authentication configuration |
-| `GET`  | `/api/auth/sso/start`                         | Redirect to the configured SSO provider        |
-| `GET`  | `/api/auth/sso/callback`                      | Handle the SSO provider callback               |
-| `POST` | `/api/auth/sso/session`                       | Exchange an SSO handoff token for a session    |
-| `POST` | `/api/auth/sso/account`                       | Create an account from an unbound SSO identity |
-| `POST` | `/api/auth/sso/bind`                          | Bind an SSO identity to an existing account    |
-| `GET`  | `/api/users/`                                 | List paginated users and available roles       |
-| `PUT`  | `/api/users/:id/roles`                        | Replace a user's role assignments              |
-| `GET`  | `/api/health`                                 | Return service health                          |
-| `GET`  | `/api/health/ready`                           | Return service readiness                       |
-| `GET`  | `/api/openapi.json`                           | Return the OpenAPI document                    |
-| `GET`  | `/api/docs`                                   | Serve Swagger UI                               |
+| Method  | Path                                          | Description                                    |
+| ------- | --------------------------------------------- | ---------------------------------------------- |
+| `GET`   | `/api/setup/defaults`                         | Return generated setup defaults                |
+| `POST`  | `/api/setup/validate`                         | Validate setup input                           |
+| `POST`  | `/api/setup/validate/environment`             | Validate setup environment fields              |
+| `POST`  | `/api/setup/test/database`                    | Test database connectivity and user presence   |
+| `POST`  | `/api/setup/test/cache`                       | Test cache connectivity                        |
+| `POST`  | `/api/setup/test/file-storage`                | Test file storage configuration                |
+| `POST`  | `/api/setup/test/logging`                     | Test logging configuration                     |
+| `POST`  | `/api/setup/test/email`                       | Test email configuration                       |
+| `POST`  | `/api/setup/test/sso`                         | Test SSO provider discovery                    |
+| `POST`  | `/api/setup/complete`                         | Complete setup                                 |
+| `GET`   | `/api/auth/config`                            | Return public authentication configuration     |
+| `POST`  | `/api/auth/register`                          | Create an account                              |
+| `POST`  | `/api/auth/register/email-verification`       | Send a registration email verification code    |
+| `POST`  | `/api/auth/password-reset/email-verification` | Send a password reset email verification code  |
+| `POST`  | `/api/auth/password-reset`                    | Reset an account password                      |
+| `POST`  | `/api/auth/login`                             | Authenticate an account                        |
+| `GET`   | `/api/auth/me`                                | Return the authenticated user                  |
+| `PATCH` | `/api/auth/me`                                | Update the authenticated user's profile        |
+| `POST`  | `/api/auth/refresh`                           | Refresh the authenticated session              |
+| `POST`  | `/api/auth/logout`                            | Clear the authenticated session                |
+| `POST`  | `/api/auth/avatar`                            | Upload the authenticated user's avatar         |
+| `GET`   | `/api/auth/sso/config`                        | Return public SSO authentication configuration |
+| `GET`   | `/api/auth/sso/start`                         | Redirect to the configured SSO provider        |
+| `GET`   | `/api/auth/sso/callback`                      | Handle the SSO provider callback               |
+| `POST`  | `/api/auth/sso/session`                       | Exchange an SSO handoff token for a session    |
+| `POST`  | `/api/auth/sso/account`                       | Create an account from an unbound SSO identity |
+| `POST`  | `/api/auth/sso/bind`                          | Bind an SSO identity to an existing account    |
+| `GET`   | `/api/users/`                                 | List paginated users and available roles       |
+| `PUT`   | `/api/users/:id/roles`                        | Replace a user's role assignments              |
+| `GET`   | `/api/health`                                 | Return service health                          |
+| `GET`   | `/api/health/ready`                           | Return service readiness                       |
+| `GET`   | `/api/openapi.json`                           | Return the OpenAPI document                    |
+| `GET`   | `/api/docs`                                   | Serve Swagger UI                               |
 
 Error responses use this shape:
 
@@ -203,11 +213,10 @@ Error responses use this shape:
 ## Modules
 
 Setup, health, authentication, users, documentation, and demo modules are
-registered by default. The setup module locks itself after `.env` exists. The
-users module provides RBAC-protected administration endpoints. The documentation
-module serves the OpenAPI document and Swagger UI. The demo module has no public
-API routes; it registers a scheduler heartbeat job as an example module-owned
-job.
+registered by default. The users module provides RBAC-protected administration
+endpoints. The documentation module serves the OpenAPI document and Swagger UI.
+The demo module has no public API routes; it registers a scheduler heartbeat job
+as an example module-owned job.
 
 The scheduler core runs module-owned jobs when modules define them and
 `SCHEDULER_ENABLED=true`.

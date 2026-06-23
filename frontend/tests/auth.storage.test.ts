@@ -1,17 +1,32 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  authSessionStorageKey,
   clearStoredSession,
   fetchCurrentUser,
   getStoredSession,
+  getUserHandle,
+  getUserInitials,
   storeSession,
   validateStoredSession,
 } from '../src/lib/auth';
-import { createSession, createTestWindow, sessionStorageKey } from './support/auth';
+import { createSession, createTestWindow } from './support/auth';
 
 describe('auth session storage', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('formats username handles for account displays', () => {
+    expect(getUserHandle('test_user')).toBe('@test_user');
+    expect(getUserHandle('  test_user  ')).toBe('@test_user');
+    expect(getUserHandle()).toBe('@user');
+  });
+
+  it('formats user initials for avatars', () => {
+    expect(getUserInitials('Test User')).toBe('TU');
+    expect(getUserInitials('  Solo  ')).toBe('S');
+    expect(getUserInitials()).toBe('U');
   });
 
   it('stores and reads a valid session', () => {
@@ -28,10 +43,10 @@ describe('auth session storage', () => {
   it('clears invalid sessions', () => {
     const window = createTestWindow();
     vi.stubGlobal('window', window);
-    window.localStorage.setItem(sessionStorageKey, '{invalid');
+    window.localStorage.setItem(authSessionStorageKey, '{invalid');
 
     expect(getStoredSession()).toBeNull();
-    expect(window.localStorage.getItem(sessionStorageKey)).toBeNull();
+    expect(window.localStorage.getItem(authSessionStorageKey)).toBeNull();
   });
 
   it('clears expired sessions', () => {
@@ -41,7 +56,7 @@ describe('auth session storage', () => {
     storeSession(createSession(new Date(Date.now() - 60_000).toISOString()));
 
     expect(getStoredSession()).toBeNull();
-    expect(window.localStorage.getItem(sessionStorageKey)).toBeNull();
+    expect(window.localStorage.getItem(authSessionStorageKey)).toBeNull();
   });
 
   it.each(['accessTokenExpiresAt', 'refreshTokenExpiresAt'] as const)(
@@ -54,10 +69,10 @@ describe('auth session storage', () => {
         [field]: 'not-a-date',
       };
 
-      window.localStorage.setItem(sessionStorageKey, JSON.stringify(session));
+      window.localStorage.setItem(authSessionStorageKey, JSON.stringify(session));
 
       expect(getStoredSession()).toBeNull();
-      expect(window.localStorage.getItem(sessionStorageKey)).toBeNull();
+      expect(window.localStorage.getItem(authSessionStorageKey)).toBeNull();
     },
   );
 
@@ -101,7 +116,7 @@ describe('auth session storage', () => {
     const refreshedSession = createSession(new Date(Date.now() + 60_000).toISOString());
     const updatedUser = {
       ...refreshedSession.user,
-      username: 'Updated User',
+      displayName: 'Updated User',
     };
     const fetchMock = vi
       .fn()
@@ -141,11 +156,7 @@ describe('auth session storage', () => {
     storeSession(createSession(new Date(Date.now() + 60_000).toISOString()));
 
     await expect(fetchCurrentUser()).resolves.toEqual(updatedUser);
-    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      'http://localhost:3000/api/auth/me',
-      'http://localhost:3000/api/auth/refresh',
-      'http://localhost:3000/api/auth/me',
-    ]);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/auth/me', '/api/auth/refresh', '/api/auth/me']);
     expect(getStoredSession()).toEqual(refreshedSession);
   });
 
@@ -162,7 +173,7 @@ describe('auth session storage', () => {
             error: null,
             data: {
               ...createSession(new Date(Date.now() + 60_000).toISOString()).user,
-              username: 'Updated User',
+              displayName: 'Updated User',
             },
           }),
           { status: 200 },
@@ -172,8 +183,8 @@ describe('auth session storage', () => {
 
     const session = await validateStoredSession();
 
-    expect(session?.user.username).toBe('Updated User');
-    expect(getStoredSession()?.user.username).toBe('Updated User');
+    expect(session?.user.displayName).toBe('Updated User');
+    expect(getStoredSession()?.user.displayName).toBe('Updated User');
   });
 
   it('clears stored sessions when validation cannot reach the API', async () => {

@@ -7,6 +7,7 @@ import { errorMiddleware } from '../src/middleware/error';
 import { createServices, initModels } from '../src/modules';
 import { defaultAuthCookieConfig } from '../src/modules/auth/auth.controller';
 import { createUsersModule } from '../src/modules/users';
+import { registerTestUser } from './support/auth';
 import { createTestContext, getTestRoute, runMiddlewares } from './support/http';
 
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
@@ -35,9 +36,9 @@ describe('users API', () => {
   });
 
   it('paginates user list responses', async () => {
-    const rootSession = await registerUser('Root User', 'root-paged@example.com');
-    await registerUser('Alpha User', 'alpha-paged@example.com');
-    await registerUser('Beta User', 'beta-paged@example.com');
+    const rootSession = await registerTestUser(services.auth, 'Root User', 'root-paged@example.com');
+    await registerTestUser(services.auth, 'Alpha User', 'alpha-paged@example.com');
+    await registerTestUser(services.auth, 'Beta User', 'beta-paged@example.com');
     const listRoute = getTestRoute(routes, 'get', '/');
     const context = await runMiddlewares(
       [errorMiddleware(), ...listRoute.handlers],
@@ -61,15 +62,6 @@ describe('users API', () => {
       totalPages: 3,
     });
   });
-
-  async function registerUser(username: string, email: string) {
-    return services.auth.register({
-      username,
-      email,
-      password: 'password123',
-      confirmPassword: 'password123',
-    });
-  }
 });
 
 interface UserListBody {

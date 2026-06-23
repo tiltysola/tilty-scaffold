@@ -20,17 +20,15 @@ Use Node.js 22 for parity with CI.
 
 ```bash
 npm install
-cp backend/.env.example backend/.env
-npm run build:shared
-npm run db:migrate
 npm run dev
 ```
 
-Frontend runs on `http://localhost:8011`. Backend defaults to
+Frontend runs on `http://localhost:8011`. Complete `/setup` to write
+`backend/.env` and apply migrations. Backend defaults to
 `http://localhost:3000`; Swagger UI is available at `/api/docs`.
 
-Copy `frontend/.env.example` to `frontend/.env` only when the frontend should
-call a different backend URL.
+For production, run `npm run build` and `npm run start:backend`. The backend
+serves the compiled frontend files from `frontend/dist`.
 
 ## Commands
 

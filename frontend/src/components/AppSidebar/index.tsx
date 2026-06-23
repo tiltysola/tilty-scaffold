@@ -1,20 +1,28 @@
-import { type ChangeEvent, type CSSProperties, type ReactNode, useRef, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import {
   BracesIcon,
   CommandIcon,
   EllipsisVerticalIcon,
-  ImageUpIcon,
   LayoutDashboardIcon,
   LogOutIcon,
+  type LucideIcon,
+  UserCircleIcon,
   UsersIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { getApiErrorMessage } from '@/lib/api';
-import { type AuthUser, getStoredSession, logout, resolveAssetUrl, uploadAvatar } from '@/lib/auth';
-import { appConfig } from '@/lib/config';
+import {
+  authSessionChangedEvent,
+  getStoredSession,
+  getUserHandle,
+  getUserInitials,
+  logout,
+  resolveAssetUrl,
+} from '@/lib/auth';
+import { getMainNavigationGroups, type NavigationIcon, routePath } from '@/router';
 import { Avatar, AvatarFallback, AvatarImage } from '@/shadcn/components/ui/avatar';
 import {
   DropdownMenu,
@@ -36,7 +44,6 @@ import {
   SidebarProvider,
   useSidebar,
 } from '@/shadcn/components/ui/sidebar';
-import { hasPermission, SystemPermission } from '@tilty/shared/access-control';
 
 import NavHeader from './NavHeader';
 import SideNav, { type SideNavProps } from './SideNav';
@@ -46,66 +53,42 @@ const sidebarStyle = {
   '--sidebar-width': 'calc(var(--spacing) * 72)',
 } as CSSProperties;
 
+const navIcons: Record<NavigationIcon, LucideIcon> = {
+  apiDocs: BracesIcon,
+  dashboard: LayoutDashboardIcon,
+  profile: UserCircleIcon,
+  users: UsersIcon,
+};
+
 interface AppSidebarProps {
   children: ReactNode;
 }
 
 interface SidebarUserProfile {
   avatarUrl?: string;
-  email: string;
   name: string;
+  username: string;
 }
 
 const SidebarUser = ({
-  onAvatarChange,
   onSignOut,
+  onProfile,
   signingOut,
   user,
 }: {
-  onAvatarChange: (user: AuthUser) => void;
   onSignOut: () => void;
+  onProfile: () => void;
   signingOut: boolean;
   user: SidebarUserProfile;
 }) => {
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const { isMobile } = useSidebar();
   const avatarUrl = resolveAssetUrl(user.avatarUrl);
-  const fallback = getInitials(user.name);
-
-  const handleAvatarSelect = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0];
-
-    event.currentTarget.value = '';
-
-    if (!file) {
-      return;
-    }
-
-    setUploadingAvatar(true);
-
-    try {
-      const updatedUser = await uploadAvatar(file);
-
-      onAvatarChange(updatedUser);
-      toast.success('Avatar updated.');
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Avatar upload failed.'));
-    } finally {
-      setUploadingAvatar(false);
-    }
-  };
+  const fallback = getUserInitials(user.name);
+  const userHandle = getUserHandle(user.username);
 
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <input
-          ref={fileInputRef}
-          className="hidden"
-          type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
-          onChange={handleAvatarSelect}
-        />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
@@ -118,7 +101,7 @@ const SidebarUser = ({
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">{user.name}</span>
-                <span className="truncate text-xs text-muted-foreground">{user.email}</span>
+                <span className="truncate text-xs text-muted-foreground">{userHandle}</span>
               </div>
               <EllipsisVerticalIcon className="ml-auto size-4" />
             </SidebarMenuButton>
@@ -136,21 +119,15 @@ const SidebarUser = ({
                   <AvatarFallback className="rounded-lg">{fallback}</AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">{user.name}</span>
-                  <span className="truncate text-xs text-muted-foreground">{user.email}</span>
+                  <span className="truncate font-medium text-sidebar-accent-foreground">{user.name}</span>
+                  <span className="truncate text-xs text-muted-foreground">{userHandle}</span>
                 </div>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              disabled={uploadingAvatar}
-              onSelect={(event: Event) => {
-                event.preventDefault();
-                fileInputRef.current?.click();
-              }}
-            >
-              <ImageUpIcon />
-              {uploadingAvatar ? 'Uploading' : 'Upload avatar'}
+            <DropdownMenuItem onSelect={onProfile}>
+              <UserCircleIcon />
+              Profile
             </DropdownMenuItem>
             <DropdownMenuItem disabled={signingOut} onSelect={onSignOut}>
               <LogOutIcon />
@@ -169,10 +146,22 @@ const Index = ({ children }: AppSidebarProps) => {
   const navigate = useNavigate();
   const sidebarUser = {
     avatarUrl: session?.user.avatarUrl,
-    email: session?.user.email ?? '',
-    name: session?.user.username ?? 'Signed-in user',
+    name: session?.user.displayName ?? 'Signed-in user',
+    username: session?.user.username ?? '',
   };
   const navItems = createNavItems(session?.user.permissions);
+
+  useEffect(() => {
+    const handleSessionChange = () => {
+      setSession(getStoredSession());
+    };
+
+    window.addEventListener(authSessionChangedEvent, handleSessionChange);
+
+    return () => {
+      window.removeEventListener(authSessionChangedEvent, handleSessionChange);
+    };
+  }, []);
 
   const handleSignOut = () => {
     if (signingOut) {
@@ -182,7 +171,7 @@ const Index = ({ children }: AppSidebarProps) => {
     setSigningOut(true);
     void logout()
       .then(() => {
-        navigate('/login', { replace: true });
+        navigate(routePath('login'), { replace: true });
       })
       .catch((error) => {
         toast.error(getApiErrorMessage(error, 'Sign out failed.'));
@@ -190,8 +179,8 @@ const Index = ({ children }: AppSidebarProps) => {
       });
   };
 
-  const handleAvatarChange = (user: AuthUser) => {
-    setSession((currentSession) => (currentSession ? { ...currentSession, user } : currentSession));
+  const handleProfile = () => {
+    navigate(routePath('profile'));
   };
 
   return (
@@ -201,7 +190,7 @@ const Index = ({ children }: AppSidebarProps) => {
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton asChild className="data-[slot=sidebar-menu-button]:p-1.5!">
-                <Link to="/dashboard">
+                <Link to={routePath('dashboard')}>
                   <CommandIcon className="size-5!" />
                   <span className="text-base font-semibold">Tilty Scaffold</span>
                 </Link>
@@ -210,15 +199,10 @@ const Index = ({ children }: AppSidebarProps) => {
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent>
-          <SideNav main={navItems.main} />
+          <SideNav groups={navItems.groups} />
         </SidebarContent>
         <SidebarFooter>
-          <SidebarUser
-            onAvatarChange={handleAvatarChange}
-            onSignOut={handleSignOut}
-            signingOut={signingOut}
-            user={sidebarUser}
-          />
+          <SidebarUser onSignOut={handleSignOut} onProfile={handleProfile} signingOut={signingOut} user={sidebarUser} />
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
@@ -231,42 +215,21 @@ const Index = ({ children }: AppSidebarProps) => {
   );
 };
 
-function getInitials(name: string) {
-  return (
-    name
-      .trim()
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((part) => part[0])
-      .join('')
-      .toUpperCase() || 'U'
-  );
-}
-
 function createNavItems(permissionKeys?: string[]) {
   return {
-    main: [
-      {
-        title: 'Dashboard',
-        url: '/dashboard',
-        icon: <LayoutDashboardIcon />,
-      },
-      ...(hasPermission(permissionKeys, SystemPermission.UserList)
-        ? [
-            {
-              title: 'Users',
-              url: '/users',
-              icon: <UsersIcon />,
-            },
-          ]
-        : []),
-      {
-        title: 'API docs',
-        url: `${appConfig.apiBaseUrl}/api/docs`,
-        external: true,
-        icon: <BracesIcon />,
-      },
-    ],
+    groups: getMainNavigationGroups(permissionKeys).map((group) => ({
+      items: group.items.map((item) => {
+        const Icon = navIcons[item.icon];
+
+        return {
+          external: item.external,
+          icon: <Icon />,
+          title: item.title,
+          url: item.url,
+        };
+      }),
+      label: group.label,
+    })),
   } satisfies SideNavProps;
 }
 

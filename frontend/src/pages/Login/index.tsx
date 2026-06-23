@@ -17,7 +17,13 @@ import {
   login,
   type SsoPublicConfig,
 } from '@/lib/auth';
-import { createPasswordFormSchema, loginCredentialsSchema, usernameSchema } from '@/lib/auth-validation';
+import {
+  createPasswordFormSchema,
+  displayNameSchema,
+  loginCredentialsSchema,
+  usernameSchema,
+} from '@/lib/auth-validation';
+import { routePath } from '@/router';
 import { Button } from '@/shadcn/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/shadcn/components/ui/card';
 import { Input } from '@/shadcn/components/ui/input';
@@ -30,6 +36,7 @@ import FormMessage from '@/components/FormMessage';
 const loginSchema = loginCredentialsSchema;
 const ssoCreateSchema = createPasswordFormSchema({
   username: usernameSchema,
+  displayName: displayNameSchema,
 });
 
 type LoginFormState = z.input<typeof loginSchema>;
@@ -37,10 +44,11 @@ type SsoCreateFormState = z.input<typeof ssoCreateSchema>;
 
 const Index = () => {
   const [ssoBind, setSsoBind] = useState<{
-    email: string;
-    redirectPath: string;
-    token: string;
     username: string;
+    displayName: string;
+    email: string;
+    token: string;
+    redirectPath: string;
   } | null>(null);
   const [ssoTab, setSsoTab] = useState<'create' | 'bind'>('create');
   const [ssoConfig, setSsoConfig] = useState<SsoPublicConfig>({ enabled: false });
@@ -50,7 +58,7 @@ const Index = () => {
   const navigate = useNavigate();
   const { error, pending: submitting, run, setError, setPending: setSubmitting } = useAsyncAction();
   const { form, handleChange } = useFormState<LoginFormState>({
-    email: '',
+    identifier: '',
     password: '',
   });
   const {
@@ -59,6 +67,7 @@ const Index = () => {
     setForm: setSsoCreateForm,
   } = useFormState<SsoCreateFormState>({
     username: '',
+    displayName: '',
     password: '',
     confirmPassword: '',
   });
@@ -99,7 +108,7 @@ const Index = () => {
       handledSsoTokenRef.current = token;
       const nextRedirectPath = getSafeRedirectPath(params.get('redirect'));
 
-      navigate('/login', { replace: true });
+      navigate(routePath('login'), { replace: true });
       setSsoBind(null);
 
       void run(() => completeSsoLogin(token), 'SSO authentication could not be completed.').then((session) => {
@@ -119,22 +128,25 @@ const Index = () => {
 
     handledSsoBindTokenRef.current = bindToken;
     const username = params.get('sso_username') ?? '';
+    const displayName = params.get('sso_display_name') ?? '';
     const nextRedirectPath = getSafeRedirectPath(params.get('redirect'));
 
     setSsoBind({
-      email: params.get('sso_email') ?? '',
-      redirectPath: nextRedirectPath,
-      token: bindToken,
       username,
+      displayName,
+      email: params.get('sso_email') ?? '',
+      token: bindToken,
+      redirectPath: nextRedirectPath,
     });
     setSsoCreateForm((current) => ({
       ...current,
+      displayName,
       username,
     }));
     setSsoTab('create');
     setError(null);
     setSubmitting(false);
-    navigate('/login', { replace: true });
+    navigate(routePath('login'), { replace: true });
   }, [location.hash, location.search, navigate, run, setError, setSsoCreateForm, setSubmitting]);
 
   const handleSsoTabChange = (value: string) => {
@@ -248,14 +260,25 @@ const Index = () => {
               <TabsContent className="mt-2" value="create">
                 <form className="grid gap-4" onSubmit={handleCreateSsoAccount}>
                   <div className="grid gap-2">
-                    <Label htmlFor="sso-username">Display name</Label>
+                    <Label htmlFor="sso-username">Username</Label>
                     <Input
-                      autoComplete="name"
+                      autoComplete="username"
                       disabled={submitting}
                       id="sso-username"
                       name="username"
                       onChange={handleSsoCreateChange('username')}
                       value={ssoCreateForm.username}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="sso-display-name">Display name</Label>
+                    <Input
+                      autoComplete="name"
+                      disabled={submitting}
+                      id="sso-display-name"
+                      name="displayName"
+                      onChange={handleSsoCreateChange('displayName')}
+                      value={ssoCreateForm.displayName}
                     />
                   </div>
                   <div className="grid gap-2">
@@ -302,15 +325,14 @@ const Index = () => {
               <TabsContent className="mt-2" value="bind">
                 <form className="grid gap-4" onSubmit={handleBindSsoAccount}>
                   <div className="grid gap-2">
-                    <Label htmlFor="email">Email</Label>
+                    <Label htmlFor="identifier">Email or username</Label>
                     <Input
-                      autoComplete="email"
+                      autoComplete="username"
                       disabled={submitting}
-                      id="email"
-                      name="email"
-                      onChange={handleChange('email')}
-                      type="email"
-                      value={form.email}
+                      id="identifier"
+                      name="identifier"
+                      onChange={handleChange('identifier')}
+                      value={form.identifier}
                     />
                   </div>
                   <div className="grid gap-2">
@@ -354,15 +376,14 @@ const Index = () => {
               ) : null}
               <form className="grid gap-4" onSubmit={handleSubmit}>
                 <div className="grid gap-2">
-                  <Label htmlFor="email">Email</Label>
+                  <Label htmlFor="identifier">Email or username</Label>
                   <Input
-                    autoComplete="email"
+                    autoComplete="username"
                     disabled={submitting}
-                    id="email"
-                    name="email"
-                    onChange={handleChange('email')}
-                    type="email"
-                    value={form.email}
+                    id="identifier"
+                    name="identifier"
+                    onChange={handleChange('identifier')}
+                    value={form.identifier}
                   />
                 </div>
                 <div className="grid gap-2">
@@ -389,11 +410,11 @@ const Index = () => {
           <CardFooter className="flex-col justify-center gap-2 text-sm text-muted-foreground">
             <div className="flex gap-2">
               <span>Need an account?</span>
-              <Link className="font-medium text-primary hover:underline" to="/register">
+              <Link className="font-medium text-primary hover:underline" to={routePath('register')}>
                 Create account
               </Link>
             </div>
-            <Link className="font-medium text-primary hover:underline" to="/forgot-password">
+            <Link className="font-medium text-primary hover:underline" to={routePath('forgotPassword')}>
               Password recovery
             </Link>
           </CardFooter>
@@ -405,7 +426,7 @@ const Index = () => {
 
 function getRedirectPath(state: unknown) {
   if (!state || typeof state !== 'object') {
-    return '/dashboard';
+    return routePath('dashboard');
   }
 
   const from = (state as { from?: unknown }).from;
@@ -415,7 +436,7 @@ function getRedirectPath(state: unknown) {
 
 function getSafeRedirectPath(value: unknown) {
   if (typeof value !== 'string' || !isSafeRelativePath(value)) {
-    return '/dashboard';
+    return routePath('dashboard');
   }
 
   return value;

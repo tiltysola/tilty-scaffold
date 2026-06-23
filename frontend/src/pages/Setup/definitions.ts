@@ -41,10 +41,11 @@ interface FieldHelp {
 }
 
 export const administratorDefaults: SetupAdministrator = {
-  confirmPassword: '',
+  username: '',
+  displayName: '',
   email: '',
   password: '',
-  username: '',
+  confirmPassword: '',
 };
 
 const booleanOptions = [
@@ -149,7 +150,7 @@ export const setupFieldHelp: Record<string, FieldHelp> = {
     placeholder: '600000',
   },
   EMAIL_VERIFICATION_SERVICE: {
-    description: 'Selects the email delivery provider used for verification and account recovery workflows.',
+    description: 'Selects the email delivery provider used for verification and password recovery workflows.',
   },
   FILE_LOCAL_ROOT: {
     description: 'Specifies the server directory used for uploaded files when local storage is selected.',
@@ -268,7 +269,7 @@ export const setupFieldHelp: Record<string, FieldHelp> = {
     placeholder: '3000',
   },
   SMTP_FROM: {
-    description: 'Specifies the sender identity displayed on verification and account recovery emails.',
+    description: 'Specifies the sender identity displayed on verification and password recovery emails.',
     placeholder: 'Tilty <no-reply@example.com>',
   },
   SMTP_HOST: {
@@ -321,7 +322,7 @@ export const setupFieldHelp: Record<string, FieldHelp> = {
     placeholder: 'https://api.example.com/api/auth/sso/callback',
   },
   SSO_REQUEST_TIMEOUT_MS: {
-    description: 'Defines the maximum duration, in milliseconds, for SSO discovery, token, and userinfo requests.',
+    description: 'Defines the maximum duration, in milliseconds, for SSO discovery, token, and JWKS requests.',
     placeholder: '10000',
   },
   SSO_SCOPES: {
@@ -334,9 +335,13 @@ export const setupFieldHelp: Record<string, FieldHelp> = {
 };
 
 export const administratorFieldHelp: Record<keyof SetupAdministrator, FieldHelp> = {
-  confirmPassword: {
-    description: 'Re-enter the administrator password for confirmation.',
-    placeholder: 'Confirm the administrator password',
+  username: {
+    description: 'Specifies the unique username used by the root administrator to log in.',
+    placeholder: 'root_admin',
+  },
+  displayName: {
+    description: 'Specifies the display name shown for the root administrator account.',
+    placeholder: 'Root Administrator',
   },
   email: {
     description: 'Specifies the email address assigned to the root administrator account.',
@@ -346,9 +351,9 @@ export const administratorFieldHelp: Record<keyof SetupAdministrator, FieldHelp>
     description: 'Defines the initial password for the root administrator account. Use at least 8 characters.',
     placeholder: 'Enter an administrator password',
   },
-  username: {
-    description: 'Specifies the display name assigned to the root administrator account.',
-    placeholder: 'Root Administrator',
+  confirmPassword: {
+    description: 'Re-enter the administrator password for confirmation.',
+    placeholder: 'Confirm the administrator password',
   },
 };
 

@@ -35,11 +35,13 @@ describe('database migrations', () => {
       await expect(assertDatabaseMigrationsApplied(sequelize)).resolves.toBeUndefined();
       expect(users.avatarStorageKey).toBeDefined();
       expect(users.avatarUrl).toBeDefined();
+      expect(users.displayName).toBeDefined();
       expect(users.email).toBeDefined();
       expect(users.ssoSubject).toBeDefined();
       expect(userIndexes.some((index) => index.name === 'users_available_created_at')).toBe(true);
       expect(userIndexes.some((index) => index.name === 'users_created_at_email')).toBe(true);
       expect(userIndexes.some((index) => index.name === 'users_sso_subject')).toBe(true);
+      expect(userIndexes.some((index) => index.name === 'users_username')).toBe(true);
       expect(permissions.key).toBeDefined();
       expect(roles.key).toBeDefined();
       expect(rolePermissions.permissionKey).toBeDefined();

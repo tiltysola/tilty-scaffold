@@ -10,10 +10,12 @@ import { getApiErrorMessage } from '@/lib/api';
 import { fetchAuthConfig, register, sendRegistrationEmailVerification } from '@/lib/auth';
 import {
   createPasswordFormSchema,
+  displayNameSchema,
   emailSchema,
   optionalVerificationCodeSchema,
   usernameSchema,
 } from '@/lib/auth-validation';
+import { routePath } from '@/router';
 import { Button } from '@/shadcn/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/shadcn/components/ui/card';
 import { Input } from '@/shadcn/components/ui/input';
@@ -23,6 +25,7 @@ import FormMessage from '@/components/FormMessage';
 
 const registerSchema = createPasswordFormSchema({
   username: usernameSchema,
+  displayName: displayNameSchema,
   email: emailSchema,
   emailVerificationCode: optionalVerificationCodeSchema,
 });
@@ -40,10 +43,11 @@ const Index = () => {
   });
   const { form, handleChange } = useFormState<RegisterFormState>({
     username: '',
+    displayName: '',
     email: '',
+    emailVerificationCode: '',
     password: '',
     confirmPassword: '',
-    emailVerificationCode: '',
   });
   const error = submitAction.error ?? emailVerification.error ?? configError;
   const notice = emailVerification.notice;
@@ -98,17 +102,18 @@ const Index = () => {
     const session = await submitAction.run(
       () =>
         register({
+          username: parsed.data.username,
+          displayName: parsed.data.displayName,
           email: parsed.data.email,
           emailVerificationCode: emailVerificationRequired ? parsed.data.emailVerificationCode : undefined,
           password: parsed.data.password,
           confirmPassword: parsed.data.confirmPassword,
-          username: parsed.data.username,
         }),
       'Account creation could not be completed.',
     );
 
     if (session) {
-      navigate('/dashboard', { replace: true });
+      navigate(routePath('dashboard'), { replace: true });
     }
   };
 
@@ -136,14 +141,25 @@ const Index = () => {
         <CardContent>
           <form className="grid gap-4" onSubmit={handleSubmit}>
             <div className="grid gap-2">
-              <Label htmlFor="username">Display name</Label>
+              <Label htmlFor="username">Username</Label>
               <Input
-                autoComplete="name"
+                autoComplete="username"
                 disabled={submitting}
                 id="username"
                 name="username"
                 onChange={handleChange('username')}
                 value={form.username}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="displayName">Display name</Label>
+              <Input
+                autoComplete="name"
+                disabled={submitting}
+                id="displayName"
+                name="displayName"
+                onChange={handleChange('displayName')}
+                value={form.displayName}
               />
             </div>
             <div className="grid gap-2">
@@ -219,7 +235,7 @@ const Index = () => {
         </CardContent>
         <CardFooter className="justify-center gap-2 text-sm text-muted-foreground">
           <span>Already have an account?</span>
-          <Link className="font-medium text-primary hover:underline" to="/login">
+          <Link className="font-medium text-primary hover:underline" to={routePath('login')}>
             Log in
           </Link>
         </CardFooter>

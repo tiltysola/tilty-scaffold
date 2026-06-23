@@ -40,6 +40,6 @@ describe('users API client', () => {
       roles: [],
       users: [],
     });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:3000/api/users/?page=2&pageSize=20');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/?page=2&pageSize=20');
   });
 });

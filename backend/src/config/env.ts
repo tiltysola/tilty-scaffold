@@ -1,4 +1,5 @@
-import { existsSync } from 'fs';
+import { parse as parseDotenv } from 'dotenv';
+import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import { z } from 'zod';
 
@@ -25,6 +26,7 @@ const defaultSsoScopes = 'openid profile email';
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    SETUP_LOCKED: z.enum(['true', 'false']).optional(),
     SERVER_HOST: z.string().default('0.0.0.0'),
     SERVER_PORT: z.coerce.number().int().positive().default(3000),
     TRUST_PROXY: z.enum(['true', 'false']).default('false'),
@@ -555,7 +557,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
 export function getEnvValidationMessage(source: NodeJS.ProcessEnv = process.env) {
   const envFilePath = getEnvFilePath();
 
-  if (source === process.env && source.NODE_ENV !== 'production' && !existsSync(envFilePath)) {
+  if (source === process.env && !existsSync(envFilePath)) {
     return `Missing environment file: ${envFilePath}\nComplete setup before starting the backend.`;
   }
 
@@ -581,6 +583,26 @@ export function getEnvFilePath() {
 
 export function hasEnvFile() {
   return existsSync(getEnvFilePath());
+}
+
+export function loadEnvFileSource(): NodeJS.ProcessEnv {
+  const environmentFilePath = getEnvFilePath();
+
+  if (!existsSync(environmentFilePath)) {
+    return {};
+  }
+
+  return parseDotenv(readFileSync(environmentFilePath, 'utf8'));
+}
+
+export function isSetupLocked() {
+  const setupLockedValue = loadEnvFileSource().SETUP_LOCKED?.trim();
+
+  if (setupLockedValue === undefined) {
+    return false;
+  }
+
+  return setupLockedValue !== 'false';
 }
 
 function parseLogTargets(value: string) {

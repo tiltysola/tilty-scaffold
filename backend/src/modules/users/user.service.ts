@@ -5,6 +5,7 @@ import { type UserModel } from './user.model';
 
 interface CreateUserWithCredentialsInput {
   username: string;
+  displayName: string;
   email: string;
   passwordHash: string;
   passwordSalt: string;
@@ -12,6 +13,7 @@ interface CreateUserWithCredentialsInput {
 
 interface CreateSsoUserInput {
   username: string;
+  displayName: string;
   email: string;
   passwordHash: string;
   passwordSalt: string;
@@ -21,6 +23,10 @@ interface CreateSsoUserInput {
 interface UpdateUserPasswordInput {
   passwordHash: string;
   passwordSalt: string;
+}
+
+interface UpdateUserProfileInput {
+  displayName: string;
 }
 
 interface ListUsersInput {
@@ -44,6 +50,20 @@ export class UserService {
     return this.userModel.findOne({
       where: { email },
     });
+  }
+
+  async findByUsername(username: string) {
+    return this.userModel.findOne({
+      where: { username },
+    });
+  }
+
+  async findByLoginIdentifier(identifier: string) {
+    const normalizedIdentifier = identifier.trim().toLowerCase();
+
+    return normalizedIdentifier.includes('@')
+      ? this.findByEmail(normalizedIdentifier)
+      : this.findByUsername(normalizedIdentifier);
   }
 
   async findBySsoSubject(ssoSubject: string) {
@@ -79,19 +99,13 @@ export class UserService {
   }
 
   async createWithCredentials(input: CreateUserWithCredentialsInput) {
-    const existing = await this.userModel.findOne({
-      where: { email: input.email },
-    });
-
-    if (existing) {
-      throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
-    }
+    await this.assertUniqueAccountIdentifiers(input);
 
     try {
       return await this.userModel.create(input);
     } catch (error) {
       if (error instanceof UniqueConstraintError) {
-        throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+        await this.throwAccountIdentifierConflict(input);
       }
 
       throw error;
@@ -111,6 +125,12 @@ export class UserService {
       throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
     }
 
+    const existingByUsername = await this.findByUsername(input.username);
+
+    if (existingByUsername) {
+      throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+    }
+
     try {
       return await this.userModel.create(input);
     } catch (error) {
@@ -121,6 +141,10 @@ export class UserService {
 
         if (await this.findByEmail(input.email)) {
           throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+        }
+
+        if (await this.findByUsername(input.username)) {
+          throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
         }
 
         throw new AppError('SSO_ACCOUNT_CREATE_CONFLICT', 'The SSO account could not be created.', 409);
@@ -165,10 +189,38 @@ export class UserService {
     return user.save();
   }
 
+  async updateProfile(user: UserModel, input: UpdateUserProfileInput) {
+    user.displayName = input.displayName;
+
+    return user.save();
+  }
+
   async updateAvatar(user: UserModel, avatarUrl: string, avatarStorageKey: string) {
     user.avatarStorageKey = avatarStorageKey;
     user.avatarUrl = avatarUrl;
 
     return user.save();
+  }
+
+  private async assertUniqueAccountIdentifiers(input: { username: string; email: string }) {
+    if (await this.findByEmail(input.email)) {
+      throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+    }
+
+    if (await this.findByUsername(input.username)) {
+      throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+    }
+  }
+
+  private async throwAccountIdentifierConflict(input: { username: string; email: string }) {
+    if (await this.findByEmail(input.email)) {
+      throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+    }
+
+    if (await this.findByUsername(input.username)) {
+      throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+    }
+
+    throw new AppError('USER_IDENTIFIER_CONFLICT', 'The account identifiers are already registered.', 409);
   }
 }

@@ -6,6 +6,7 @@ import { type BackendModule } from './core/module';
 import { createRouter } from './core/router';
 import { csrfProtectionMiddleware } from './middleware/csrf';
 import { errorMiddleware } from './middleware/error';
+import { type FrontendFilesConfig, frontendFilesMiddleware } from './middleware/frontend-files';
 import { rateLimitMiddleware, type RateLimitOptions } from './middleware/rate-limit';
 import { requestIdMiddleware } from './middleware/request-id';
 import { requestLogMiddleware } from './middleware/request-log';
@@ -15,6 +16,7 @@ import { type StaticFilesConfig, staticFilesMiddleware } from './middleware/stat
 
 interface AppConfig {
   corsOrigins: string[];
+  frontendFiles?: FrontendFilesConfig;
   globalRateLimit?: RateLimitOptions;
   requestLogEnabled: boolean;
   setupRedirect?: {
@@ -60,6 +62,9 @@ export function createApp(modules: BackendModule[], config: AppConfig = defaultA
   app.use(csrfProtectionMiddleware({ allowedOrigins: config.corsOrigins }));
   if (config.staticFiles) {
     app.use(staticFilesMiddleware(config.staticFiles));
+  }
+  if (config.frontendFiles) {
+    app.use(frontendFilesMiddleware(config.frontendFiles));
   }
   app.use(bodyParser({ jsonLimit: '2mb' }));
   app.use(router.routes());

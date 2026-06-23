@@ -78,18 +78,18 @@ export const openApiDocument = {
   openapi: '3.1.0',
   info: {
     title: 'Tilty Scaffold API',
-    version: '0.1.0',
+    version: '0.1.5',
   },
   servers: [
     {
-      url: 'http://localhost:3000',
-      description: 'Local backend',
+      url: '/',
+      description: 'Current origin',
     },
   ],
   tags: [
     {
       name: 'Setup',
-      description: 'Setup Wizard endpoints',
+      description: 'Setup endpoints',
     },
     {
       name: 'Auth',
@@ -597,7 +597,10 @@ export const openApiDocument = {
             $ref: '#/components/responses/ValidationError',
           },
           '409': {
-            $ref: '#/components/responses/EmailExists',
+            $ref: '#/components/responses/AccountIdentifierConflict',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
           },
         },
       },
@@ -634,7 +637,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/EmailVerificationDisabled',
           },
           '409': {
-            $ref: '#/components/responses/EmailExists',
+            $ref: '#/components/responses/AccountIdentifierConflict',
           },
           '429': {
             $ref: '#/components/responses/RateLimited',
@@ -710,6 +713,9 @@ export const openApiDocument = {
           '404': {
             $ref: '#/components/responses/EmailVerificationDisabled',
           },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
         },
       },
     },
@@ -743,6 +749,9 @@ export const openApiDocument = {
           },
           '401': {
             $ref: '#/components/responses/InvalidCredentials',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
           },
         },
       },
@@ -781,6 +790,58 @@ export const openApiDocument = {
           },
           '401': {
             $ref: '#/components/responses/AuthRequired',
+          },
+        },
+      },
+      patch: {
+        tags: ['Auth'],
+        summary: "Update the authenticated user's profile",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/UpdateCurrentUserRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated authenticated user',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/AuthUser',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
           },
         },
       },
@@ -912,6 +973,9 @@ export const openApiDocument = {
           },
           '413': {
             description: 'Uploaded file is too large',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
           },
         },
       },
@@ -1105,6 +1169,9 @@ export const openApiDocument = {
           '409': {
             $ref: '#/components/responses/SsoBindConflict',
           },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
         },
       },
     },
@@ -1137,13 +1204,16 @@ export const openApiDocument = {
             $ref: '#/components/responses/ValidationError',
           },
           '401': {
-            $ref: '#/components/responses/InvalidCredentials',
+            $ref: '#/components/responses/SsoBindUnauthorized',
           },
           '404': {
             $ref: '#/components/responses/SsoDisabled',
           },
           '409': {
             $ref: '#/components/responses/SsoBindConflict',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
           },
         },
       },
@@ -1424,8 +1494,8 @@ export const openApiDocument = {
           },
         },
       },
-      EmailExists: {
-        description: 'Email already exists',
+      AccountIdentifierConflict: {
+        description: 'Email address or username already exists',
         content: {
           'application/json': {
             schema: {
@@ -1445,11 +1515,47 @@ export const openApiDocument = {
         },
       },
       InvalidCredentials: {
-        description: 'The email address or password is invalid',
+        description: 'The account identifier or password is invalid',
         content: {
           'application/json': {
             schema: {
               $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
+      SsoBindUnauthorized: {
+        description: 'The account credentials are invalid, or the SSO bind token is invalid or expired',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+            examples: {
+              invalidCredentials: {
+                summary: 'Invalid account credentials',
+                value: {
+                  code: 401,
+                  error: 'AUTH_INVALID_CREDENTIALS',
+                  message: 'The account identifier or password is invalid.',
+                },
+              },
+              invalidToken: {
+                summary: 'Invalid or consumed SSO bind token',
+                value: {
+                  code: 401,
+                  error: 'AUTH_INVALID_TOKEN',
+                  message: 'Authentication token is invalid.',
+                },
+              },
+              expiredToken: {
+                summary: 'Expired SSO bind token',
+                value: {
+                  code: 401,
+                  error: 'AUTH_TOKEN_EXPIRED',
+                  message: 'Authentication token has expired.',
+                },
+              },
             },
           },
         },
@@ -1485,7 +1591,7 @@ export const openApiDocument = {
         },
       },
       SetupLocked: {
-        description: 'Setup is locked because the backend environment file already exists',
+        description: 'Setup is locked because SETUP_LOCKED is true.',
         content: {
           'application/json': {
             schema: {
@@ -1552,7 +1658,7 @@ export const openApiDocument = {
       SetupEnvironment: {
         type: 'object',
         description:
-          'Backend environment variables accepted by the Setup Wizard. All values are submitted as strings; selected providers determine which values must be non-empty.',
+          'Backend environment variables accepted during setup. All values are submitted as strings; selected providers determine which values must be non-empty. SETUP_LOCKED is managed by the backend.',
         required: setupEnvironmentKeys,
         propertyNames: {
           enum: setupEnvironmentKeys,
@@ -1563,21 +1669,31 @@ export const openApiDocument = {
       },
       SetupDefaults: {
         type: 'object',
-        required: ['environment'],
+        required: ['environment', 'environmentFileLoaded'],
         properties: {
           environment: {
             $ref: '#/components/schemas/SetupEnvironment',
+          },
+          environmentFileLoaded: {
+            type: 'boolean',
+            description: 'Whether an existing backend .env file was loaded.',
           },
         },
       },
       SetupAdministrator: {
         type: 'object',
-        required: ['username', 'email', 'password', 'confirmPassword'],
+        required: ['username', 'displayName', 'email', 'password', 'confirmPassword'],
         properties: {
           username: {
             type: 'string',
-            minLength: 2,
+            minLength: 3,
             maxLength: 32,
+            pattern: '^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$',
+          },
+          displayName: {
+            type: 'string',
+            minLength: 2,
+            maxLength: 64,
           },
           email: {
             type: 'string',
@@ -1832,18 +1948,31 @@ export const openApiDocument = {
           },
         ],
       },
-      AuthUser: {
+      UpdateCurrentUserRequest: {
         type: 'object',
-        required: ['id', 'username', 'email', 'roles', 'permissions'],
+        additionalProperties: false,
+        required: ['displayName'],
         properties: {
-          id: {
-            type: 'string',
-            format: 'uuid',
-          },
-          username: {
+          displayName: {
             type: 'string',
             minLength: 2,
+            maxLength: 64,
+          },
+        },
+      },
+      AuthUser: {
+        type: 'object',
+        required: ['username', 'displayName', 'email', 'roles', 'permissions'],
+        properties: {
+          username: {
+            type: 'string',
+            minLength: 3,
             maxLength: 32,
+          },
+          displayName: {
+            type: 'string',
+            minLength: 2,
+            maxLength: 64,
           },
           email: {
             type: 'string',
@@ -1902,13 +2031,26 @@ export const openApiDocument = {
       },
       UserListItem: {
         type: 'object',
-        required: ['id', 'username', 'email', 'available', 'roles', 'permissions', 'createdAt', 'updatedAt'],
+        required: [
+          'id',
+          'username',
+          'displayName',
+          'email',
+          'available',
+          'roles',
+          'permissions',
+          'createdAt',
+          'updatedAt',
+        ],
         properties: {
           id: {
             type: 'string',
             format: 'uuid',
           },
           username: {
+            type: 'string',
+          },
+          displayName: {
             type: 'string',
           },
           email: {
@@ -2095,15 +2237,18 @@ export const openApiDocument = {
       },
       SsoCreateAccountRequest: {
         type: 'object',
-        required: ['token', 'username', 'password', 'confirmPassword'],
+        required: ['username', 'displayName', 'password', 'confirmPassword', 'token'],
         properties: {
-          token: {
-            type: 'string',
-          },
           username: {
             type: 'string',
-            minLength: 2,
+            minLength: 3,
             maxLength: 32,
+            pattern: '^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$',
+          },
+          displayName: {
+            type: 'string',
+            minLength: 2,
+            maxLength: 64,
           },
           password: {
             type: 'string',
@@ -2115,24 +2260,27 @@ export const openApiDocument = {
             minLength: 8,
             maxLength: 128,
           },
+          token: {
+            type: 'string',
+          },
         },
       },
       SsoBindAccountRequest: {
         type: 'object',
-        required: ['token', 'email', 'password'],
+        required: ['identifier', 'password', 'token'],
         properties: {
-          token: {
+          identifier: {
             type: 'string',
-          },
-          email: {
-            type: 'string',
-            format: 'email',
+            description: 'Email address or username.',
             maxLength: 255,
           },
           password: {
             type: 'string',
             minLength: 8,
             maxLength: 128,
+          },
+          token: {
+            type: 'string',
           },
         },
       },
@@ -2173,11 +2321,11 @@ export const openApiDocument = {
       },
       LoginRequest: {
         type: 'object',
-        required: ['email', 'password'],
+        required: ['identifier', 'password'],
         properties: {
-          email: {
+          identifier: {
             type: 'string',
-            format: 'email',
+            description: 'Email address or username.',
             maxLength: 255,
           },
           password: {
@@ -2189,17 +2337,27 @@ export const openApiDocument = {
       },
       RegisterRequest: {
         type: 'object',
-        required: ['username', 'email', 'password', 'confirmPassword'],
+        required: ['username', 'displayName', 'email', 'password', 'confirmPassword'],
         properties: {
           username: {
             type: 'string',
-            minLength: 2,
+            minLength: 3,
             maxLength: 32,
+            pattern: '^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$',
+          },
+          displayName: {
+            type: 'string',
+            minLength: 2,
+            maxLength: 64,
           },
           email: {
             type: 'string',
             format: 'email',
             maxLength: 255,
+          },
+          emailVerificationCode: {
+            type: 'string',
+            pattern: '^\\d{6}$',
           },
           password: {
             type: 'string',
@@ -2210,10 +2368,6 @@ export const openApiDocument = {
             type: 'string',
             minLength: 8,
             maxLength: 128,
-          },
-          emailVerificationCode: {
-            type: 'string',
-            pattern: '^\\d{6}$',
           },
         },
       },

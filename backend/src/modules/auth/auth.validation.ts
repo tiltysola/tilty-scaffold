@@ -1,8 +1,8 @@
 import { AppError } from '../../core/errors';
 
 interface PasswordConfirmationInput {
-  confirmPassword: string;
   password: string;
+  confirmPassword: string;
 }
 
 export function assertPasswordConfirmation(input: PasswordConfirmationInput) {

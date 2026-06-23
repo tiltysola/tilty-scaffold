@@ -10,7 +10,9 @@ import {
   sendPasswordResetEmailVerification,
   sendRegistrationEmailVerification,
   storeSession,
+  updateCurrentUser,
 } from '../src/lib/auth';
+import { createApiSuccessResponse } from './support/api';
 import { createSession, createTestWindow } from './support/auth';
 
 describe('auth API client', () => {
@@ -22,17 +24,10 @@ describe('auth API client', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
-        return new Response(
-          JSON.stringify({
-            code: 200,
-            error: null,
-            data: {
-              passwordRecoveryEnabled: true,
-              registrationEmailVerificationRequired: true,
-            },
-          }),
-          { status: 200 },
-        );
+        return createApiSuccessResponse({
+          passwordRecoveryEnabled: true,
+          registrationEmailVerificationRequired: true,
+        });
       }),
     );
 
@@ -45,11 +40,11 @@ describe('auth API client', () => {
   it.each([
     {
       request: sendRegistrationEmailVerification,
-      url: 'http://localhost:3000/api/auth/register/email-verification',
+      url: '/api/auth/register/email-verification',
     },
     {
       request: sendPasswordResetEmailVerification,
-      url: 'http://localhost:3000/api/auth/password-reset/email-verification',
+      url: '/api/auth/password-reset/email-verification',
     },
   ])('requests email verification codes from $url', async ({ request, url }) => {
     const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
@@ -59,17 +54,10 @@ describe('auth API client', () => {
         }),
       );
 
-      return new Response(
-        JSON.stringify({
-          code: 200,
-          error: null,
-          data: {
-            cooldownSeconds: 60,
-            expiresInSeconds: 600,
-          },
-        }),
-        { status: 200 },
-      );
+      return createApiSuccessResponse({
+        cooldownSeconds: 60,
+        expiresInSeconds: 600,
+      });
     });
 
     vi.stubGlobal('fetch', fetchMock);
@@ -96,32 +84,27 @@ describe('auth API client', () => {
       vi.fn(async (_url, init?: RequestInit) => {
         expect(init?.body).toBe(
           JSON.stringify({
+            username: 'test_user',
+            displayName: 'Test User',
             email: 'user@example.com',
             emailVerificationCode: '123456',
             password: 'password123',
             confirmPassword: 'password123',
-            username: 'Test User',
           }),
         );
 
-        return new Response(
-          JSON.stringify({
-            code: 200,
-            error: null,
-            data: session,
-          }),
-          { status: 201 },
-        );
+        return createApiSuccessResponse(session, { status: 201 });
       }),
     );
 
     await expect(
       register({
+        username: 'test_user',
+        displayName: 'Test User',
         email: 'user@example.com',
         emailVerificationCode: '123456',
         password: 'password123',
         confirmPassword: 'password123',
-        username: 'Test User',
       }),
     ).resolves.toEqual(session);
     expect(getStoredSession()).toEqual(session);
@@ -133,37 +116,57 @@ describe('auth API client', () => {
     const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
       expect(init?.body).toBeUndefined();
 
-      return new Response(
-        JSON.stringify({
-          code: 200,
-          error: null,
-          data: session,
-        }),
-        { status: 200 },
-      );
+      return createApiSuccessResponse(session);
     });
 
     vi.stubGlobal('window', window);
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(refreshSession()).resolves.toEqual(session);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:3000/api/auth/refresh');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/refresh');
     expect(getStoredSession()).toEqual(session);
+  });
+
+  it('updates the current user profile and stores returned user metadata', async () => {
+    const window = createTestWindow();
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
+    const updatedUser = {
+      ...session.user,
+      displayName: 'Updated User',
+    };
+    const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
+      expect(init?.body).toBe(
+        JSON.stringify({
+          displayName: 'Updated User',
+        }),
+      );
+      expect(init?.method).toBe('PATCH');
+
+      return createApiSuccessResponse(updatedUser);
+    });
+
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('fetch', fetchMock);
+    storeSession(session);
+
+    await expect(
+      updateCurrentUser({
+        displayName: 'Updated User',
+      }),
+    ).resolves.toEqual(updatedUser);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me');
+    expect(getStoredSession()).toEqual({
+      ...session,
+      user: updatedUser,
+    });
   });
 
   it('signs out through the backend and clears the stored session', async () => {
     const window = createTestWindow();
     const fetchMock = vi.fn<typeof fetch>(async () => {
-      return new Response(
-        JSON.stringify({
-          code: 200,
-          error: null,
-          data: {
-            signedOut: true,
-          },
-        }),
-        { status: 200 },
-      );
+      return createApiSuccessResponse({
+        signedOut: true,
+      });
     });
 
     vi.stubGlobal('window', window);
@@ -173,7 +176,7 @@ describe('auth API client', () => {
     await logout();
 
     expect(getStoredSession()).toBeNull();
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:3000/api/auth/logout');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/logout');
   });
 
   it('keeps stored sessions until logout requests complete', async () => {
@@ -195,16 +198,9 @@ describe('auth API client', () => {
 
     expect(getStoredSession()).toEqual(session);
     resolveLogout?.(
-      new Response(
-        JSON.stringify({
-          code: 200,
-          error: null,
-          data: {
-            signedOut: true,
-          },
-        }),
-        { status: 200 },
-      ),
+      createApiSuccessResponse({
+        signedOut: true,
+      }),
     );
     await logoutPromise;
     expect(getStoredSession()).toBeNull();
@@ -241,16 +237,9 @@ describe('auth API client', () => {
         }),
       );
 
-      return new Response(
-        JSON.stringify({
-          code: 200,
-          error: null,
-          data: {
-            reset: true,
-          },
-        }),
-        { status: 200 },
-      );
+      return createApiSuccessResponse({
+        reset: true,
+      });
     });
 
     vi.stubGlobal('fetch', fetchMock);
@@ -266,6 +255,6 @@ describe('auth API client', () => {
       reset: true,
     });
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:3000/api/auth/password-reset');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/password-reset');
   });
 });

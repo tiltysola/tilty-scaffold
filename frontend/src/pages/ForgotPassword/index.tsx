@@ -9,6 +9,7 @@ import { useFormState } from '@/hooks/useFormState';
 import { ApiError, getApiErrorMessage } from '@/lib/api';
 import { fetchAuthConfig, resetPassword, sendPasswordResetEmailVerification } from '@/lib/auth';
 import { createPasswordFormSchema, emailSchema, verificationCodeSchema } from '@/lib/auth-validation';
+import { routePath } from '@/router';
 import { Button } from '@/shadcn/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/shadcn/components/ui/card';
 import { Input } from '@/shadcn/components/ui/input';
@@ -203,7 +204,7 @@ const Index = () => {
         </CardContent>
         <CardFooter className="justify-center gap-2 text-sm text-muted-foreground">
           <span>Remember your password?</span>
-          <Link className="font-medium text-primary hover:underline" to="/login">
+          <Link className="font-medium text-primary hover:underline" to={routePath('login')}>
             Log in
           </Link>
         </CardFooter>

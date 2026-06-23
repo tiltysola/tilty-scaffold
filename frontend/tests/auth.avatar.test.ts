@@ -13,7 +13,7 @@ describe('auth avatar client', () => {
     const storedSession = createSession(new Date(Date.now() + 60_000).toISOString());
     const updatedUser = {
       ...storedSession.user,
-      avatarUrl: '/uploads/avatars/user-id/avatar.png',
+      avatarUrl: '/uploads/avatars/avatar.png',
     };
     const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
       expect(init?.body).toBeInstanceOf(FormData);
@@ -33,8 +33,8 @@ describe('auth avatar client', () => {
     storeSession(storedSession);
 
     await expect(uploadAvatar(new File(['avatar'], 'avatar.png', { type: 'image/png' }))).resolves.toEqual(updatedUser);
-    expect(getStoredSession()?.user.avatarUrl).toBe('/uploads/avatars/user-id/avatar.png');
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:3000/api/auth/avatar');
+    expect(getStoredSession()?.user.avatarUrl).toBe('/uploads/avatars/avatar.png');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/avatar');
   });
 
   it('keeps refreshed session metadata when avatar uploads refresh authentication', async () => {
@@ -43,7 +43,7 @@ describe('auth avatar client', () => {
     const refreshedSession = createSession(new Date(Date.now() + 120_000).toISOString());
     const updatedUser = {
       ...initialSession.user,
-      avatarUrl: '/uploads/avatars/user-id/refreshed.png',
+      avatarUrl: '/uploads/avatars/refreshed.png',
     };
     const fetchMock = vi
       .fn()
@@ -84,9 +84,9 @@ describe('auth avatar client', () => {
 
     await expect(uploadAvatar(new File(['avatar'], 'avatar.png', { type: 'image/png' }))).resolves.toEqual(updatedUser);
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      'http://localhost:3000/api/auth/avatar',
-      'http://localhost:3000/api/auth/refresh',
-      'http://localhost:3000/api/auth/avatar',
+      '/api/auth/avatar',
+      '/api/auth/refresh',
+      '/api/auth/avatar',
     ]);
     expect(getStoredSession()).toEqual({
       ...refreshedSession,
@@ -95,11 +95,8 @@ describe('auth avatar client', () => {
   });
 
   it('resolves backend-relative asset URLs', () => {
-    expect(resolveAssetUrl('/uploads/avatar.png')).toBe('http://localhost:3000/uploads/avatar.png');
+    expect(resolveAssetUrl('/uploads/avatar.png')).toBe('/uploads/avatar.png');
     expect(resolveAssetUrl('https://cdn.example.com/avatar.png')).toBe('https://cdn.example.com/avatar.png');
-    expect(resolveAssetUrl('http://localhost:3000/uploads/avatar.png')).toBe(
-      'http://localhost:3000/uploads/avatar.png',
-    );
     expect(resolveAssetUrl('http://evil.example.com/avatar.png')).toBeUndefined();
     expect(resolveAssetUrl('//evil.example.com/avatar.png')).toBeUndefined();
     expect(resolveAssetUrl('/uploads\\avatar.png')).toBeUndefined();

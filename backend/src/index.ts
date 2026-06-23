@@ -1,11 +1,11 @@
 import { bootstrap } from './bootstrap';
-import { getEnvValidationMessage, hasEnvFile } from './config/env';
+import { getEnvValidationMessage, isSetupLocked } from './config/env';
 import { flushLogger, logger } from './core/logger';
 import { bootstrapSetup } from './setup-bootstrap';
 
 const envValidationMessage = getEnvValidationMessage();
 
-if (!hasEnvFile()) {
+if (!isSetupLocked()) {
   bootstrapSetup().catch(handleStartupError);
 } else if (envValidationMessage) {
   logger.error(envValidationMessage);

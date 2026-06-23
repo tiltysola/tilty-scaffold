@@ -22,7 +22,7 @@ describe('apiRequest', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const data = await apiRequest<{ ok: boolean }>('/api/auth/login', {
-      body: { email: 'user@example.com', password: 'password123' },
+      body: { identifier: 'user@example.com', password: 'password123' },
       method: 'POST',
     });
 
@@ -31,8 +31,8 @@ describe('apiRequest', () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     const headers = init?.headers as Headers;
 
-    expect(url).toBe('http://localhost:3000/api/auth/login');
-    expect(init?.body).toBe(JSON.stringify({ email: 'user@example.com', password: 'password123' }));
+    expect(url).toBe('/api/auth/login');
+    expect(init?.body).toBe(JSON.stringify({ identifier: 'user@example.com', password: 'password123' }));
     expect(init?.credentials).toBe('include');
     expect(init?.signal).toBeInstanceOf(AbortSignal);
     expect(headers.get('Content-Type')).toBe('application/json');
@@ -64,6 +64,25 @@ describe('apiRequest', () => {
 
     expect(init?.body).toBe(form);
     expect(headers.has('Content-Type')).toBe(false);
+  });
+
+  it('rejects absolute and non-API request paths before fetch', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    for (const path of [
+      'https://api.example.com/api/auth/me',
+      '//api.example.com/api/auth/me',
+      '/uploads/avatar.png',
+    ]) {
+      await expect(apiRequest(path)).rejects.toMatchObject({
+        code: 'API_PATH_INVALID',
+        status: 0,
+      });
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('throws ApiError for API failure payloads', async () => {
@@ -122,7 +141,7 @@ describe('apiRequest', () => {
           JSON.stringify({
             code: 503,
             error: 'SETUP_REQUIRED',
-            message: 'Setup is required before this API can be used.',
+            message: 'Setup is required before the application can be used.',
           }),
           { status: 503 },
         );
@@ -156,7 +175,7 @@ describe('apiRequest', () => {
           JSON.stringify({
             code: 503,
             error: 'SETUP_RESTART_REQUIRED',
-            message: 'Setup is complete. Restart the backend service before using this API.',
+            message: 'Setup is complete. Restart the backend service before using the application.',
           }),
           { status: 503 },
         );

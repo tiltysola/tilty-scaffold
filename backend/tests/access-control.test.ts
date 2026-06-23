@@ -9,6 +9,7 @@ import { errorMiddleware } from '../src/middleware/error';
 import { createServices, initModels } from '../src/modules';
 import { defaultAuthCookieConfig } from '../src/modules/auth/auth.controller';
 import { createUsersModule } from '../src/modules/users';
+import { registerTestUser } from './support/auth';
 import { createTestContext, getTestRoute, runMiddlewares } from './support/http';
 
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
@@ -37,7 +38,8 @@ describe('access control', () => {
   });
 
   it('grants the first registered user the root role', async () => {
-    const session = await registerUser('Root User', 'root@example.com');
+    const session = await registerTestUser(services.auth, 'Root User', 'root@example.com');
+    const rootUser = await services.user.findByUsername('root_user');
 
     expect(session.user.roles).toEqual([SystemRole.Root]);
     expect(session.user.permissions).toEqual([
@@ -45,12 +47,13 @@ describe('access control', () => {
       SystemPermission.UserAdmin,
       SystemPermission.UserList,
     ]);
-    await expect(services.accessControl.can(session.user.id, SystemPermission.UserAdmin)).resolves.toBe(true);
+    expect(rootUser).not.toBeNull();
+    await expect(services.accessControl.can(rootUser!.id, SystemPermission.UserAdmin)).resolves.toBe(true);
   });
 
   it('enforces user list permissions on the server', async () => {
-    const rootSession = await registerUser('Root User', 'root-list@example.com');
-    const regularSession = await registerUser('Regular User', 'regular-list@example.com');
+    const rootSession = await registerTestUser(services.auth, 'Root User', 'root-list@example.com');
+    const regularSession = await registerTestUser(services.auth, 'Regular User', 'regular-list@example.com');
     const listRoute = getTestRoute(routes, 'get', '/');
 
     const forbiddenContext = await runMiddlewares(
@@ -86,10 +89,15 @@ describe('access control', () => {
   });
 
   it('updates user roles and prevents removing the final root', async () => {
-    const rootSession = await registerUser('Root User', 'root-admin@example.com');
-    const regularSession = await registerUser('Regular User', 'regular-admin@example.com');
+    const rootSession = await registerTestUser(services.auth, 'Root User', 'root-admin@example.com');
+    const regularSession = await registerTestUser(services.auth, 'Regular User', 'regular-admin@example.com');
+    const regularUser = await services.user.findByUsername('regular_user');
+    const rootUser = await services.user.findByUsername('root_user');
     const updateRolesRoute = getTestRoute(routes, 'put', '/:id/roles');
     const listRoute = getTestRoute(routes, 'get', '/');
+
+    expect(regularUser).not.toBeNull();
+    expect(rootUser).not.toBeNull();
 
     const updateContext = await runMiddlewares(
       [errorMiddleware(), ...updateRolesRoute.handlers],
@@ -99,7 +107,7 @@ describe('access control', () => {
         },
         {},
         {
-          id: regularSession.user.id,
+          id: regularUser!.id,
         },
         {
           cookies: {
@@ -132,7 +140,7 @@ describe('access control', () => {
         },
         {},
         {
-          id: rootSession.user.id,
+          id: rootUser!.id,
         },
         {
           cookies: {
@@ -147,15 +155,6 @@ describe('access control', () => {
       error: 'LAST_ROOT_ROLE_REQUIRED',
     });
   });
-
-  async function registerUser(username: string, email: string) {
-    return services.auth.register({
-      username,
-      email,
-      password: 'password123',
-      confirmPassword: 'password123',
-    });
-  }
 });
 
 interface UserListBody {

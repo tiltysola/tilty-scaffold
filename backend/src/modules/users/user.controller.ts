@@ -61,13 +61,14 @@ function toUserListItem(user: UserModel, access: UserAccess = { roles: [], permi
   return {
     id: user.id,
     username: user.username,
+    displayName: user.displayName,
     email: user.email,
+    ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
     available: user.available,
     roles: access.roles,
     permissions: access.permissions,
     createdAt: toIsoString(user.createdAt),
     updatedAt: toIsoString(user.updatedAt),
-    ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
   };
 }
 

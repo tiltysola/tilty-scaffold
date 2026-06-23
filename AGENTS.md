@@ -39,6 +39,13 @@ documentation, not in this file.
 - Review security, privacy, data, concurrency, performance, and accessibility
   impact when relevant.
 
+## Field Ordering
+
+- Keep equivalent structures in a consistent field order across schemas,
+  interfaces, DTOs, API clients, API documentation, object literals, and tests.
+- When adding or changing fields, review directly related declarations and
+  fixtures so equivalent structures keep the same order.
+
 ## Documentation
 
 - Keep project-specific instructions in the relevant project documentation.
@@ -52,6 +59,8 @@ documentation, not in this file.
   robustness.
 - Before completing any task, run the relevant checks and report failures or
   skipped checks.
+- After every code change, check changed and directly related files for
+  field-order consistency.
 - After code changes, review relevant documentation for accuracy and update it
   when needed.
 - If any README or `AGENTS.md` file changed, verify that the content is formal,

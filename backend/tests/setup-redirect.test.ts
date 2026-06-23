@@ -29,7 +29,7 @@ describe('setup redirect middleware', () => {
     expect(context.body).toEqual({
       code: 503,
       error: 'SETUP_REQUIRED',
-      message: 'Setup is required before this API can be used.',
+      message: 'Setup is required before the application can be used.',
     });
     expect(context.responseHeaders.location).toBeUndefined();
   });
@@ -73,7 +73,7 @@ describe('setup redirect middleware', () => {
     expect(context.body).toEqual({
       code: 503,
       error: 'SETUP_RESTART_REQUIRED',
-      message: 'Setup is complete. Restart the backend service before using this API.',
+      message: 'Setup is complete. Restart the backend service before using the application.',
     });
     expect(context.responseHeaders.location).toBeUndefined();
   });
@@ -103,7 +103,7 @@ describe('setup redirect middleware', () => {
     expect(context.responseHeaders.location).toBe('http://localhost:8011/setup');
   });
 
-  it('redirects browser navigation requests to the setup page in setup mode', async () => {
+  it('redirects browser navigation requests to a relative setup path in setup mode', async () => {
     const context = await runMiddlewares(
       [
         setupRedirectMiddleware({
@@ -125,7 +125,7 @@ describe('setup redirect middleware', () => {
     );
 
     expect(context.status).toBe(302);
-    expect(context.responseHeaders.location).toBe('http://localhost:8011/setup');
+    expect(context.responseHeaders.location).toBe('/setup');
   });
 
   it('passes non-HTML non-API requests through in setup mode', async () => {
@@ -179,6 +179,24 @@ describe('setup redirect middleware', () => {
 
     expect(context.status).toBe(302);
     expect(context.responseHeaders.location).toBe('http://localhost:8011/login');
+  });
+
+  it('redirects direct setup page visits to a relative login path when no frontend origin is provided', async () => {
+    const context = await runMiddlewares(
+      [
+        setupRedirectMiddleware({
+          allowedOrigins: ['http://localhost:8011'],
+          isSetupLocked: () => true,
+          mode: 'setup',
+        }),
+      ],
+      createTestContext(undefined, {}, undefined, {
+        path: '/setup',
+      }),
+    );
+
+    expect(context.status).toBe(302);
+    expect(context.responseHeaders.location).toBe('/login');
   });
 
   it('allows setup API requests after setup completes without restart', async () => {

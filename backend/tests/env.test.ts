@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 
 import { getEnvValidationMessage, loadEnv } from '../src/config/env';
@@ -146,22 +149,27 @@ describe('environment configuration', () => {
     expect(message).toContain('CORS_ORIGINS');
   });
 
-  it('allows production configuration from process environment without a local env file', () => {
+  it('requires a local environment file for process environment validation', async () => {
+    const originalCwd = process.cwd();
     const originalEnv = process.env;
-
-    process.env = {
-      AUTH_COOKIE_SECURE: 'true',
-      AUTH_TOKEN_SECRET: authTokenSecret,
-      CORS_ORIGINS: 'https://app.example.com',
-      DATABASE_DIALECT: 'sqlite',
-      DATABASE_SYNC: 'off',
-      NODE_ENV: 'production',
-    };
+    const temporaryRoot = await mkdtemp(join(tmpdir(), 'tilty-env-'));
 
     try {
-      expect(getEnvValidationMessage()).toBeNull();
+      process.chdir(temporaryRoot);
+      process.env = {
+        AUTH_COOKIE_SECURE: 'true',
+        AUTH_TOKEN_SECRET: authTokenSecret,
+        CORS_ORIGINS: 'https://app.example.com',
+        DATABASE_DIALECT: 'sqlite',
+        DATABASE_SYNC: 'off',
+        NODE_ENV: 'production',
+      };
+
+      expect(getEnvValidationMessage()).toContain('Missing environment file');
     } finally {
       process.env = originalEnv;
+      process.chdir(originalCwd);
+      await rm(temporaryRoot, { force: true, recursive: true });
     }
   });
 

@@ -12,8 +12,9 @@ import {
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
 const payload = {
   sub: 'user-id',
+  username: 'test_user',
+  displayName: 'Test User',
   email: 'user@example.com',
-  username: 'Test User',
 };
 
 describe('auth token crypto', () => {
@@ -78,10 +79,11 @@ describe('auth token crypto', () => {
   it('creates and verifies SSO bind tokens', async () => {
     const token = await createSsoBindToken(
       {
+        ssoSubject: 'provider-user@identity.example.com',
+        username: 'sso_user',
+        displayName: 'Token User',
         email: 'sso@example.com',
         redirectPath: '/dashboard',
-        ssoSubject: 'provider-user@passport.mahoutsukai.cn',
-        username: 'SSO User',
       },
       authTokenSecret,
     );
@@ -90,12 +92,13 @@ describe('auth token crypto', () => {
     expect(token.token.split('.')).toHaveLength(3);
     expect(Date.parse(token.expiresAt)).not.toBeNaN();
     expect(verified).toMatchObject({
-      email: 'sso@example.com',
       jti: token.tokenId,
+      ssoSubject: 'provider-user@identity.example.com',
+      username: 'sso_user',
+      displayName: 'Token User',
+      email: 'sso@example.com',
       redirectPath: '/dashboard',
-      ssoSubject: 'provider-user@passport.mahoutsukai.cn',
       type: 'sso_bind',
-      username: 'SSO User',
     });
   });
 });

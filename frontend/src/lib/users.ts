@@ -11,15 +11,16 @@ export interface RoleSummary {
 }
 
 export interface UserListItem {
-  available: boolean;
-  avatarUrl?: string;
-  createdAt: string;
-  email: string;
   id: string;
-  permissions: string[];
-  roles: string[];
-  updatedAt: string;
   username: string;
+  displayName: string;
+  email: string;
+  avatarUrl?: string;
+  available: boolean;
+  roles: string[];
+  permissions: string[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface UserListPagination {

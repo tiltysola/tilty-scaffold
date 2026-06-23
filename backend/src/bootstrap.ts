@@ -1,4 +1,6 @@
+import { existsSync } from 'fs';
 import { createServer, type Server } from 'http';
+import { resolve } from 'path';
 
 import { createApp, shouldSkipGlobalRateLimit } from './app';
 import { loadEnv } from './config/env';
@@ -10,29 +12,33 @@ import { createFileStorage } from './infra/file-storage';
 import { assertDatabaseMigrationsApplied } from './infra/migrator';
 import { createModules, createServices, initModels } from './modules';
 
-export async function bootstrap() {
-  const env = loadEnv();
-  configureLogger(env.logger);
+const frontendDistDirectory = resolve(__dirname, '../../frontend/dist');
+const frontendEntryFilePath = resolve(frontendDistDirectory, 'index.html');
 
-  const cacheStore = createCacheStore(env.cache);
-  const fileStorage = createFileStorage(env.fileStorage);
-  const sequelize = createSequelize(env.database);
+export async function bootstrap() {
+  const environmentConfig = loadEnv();
+  configureLogger(environmentConfig.logger);
+  warnIfFrontendEntryFileMissing();
+
+  const cacheStore = createCacheStore(environmentConfig.cache);
+  const fileStorage = createFileStorage(environmentConfig.fileStorage);
+  const sequelize = createSequelize(environmentConfig.database);
   const models = initModels(sequelize);
   const services = createServices(models, {
-    authTokens: env.authTokens,
-    authTokenSecret: env.authTokenSecret,
+    authTokens: environmentConfig.authTokens,
+    authTokenSecret: environmentConfig.authTokenSecret,
     cacheStore,
     fileStorage,
-    ...(env.email ? { email: env.email } : {}),
-    ...(env.sso ? { sso: env.sso } : {}),
+    ...(environmentConfig.email ? { email: environmentConfig.email } : {}),
+    ...(environmentConfig.sso ? { sso: environmentConfig.sso } : {}),
   });
   const modules = createModules(services, {
-    authCookies: env.authCookies,
+    authCookies: environmentConfig.authCookies,
     authRateLimit: {
-      ...env.authRateLimit,
+      ...environmentConfig.authRateLimit,
       cacheStore,
     },
-    avatarUploadMaxBytes: env.fileUpload.maxBytes,
+    avatarUploadMaxBytes: environmentConfig.fileUpload.maxBytes,
     readinessChecks: [
       {
         name: 'database',
@@ -40,7 +46,7 @@ export async function bootstrap() {
           await sequelize.authenticate();
         },
       },
-      ...(env.cache.store === 'redis'
+      ...(environmentConfig.cache.store === 'redis'
         ? [
             {
               name: 'cache',
@@ -53,42 +59,45 @@ export async function bootstrap() {
     ],
   });
 
-  await connectDatabase(sequelize, env.databaseSync);
-  if (env.databaseSync === 'off') {
+  await connectDatabase(sequelize, environmentConfig.databaseSync);
+  if (environmentConfig.databaseSync === 'off') {
     await assertDatabaseMigrationsApplied(sequelize);
   }
   await services.accessControl.syncSystemAccessControl();
 
-  const scheduler = env.scheduleEnabled
+  const scheduler = environmentConfig.scheduleEnabled
     ? startScheduler(
         collectJobs(modules),
-        env.schedulerLock
+        environmentConfig.schedulerLock
           ? {
               lock: {
                 cacheStore,
-                ttlMs: env.schedulerLock.ttlMs,
+                ttlMs: environmentConfig.schedulerLock.ttlMs,
               },
             }
           : undefined,
       )
     : undefined;
   const app = createApp(modules, {
-    corsOrigins: env.corsOrigins,
+    corsOrigins: environmentConfig.corsOrigins,
+    frontendFiles: {
+      root: frontendDistDirectory,
+    },
     globalRateLimit: {
-      ...env.globalRateLimit,
+      ...environmentConfig.globalRateLimit,
       cacheStore,
       scope: 'ip',
       skip: shouldSkipGlobalRateLimit,
     },
-    requestLogEnabled: env.requestLogEnabled,
+    requestLogEnabled: environmentConfig.requestLogEnabled,
     setupRedirect: { mode: 'locked' },
-    ...(env.localFiles ? { staticFiles: env.localFiles } : {}),
-    trustProxy: env.trustProxy,
+    ...(environmentConfig.localFiles ? { staticFiles: environmentConfig.localFiles } : {}),
+    trustProxy: environmentConfig.trustProxy,
   });
   const server = createServer(app.callback());
 
-  await listen(server, env.port, env.host);
-  logger.info(`HTTP server listening on ${env.host}:${env.port}`);
+  await listen(server, environmentConfig.port, environmentConfig.host);
+  logger.info(`HTTP server listening on ${environmentConfig.host}:${environmentConfig.port}`);
 
   const shutdown = async (signal: NodeJS.Signals) => {
     logger.info(`Received ${signal}; shutting down.`);
@@ -102,6 +111,14 @@ export async function bootstrap() {
 
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
+}
+
+function warnIfFrontendEntryFileMissing() {
+  if (!existsSync(frontendEntryFilePath)) {
+    logger.warn(
+      `Frontend entry file was not found at ${frontendEntryFilePath}. Backend-served browser routes require npm run build:frontend.`,
+    );
+  }
 }
 
 function listen(server: Server, port: number, host: string) {

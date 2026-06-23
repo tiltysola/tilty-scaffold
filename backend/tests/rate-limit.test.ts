@@ -33,7 +33,7 @@ describe('rate limit middleware', () => {
 
     await runMiddlewares(
       getTestRoute(routes, 'post', '/login').handlers,
-      createTestContext({ email: 'user@example.com', password: 'password123' }, {}, undefined, {
+      createTestContext({ identifier: 'user@example.com', password: 'password123' }, {}, undefined, {
         method: 'POST',
         path: '/api/auth/login',
       }),
@@ -42,7 +42,7 @@ describe('rate limit middleware', () => {
     await expect(
       runMiddlewares(
         getTestRoute(routes, 'post', '/login').handlers,
-        createTestContext({ email: 'user@example.com', password: 'password123' }, {}, undefined, {
+        createTestContext({ identifier: 'user@example.com', password: 'password123' }, {}, undefined, {
           method: 'POST',
           path: '/api/auth/login',
         }),

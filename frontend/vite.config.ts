@@ -28,6 +28,10 @@ export default defineConfig({
     },
     host: '0.0.0.0',
     port: 8011,
+    proxy: {
+      '/api': 'http://localhost:3000',
+      '/uploads': 'http://localhost:3000',
+    },
     strictPort: true,
   },
 });

@@ -1,17 +1,18 @@
 import { isSafeRelativePath } from '@tilty/shared/paths';
 
 import { ApiError, apiRequest, type ApiRequestOptions } from './api';
-import { appConfig } from './config';
 
+export const authSessionStorageKey = 'tilty-scaffold.auth.session';
+export const authSessionChangedEvent = 'tilty-scaffold.auth.session.changed';
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 export interface AuthUser {
-  id: string;
   username: string;
+  displayName: string;
   email: string;
+  avatarUrl?: string;
   roles: string[];
   permissions: string[];
-  avatarUrl?: string;
 }
 
 export interface AuthSession {
@@ -26,29 +27,31 @@ interface AuthPublicConfig {
 }
 
 interface RegisterInput {
+  username: string;
+  displayName: string;
   email: string;
   emailVerificationCode?: string;
   password: string;
   confirmPassword: string;
-  username: string;
 }
 
 interface LoginInput {
-  email: string;
+  identifier: string;
   password: string;
 }
 
 interface BindSsoAccountInput {
-  email: string;
+  identifier: string;
   password: string;
   token: string;
 }
 
 interface CreateSsoAccountInput {
-  confirmPassword: string;
-  password: string;
-  token: string;
   username: string;
+  displayName: string;
+  password: string;
+  confirmPassword: string;
+  token: string;
 }
 
 interface ResetPasswordInput {
@@ -56,6 +59,10 @@ interface ResetPasswordInput {
   emailVerificationCode: string;
   password: string;
   confirmPassword: string;
+}
+
+interface UpdateCurrentUserInput {
+  displayName: string;
 }
 
 export interface SsoPublicConfig {
@@ -133,11 +140,11 @@ export async function fetchSsoConfig() {
 }
 
 export function getSsoStartUrl(redirectPath: string) {
-  const url = new URL('/api/auth/sso/start', appConfig.apiBaseUrl);
+  const params = new URLSearchParams({
+    redirect: redirectPath,
+  });
 
-  url.searchParams.set('redirect', redirectPath);
-
-  return url.toString();
+  return `/api/auth/sso/start?${params.toString()}`;
 }
 
 export function getSsoCallbackParams(hash: string) {
@@ -185,6 +192,28 @@ export async function fetchCurrentUser() {
   });
 }
 
+export async function updateCurrentUser(input: UpdateCurrentUserInput) {
+  const session = getStoredSession();
+
+  if (!session) {
+    throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication is required.');
+  }
+
+  const { result: user, session: refreshedSession } = await runAuthenticatedRequest(() =>
+    apiRequest<AuthUser>('/api/auth/me', {
+      body: input,
+      method: 'PATCH',
+    }),
+  );
+
+  storeSession({
+    ...(refreshedSession ?? session),
+    user,
+  });
+
+  return user;
+}
+
 export async function authenticatedApiRequest<T>(path: string, options?: ApiRequestOptions) {
   const { result } = await runAuthenticatedRequest(() => apiRequest<T>(path, options));
 
@@ -224,6 +253,24 @@ export async function logout() {
   clearStoredSession();
 }
 
+export function getUserHandle(username?: string) {
+  const trimmedUsername = username?.trim();
+
+  return trimmedUsername ? `@${trimmedUsername}` : '@user';
+}
+
+export function getUserInitials(name?: string) {
+  return (
+    name
+      ?.trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join('')
+      .toUpperCase() || 'U'
+  );
+}
+
 export function resolveAssetUrl(url?: string) {
   if (!url) {
     return undefined;
@@ -234,7 +281,7 @@ export function resolveAssetUrl(url?: string) {
   }
 
   if (isSafeRelativePath(url)) {
-    return new URL(url, appConfig.apiBaseUrl).toString();
+    return url;
   }
 
   return undefined;
@@ -282,7 +329,8 @@ export function storeSession(session: AuthSession) {
     return;
   }
 
-  window.localStorage.setItem(appConfig.authSessionStorageKey, JSON.stringify(session));
+  window.localStorage.setItem(authSessionStorageKey, JSON.stringify(session));
+  emitStoredSessionChanged();
 }
 
 export function getStoredSession() {
@@ -290,7 +338,7 @@ export function getStoredSession() {
     return null;
   }
 
-  const value = window.localStorage.getItem(appConfig.authSessionStorageKey);
+  const value = window.localStorage.getItem(authSessionStorageKey);
 
   if (!value) {
     return null;
@@ -316,7 +364,16 @@ export function clearStoredSession() {
     return;
   }
 
-  window.localStorage.removeItem(appConfig.authSessionStorageKey);
+  window.localStorage.removeItem(authSessionStorageKey);
+  emitStoredSessionChanged();
+}
+
+function emitStoredSessionChanged() {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function' || typeof Event === 'undefined') {
+    return;
+  }
+
+  window.dispatchEvent(new Event(authSessionChangedEvent));
 }
 
 function isAuthSession(value: unknown): value is AuthSession {
@@ -345,8 +402,8 @@ function isAuthUser(value: unknown): value is AuthUser {
   const user = value as Record<string, unknown>;
 
   return (
-    typeof user.id === 'string' &&
     typeof user.username === 'string' &&
+    typeof user.displayName === 'string' &&
     typeof user.email === 'string' &&
     isStringArray(user.roles) &&
     isStringArray(user.permissions) &&

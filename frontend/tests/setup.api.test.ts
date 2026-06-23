@@ -12,6 +12,7 @@ import {
   validateSetup,
   validateSetupEnvironment,
 } from '../src/lib/setup';
+import { createApiSuccessResponse } from './support/api';
 
 describe('setup API client', () => {
   afterEach(() => {
@@ -22,21 +23,20 @@ describe('setup API client', () => {
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
 
-      expect(url).toBe('http://localhost:3000/api/setup/defaults');
+      expect(url).toBe('/api/setup/defaults');
 
-      return new Response(
-        JSON.stringify({
-          code: 200,
-          error: null,
-          data: { environment: { NODE_ENV: 'development' } },
-        }),
-        { status: 200 },
-      );
+      return createApiSuccessResponse({
+        environment: { NODE_ENV: 'development' },
+        environmentFileLoaded: false,
+      });
     });
 
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(fetchSetupDefaults()).resolves.toMatchObject({ environment: { NODE_ENV: 'development' } });
+    await expect(fetchSetupDefaults()).resolves.toMatchObject({
+      environment: { NODE_ENV: 'development' },
+      environmentFileLoaded: false,
+    });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -47,21 +47,15 @@ describe('setup API client', () => {
         ? { valid: true }
         : { administratorCreated: true, completed: true, restartRequired: true };
 
-      return new Response(
-        JSON.stringify({
-          code: 200,
-          error: null,
-          data,
-        }),
-        { status: 200 },
-      );
+      return createApiSuccessResponse(data);
     });
     const payload = {
       administrator: {
-        confirmPassword: 'password123',
+        username: 'root_user',
+        displayName: 'Root User',
         email: 'root@example.com',
         password: 'password123',
-        username: 'Root User',
+        confirmPassword: 'password123',
       },
       environment: {
         NODE_ENV: 'development',
@@ -91,14 +85,7 @@ describe('setup API client', () => {
       const url = String(input);
       const data = getConnectivityTestResponse(url);
 
-      return new Response(
-        JSON.stringify({
-          code: 200,
-          error: null,
-          data,
-        }),
-        { status: 200 },
-      );
+      return createApiSuccessResponse(data);
     });
     const environment = {
       CACHE_STORE: 'redis',
@@ -116,13 +103,13 @@ describe('setup API client', () => {
     await expect(validateSetupEnvironment(environment)).resolves.toEqual({ valid: true });
 
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
-      'http://localhost:3000/api/setup/test/database',
-      'http://localhost:3000/api/setup/test/cache',
-      'http://localhost:3000/api/setup/test/file-storage',
-      'http://localhost:3000/api/setup/test/logging',
-      'http://localhost:3000/api/setup/test/email',
-      'http://localhost:3000/api/setup/test/sso',
-      'http://localhost:3000/api/setup/validate/environment',
+      '/api/setup/test/database',
+      '/api/setup/test/cache',
+      '/api/setup/test/file-storage',
+      '/api/setup/test/logging',
+      '/api/setup/test/email',
+      '/api/setup/test/sso',
+      '/api/setup/validate/environment',
     ]);
   });
 });
