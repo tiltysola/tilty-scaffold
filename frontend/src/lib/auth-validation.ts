@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { hasMatchingPasswordConfirmation } from '@tilty/shared/validation';
+import { hasMatchingPasswordConfirmation, isValidPhoneNumber, normalizePhoneNumber } from '@tilty/shared/validation';
 
 export const usernameSchema = z
   .string()
@@ -14,6 +14,9 @@ export const usernameSchema = z
   .transform((username) => username.toLowerCase());
 export const displayNameSchema = z.string().trim().min(2, 'Display name must contain at least 2 characters.').max(64);
 export const emailSchema = z.string().trim().pipe(z.email('Provide a valid email address.'));
+export const phoneNumberSchema = z.string().trim().max(32).transform(normalizePhoneNumber).refine(isValidPhoneNumber, {
+  message: 'Phone number must use E.164 format.',
+});
 export const optionalVerificationCodeSchema = z.string().trim();
 export const verificationCodeSchema = z
   .string()

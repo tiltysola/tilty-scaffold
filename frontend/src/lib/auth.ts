@@ -10,6 +10,9 @@ export interface AuthUser {
   username: string;
   displayName: string;
   email: string;
+  emailVerified: boolean;
+  phoneNumber?: string;
+  phoneVerified: boolean;
   avatarUrl?: string;
   roles: string[];
   permissions: string[];
@@ -21,8 +24,17 @@ export interface AuthSession {
   user: AuthUser;
 }
 
-interface AuthPublicConfig {
+interface PersistedAuthSession {
+  accessTokenExpiresAt: string;
+  refreshTokenExpiresAt: string;
+}
+
+export type PhoneCountryCode = '+86' | '+852' | '+853';
+
+export interface AuthPublicConfig {
   passwordRecoveryEnabled: boolean;
+  phoneCountryCodes: PhoneCountryCode[];
+  profileEmailVerificationEnabled: boolean;
   registrationEmailVerificationRequired: boolean;
 }
 
@@ -61,12 +73,46 @@ interface ResetPasswordInput {
   confirmPassword: string;
 }
 
+interface VerifyProfileEmailInput {
+  emailVerificationCode: string;
+}
+
+interface SendProfilePhoneVerificationInput {
+  phoneNumber: string;
+}
+
+interface VerifyProfilePhoneInput {
+  phoneNumber: string;
+  phoneVerificationCode: string;
+}
+
 interface UpdateCurrentUserInput {
   displayName: string;
+  phoneNumber?: string | null;
 }
 
 export interface SsoPublicConfig {
   enabled: boolean;
+  loginEnabled: boolean;
+  providers: SsoPublicProvider[];
+}
+
+export interface SsoPublicProvider {
+  id: string;
+  name: string;
+  iconUrl?: string;
+  protocol: 'oauth2' | 'oidc';
+  loginEnabled: boolean;
+  bindingEnabled: boolean;
+}
+
+export interface SsoIdentityPublic {
+  providerId: string;
+  providerName: string;
+  providerSubject: string;
+  email: string;
+  createdAt: string;
+  iconUrl?: string;
 }
 
 export interface SendEmailVerificationInput {
@@ -77,6 +123,8 @@ export interface EmailVerificationSendResult {
   cooldownSeconds: number;
   expiresInSeconds: number;
 }
+
+let inMemorySession: AuthSession | null = null;
 
 export async function fetchAuthConfig() {
   return apiRequest<AuthPublicConfig>('/api/auth/config');
@@ -107,6 +155,19 @@ export async function sendPasswordResetEmailVerification(input: SendEmailVerific
   });
 }
 
+export async function sendProfileEmailVerification() {
+  return authenticatedApiRequest<EmailVerificationSendResult>('/api/auth/me/email-verification', {
+    method: 'POST',
+  });
+}
+
+export async function sendProfilePhoneVerification(input: SendProfilePhoneVerificationInput) {
+  return authenticatedApiRequest<EmailVerificationSendResult>('/api/auth/me/phone-verification', {
+    body: input,
+    method: 'POST',
+  });
+}
+
 export async function login(input: LoginInput) {
   const session = await apiRequest<AuthSession>('/api/auth/login', {
     method: 'POST',
@@ -125,6 +186,50 @@ export async function resetPassword(input: ResetPasswordInput) {
   });
 }
 
+export async function verifyProfileEmail(input: VerifyProfileEmailInput) {
+  const session = getStoredSession();
+
+  if (!session) {
+    throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication is required.');
+  }
+
+  const { result: user, session: refreshedSession } = await runAuthenticatedRequest(() =>
+    apiRequest<AuthUser>('/api/auth/me/email-verification/confirm', {
+      body: input,
+      method: 'POST',
+    }),
+  );
+
+  storeSession({
+    ...(refreshedSession ?? session),
+    user,
+  });
+
+  return user;
+}
+
+export async function verifyProfilePhone(input: VerifyProfilePhoneInput) {
+  const session = getStoredSession();
+
+  if (!session) {
+    throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication is required.');
+  }
+
+  const { result: user, session: refreshedSession } = await runAuthenticatedRequest(() =>
+    apiRequest<AuthUser>('/api/auth/me/phone-verification/confirm', {
+      body: input,
+      method: 'POST',
+    }),
+  );
+
+  storeSession({
+    ...(refreshedSession ?? session),
+    user,
+  });
+
+  return user;
+}
+
 export async function refreshSession() {
   const session = await apiRequest<AuthSession>('/api/auth/refresh', {
     method: 'POST',
@@ -139,12 +244,25 @@ export async function fetchSsoConfig() {
   return apiRequest<SsoPublicConfig>('/api/auth/sso/config');
 }
 
-export function getSsoStartUrl(redirectPath: string) {
+export function getSsoStartUrl(redirectPath: string, providerId?: string) {
   const params = new URLSearchParams({
     redirect: redirectPath,
   });
 
+  if (providerId) {
+    params.set('providerId', providerId);
+  }
+
   return `/api/auth/sso/start?${params.toString()}`;
+}
+
+export function getSsoBindStartUrl(providerId: string, redirectPath: string) {
+  const params = new URLSearchParams({
+    providerId,
+    redirect: redirectPath,
+  });
+
+  return `/api/auth/sso/bind/start?${params.toString()}`;
 }
 
 export function getSsoCallbackParams(hash: string) {
@@ -184,6 +302,12 @@ export async function bindSsoAccount(input: BindSsoAccountInput) {
   storeSession(session);
 
   return session;
+}
+
+export async function fetchSsoIdentities() {
+  return authenticatedApiRequest<{ identities: SsoIdentityPublic[] }>('/api/auth/sso/identities', {
+    method: 'GET',
+  });
 }
 
 export async function fetchCurrentUser() {
@@ -256,7 +380,7 @@ export async function logout() {
 export function getUserHandle(username?: string) {
   const trimmedUsername = username?.trim();
 
-  return trimmedUsername ? `@${trimmedUsername}` : '@user';
+  return trimmedUsername ? `@${trimmedUsername}` : '@unknown-user';
 }
 
 export function getUserInitials(name?: string) {
@@ -310,8 +434,9 @@ export async function validateStoredSession() {
 
   try {
     const user = await fetchCurrentUser();
+    const currentSession = getStoredSession() ?? session;
     const validatedSession = {
-      ...session,
+      ...currentSession,
       user,
     };
 
@@ -325,19 +450,53 @@ export async function validateStoredSession() {
 }
 
 export function storeSession(session: AuthSession) {
+  inMemorySession = session;
+
   if (typeof window === 'undefined') {
     return;
   }
 
-  window.localStorage.setItem(authSessionStorageKey, JSON.stringify(session));
+  writePersistedSession(session);
   emitStoredSessionChanged();
 }
 
 export function getStoredSession() {
   if (typeof window === 'undefined') {
+    return inMemorySession && isAuthSession(inMemorySession) ? inMemorySession : null;
+  }
+
+  const persistedSession = readPersistedSession();
+
+  if (!persistedSession) {
+    inMemorySession = null;
     return null;
   }
 
+  if (
+    inMemorySession &&
+    isAuthSession(inMemorySession) &&
+    hasMatchingSessionMetadata(inMemorySession, persistedSession)
+  ) {
+    return inMemorySession;
+  }
+
+  inMemorySession = null;
+
+  return createUnvalidatedSession(persistedSession);
+}
+
+export function clearStoredSession() {
+  inMemorySession = null;
+
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.removeItem(authSessionStorageKey);
+  emitStoredSessionChanged();
+}
+
+function readPersistedSession() {
   const value = window.localStorage.getItem(authSessionStorageKey);
 
   if (!value) {
@@ -345,27 +504,71 @@ export function getStoredSession() {
   }
 
   try {
-    const session = JSON.parse(value) as unknown;
+    const source = JSON.parse(value) as unknown;
+    const metadata = parsePersistedSession(source);
 
-    if (!isAuthSession(session)) {
+    if (!metadata) {
       clearStoredSession();
       return null;
     }
 
-    return session;
+    return metadata;
   } catch {
     clearStoredSession();
     return null;
   }
 }
 
-export function clearStoredSession() {
-  if (typeof window === 'undefined') {
-    return;
+function writePersistedSession(session: PersistedAuthSession) {
+  window.localStorage.setItem(authSessionStorageKey, JSON.stringify(toPersistedSession(session)));
+}
+
+function parsePersistedSession(value: unknown): PersistedAuthSession | null {
+  if (!value || typeof value !== 'object') {
+    return null;
   }
 
-  window.localStorage.removeItem(authSessionStorageKey);
-  emitStoredSessionChanged();
+  const session = value as Record<string, unknown>;
+  const accessTokenExpiresAt = parseTimestamp(session.accessTokenExpiresAt);
+  const refreshTokenExpiresAt = parseTimestamp(session.refreshTokenExpiresAt);
+
+  if (accessTokenExpiresAt === null || refreshTokenExpiresAt === null || refreshTokenExpiresAt <= Date.now()) {
+    return null;
+  }
+
+  return {
+    accessTokenExpiresAt: session.accessTokenExpiresAt as string,
+    refreshTokenExpiresAt: session.refreshTokenExpiresAt as string,
+  };
+}
+
+function toPersistedSession(session: PersistedAuthSession): PersistedAuthSession {
+  return {
+    accessTokenExpiresAt: session.accessTokenExpiresAt,
+    refreshTokenExpiresAt: session.refreshTokenExpiresAt,
+  };
+}
+
+function createUnvalidatedSession(session: PersistedAuthSession): AuthSession {
+  return {
+    ...session,
+    user: {
+      username: '',
+      displayName: '',
+      email: '',
+      emailVerified: false,
+      phoneVerified: false,
+      roles: [],
+      permissions: [],
+    },
+  };
+}
+
+function hasMatchingSessionMetadata(session: PersistedAuthSession, persistedSession: PersistedAuthSession) {
+  return (
+    session.accessTokenExpiresAt === persistedSession.accessTokenExpiresAt &&
+    session.refreshTokenExpiresAt === persistedSession.refreshTokenExpiresAt
+  );
 }
 
 function emitStoredSessionChanged() {
@@ -405,6 +608,9 @@ function isAuthUser(value: unknown): value is AuthUser {
     typeof user.username === 'string' &&
     typeof user.displayName === 'string' &&
     typeof user.email === 'string' &&
+    typeof user.emailVerified === 'boolean' &&
+    (user.phoneNumber === undefined || typeof user.phoneNumber === 'string') &&
+    typeof user.phoneVerified === 'boolean' &&
     isStringArray(user.roles) &&
     isStringArray(user.permissions) &&
     (user.avatarUrl === undefined || typeof user.avatarUrl === 'string')

@@ -36,40 +36,48 @@ navigation redirects to `/setup`, and non-setup API requests return
 `/login`. Backend setup lock configuration is documented in `backend/README.md`.
 
 The setup page applies migrations through `/api/setup/*`. Database, Redis
-cache, OSS storage, SLS logging, SMTP email, and SSO must pass connection tests
-when enabled. The database step detects available users; setup creates the root
-administrator only when none exist. Existing users are retained. Configuration
-without a network dependency is validated for required values and URL or email
-format. CORS origins default to the current frontend origin.
+cache, OSS storage, SLS logging, SMTP email, Aliyun SMS, and SSO must pass
+connection tests when enabled. The database step detects available users; setup
+creates the root administrator only when none exist. Existing users are
+retained. Configuration without a network dependency is validated for required
+values and URL or email format. The application domain defaults to the current
+frontend origin, and CORS origins default to that domain.
 
 Access and refresh tokens are stored by the backend in HttpOnly cookies and are
-not stored from API response bodies. localStorage keeps only user and
-token-expiration metadata. Stored session metadata is cleared when the frontend
-cannot validate it with the backend.
+not stored from API response bodies. localStorage keeps only token-expiration
+metadata. User state is refreshed from `/api/auth/me`, and stored session
+metadata is cleared when the frontend cannot validate it with the backend.
 
 Authenticated user metadata includes role and permission keys. The dashboard
-shows a signed-in greeting and scaffold overview. The sidebar and protected
-routes use role and permission keys for navigation and page access; the backend
-remains the source of truth for API authorization.
+displays authenticated user context and application status. The sidebar and
+protected routes use role and permission keys for navigation and page access;
+the backend remains the source of truth for API authorization.
 
 The profile page updates the current user's avatar through
-`/api/auth/avatar` and display name through `PATCH /api/auth/me`.
+`/api/auth/avatar`, display name through `PATCH /api/auth/me`, and unverified
+email status through `/api/auth/me/email-verification` and
+`/api/auth/me/email-verification/confirm`. Phone binding uses
+`/api/auth/me/phone-verification` and
+`/api/auth/me/phone-verification/confirm` when SMS verification is configured.
 
 The registration page reads `/api/auth/config` and shows email verification
 only when the backend requires it. The login page reads `/api/auth/sso/config`
-and shows the SSO login button only when the backend has SSO enabled. The SSO
-start request uses `/api/auth/sso/start`. SSO callback tokens are delivered in
-the login URL fragment and consumed by the login page.
+and shows configured SSO provider buttons for providers with login enabled. SSO
+start requests use `/api/auth/sso/start` with an optional `providerId`. SSO
+callback tokens are delivered in the login URL fragment and consumed by the
+login page.
 
 The password recovery page reads `/api/auth/config`; when SMTP-backed email is
 not enabled, it instructs the user to contact the site administrator.
 
 First-time SSO identities complete account creation or existing-account binding
-on the login page.
+on the login page. The profile page reads `/api/auth/sso/identities` and can
+start profile provider binding through `/api/auth/sso/bind/start`.
 
 The users page calls `/api/users/` and is available only when the current user
-has `USER_LIST` or `ROOT`. Users with `USER_ADMIN` or `ROOT` can update user
-role assignments through `/api/users/:id/roles`.
+has `USER_LIST` or `ROOT`. Users with `USER_ADMIN` or `ROOT` can update managed
+user profile fields, password, account status, and role assignments through
+`/api/users/:id`.
 
 ## Routes
 

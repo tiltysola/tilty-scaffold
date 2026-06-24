@@ -23,7 +23,7 @@ describe('frontend files middleware', () => {
 
       expect(context.responseHeaders['cache-control']).toBe('public, max-age=31536000, immutable');
       expect(context.responseHeaders['cross-origin-resource-policy']).toBe('same-origin');
-      expect(context.type).toBe('application/javascript; charset=utf-8');
+      expect(context.type).toBe('text/javascript; charset=utf-8');
     } finally {
       await rm(root, { force: true, recursive: true });
     }

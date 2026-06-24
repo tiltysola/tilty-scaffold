@@ -1,19 +1,15 @@
-import { existsSync } from 'fs';
-import { createServer, type Server } from 'http';
-import { resolve } from 'path';
+import { createServer } from 'http';
 
 import { createApp, shouldSkipGlobalRateLimit } from './app';
 import { loadEnv } from './config/env';
 import { configureLogger, flushLogger, logger } from './core/logger';
 import { collectJobs, startScheduler, stopScheduler } from './core/scheduler';
+import { closeServer, frontendDistDirectory, listen, warnIfFrontendEntryFileMissing } from './core/server';
 import { createCacheStore } from './infra/cache';
 import { connectDatabase, createSequelize } from './infra/database';
 import { createFileStorage } from './infra/file-storage';
 import { assertDatabaseMigrationsApplied } from './infra/migrator';
 import { createModules, createServices, initModels } from './modules';
-
-const frontendDistDirectory = resolve(__dirname, '../../frontend/dist');
-const frontendEntryFilePath = resolve(frontendDistDirectory, 'index.html');
 
 export async function bootstrap() {
   const environmentConfig = loadEnv();
@@ -30,6 +26,7 @@ export async function bootstrap() {
     cacheStore,
     fileStorage,
     ...(environmentConfig.email ? { email: environmentConfig.email } : {}),
+    ...(environmentConfig.sms ? { sms: environmentConfig.sms } : {}),
     ...(environmentConfig.sso ? { sso: environmentConfig.sso } : {}),
   });
   const modules = createModules(services, {
@@ -111,41 +108,4 @@ export async function bootstrap() {
 
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
-}
-
-function warnIfFrontendEntryFileMissing() {
-  if (!existsSync(frontendEntryFilePath)) {
-    logger.warn(
-      `Frontend entry file was not found at ${frontendEntryFilePath}. Backend-served browser routes require npm run build:frontend.`,
-    );
-  }
-}
-
-function listen(server: Server, port: number, host: string) {
-  return new Promise<void>((resolve, reject) => {
-    const handleError = (error: Error) => {
-      server.off('listening', handleListening);
-      reject(error);
-    };
-    const handleListening = () => {
-      server.off('error', handleError);
-      resolve();
-    };
-
-    server.once('error', handleError);
-    server.once('listening', handleListening);
-    server.listen(port, host);
-  });
-}
-
-function closeServer(server: Server) {
-  return new Promise<void>((resolve, reject) => {
-    server.close((err) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve();
-      }
-    });
-  });
 }

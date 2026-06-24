@@ -8,11 +8,14 @@ import {
   registerSchema,
   resetPasswordSchema,
   sendEmailVerificationSchema,
+  sendProfilePhoneVerificationSchema,
   ssoBindAccountSchema,
   ssoCreateAccountSchema,
   ssoSessionSchema,
   ssoStartQuerySchema,
   updateCurrentUserSchema,
+  verifyProfileEmailSchema,
+  verifyProfilePhoneSchema,
 } from './auth.schemas';
 import { type AuthService } from './auth.service';
 import { type SsoCallbackInput, type SsoService } from './auth.sso';
@@ -69,6 +72,21 @@ export class AuthController {
     ctx.body = ok(result);
   };
 
+  sendProfileEmailVerification: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const result = await this.authService.sendProfileEmailVerification(token);
+
+    ctx.body = ok(result);
+  };
+
+  sendProfilePhoneVerification: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const input = sendProfilePhoneVerificationSchema.parse(ctx.request.body);
+    const result = await this.authService.sendProfilePhoneVerification(token, input);
+
+    ctx.body = ok(result);
+  };
+
   login: Middleware = async (ctx) => {
     const input = loginSchema.parse(ctx.request.body);
     const session = await this.authService.login(input);
@@ -82,6 +100,22 @@ export class AuthController {
     const result = await this.authService.resetPassword(input);
 
     ctx.body = ok(result);
+  };
+
+  verifyProfileEmail: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const input = verifyProfileEmailSchema.parse(ctx.request.body);
+    const user = await this.authService.verifyProfileEmail(token, input);
+
+    ctx.body = ok(user);
+  };
+
+  verifyProfilePhone: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const input = verifyProfilePhoneSchema.parse(ctx.request.body);
+    const user = await this.authService.verifyProfilePhone(token, input);
+
+    ctx.body = ok(user);
   };
 
   me: Middleware = async (ctx) => {
@@ -140,7 +174,16 @@ export class AuthController {
 
   ssoStart: Middleware = async (ctx) => {
     const query = ssoStartQuerySchema.parse(ctx.query);
-    const loginUrl = await this.ssoService.createLoginUrl(query.redirect);
+    const loginUrl = await this.ssoService.createLoginUrl(query.redirect, query.providerId);
+
+    ctx.redirect(loginUrl);
+  };
+
+  ssoBindStart: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const { user } = await this.authService.authenticate(token);
+    const query = ssoStartQuerySchema.parse(ctx.query);
+    const loginUrl = await this.ssoService.createBindUrl(user.id, query.redirect, query.providerId);
 
     ctx.redirect(loginUrl);
   };
@@ -179,6 +222,15 @@ export class AuthController {
 
     setAuthCookies(ctx, session, this.cookieConfig);
     ctx.body = ok(toSessionResponse(session));
+  };
+
+  ssoIdentities: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const { user } = await this.authService.authenticate(token);
+
+    ctx.body = ok({
+      identities: await this.ssoService.listUserIdentities(user.id),
+    });
   };
 }
 

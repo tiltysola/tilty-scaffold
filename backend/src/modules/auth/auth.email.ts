@@ -1,7 +1,6 @@
 import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'crypto';
-import { once } from 'events';
-import { connect as connectSocket, type Socket } from 'net';
-import { connect as connectTlsSocket, type TLSSocket } from 'tls';
+import nodemailer from 'nodemailer';
+import SMTPTransport from 'nodemailer/lib/smtp-transport';
 
 import { AppError } from '../../core/errors';
 import { type CacheStore, MemoryCacheStore } from '../../infra/cache';
@@ -35,6 +34,11 @@ export interface EmailSender {
   send(input: SendEmailInput): Promise<void>;
 }
 
+interface SmtpEmailSenderPoolOptions {
+  createSender?: (config: SmtpEmailSenderConfig) => EmailSender;
+  selectProfileIndex?: (profileCount: number) => number;
+}
+
 interface VerificationRecord {
   attemptsRemaining: number;
   codeHash: string;
@@ -42,12 +46,7 @@ interface VerificationRecord {
   nextSendAt: number;
 }
 
-type VerificationPurpose = 'password-reset' | 'registration';
-
-interface SmtpResponse {
-  code: number;
-  message: string;
-}
+type VerificationPurpose = 'password-reset' | 'profile-email' | 'registration';
 
 const defaultVerificationConfig = {
   codeCooldownMs: 60_000,
@@ -102,6 +101,14 @@ export class EmailVerificationService {
     ]);
   }
 
+  async sendProfileEmailVerificationCode(email: string) {
+    return this.sendCode('profile-email', email, 'Profile email verification code', (code) => [
+      `Your profile email verification code is ${code}.`,
+      `This code expires in ${Math.ceil(this.codeExpiresInMs / 60_000)} minutes.`,
+      'No action is required if this code was not requested by you.',
+    ]);
+  }
+
   async verifyRegistrationCode(email: string, code?: string) {
     if (!this.sender) {
       return;
@@ -116,6 +123,14 @@ export class EmailVerificationService {
     }
 
     await this.verifyCode('password-reset', email, code);
+  }
+
+  async verifyProfileEmailVerificationCode(email: string, code?: string) {
+    if (!this.sender) {
+      throw new AppError('EMAIL_VERIFICATION_DISABLED', 'Email verification is disabled.', 404);
+    }
+
+    await this.verifyCode('profile-email', email, code);
   }
 
   private async sendCode(
@@ -222,7 +237,11 @@ export class EmailVerificationService {
       }
     }
 
-    throw new AppError('EMAIL_VERIFICATION_CONFLICT', 'Email verification state changed. Try again.', 409);
+    throw new AppError(
+      'EMAIL_VERIFICATION_CONFLICT',
+      'Email verification state changed. Submit the request again.',
+      409,
+    );
   }
 
   private hashVerificationCode(purpose: VerificationPurpose, email: string, code: string) {
@@ -258,208 +277,56 @@ export class SmtpEmailSender implements EmailSender {
   constructor(private readonly config: SmtpEmailSenderConfig) {}
 
   async check() {
-    const client = await SmtpClient.connect(this.config);
+    const transporter = createSmtpTransport(this.config);
 
     try {
-      await client.expect([220]);
-      await client.ehlo();
-
-      if (!this.config.secure && this.config.startTls) {
-        await client.startTls();
-        await client.ehlo();
-      }
-
-      if (this.config.username && this.config.password) {
-        await client.authPlain(this.config.username, this.config.password);
-      }
-
-      await client.quit();
+      await transporter.verify();
     } finally {
-      client.close();
+      transporter.close();
     }
   }
 
   async send(input: SendEmailInput) {
-    const client = await SmtpClient.connect(this.config);
+    const transporter = createSmtpTransport(this.config);
 
     try {
-      await client.expect([220]);
-      await client.ehlo();
-
-      if (!this.config.secure && this.config.startTls) {
-        await client.startTls();
-        await client.ehlo();
-      }
-
-      if (this.config.username && this.config.password) {
-        await client.authPlain(this.config.username, this.config.password);
-      }
-
-      await client.sendMail(this.config.from, input.to, createMessage(this.config.from, input));
-      await client.quit();
+      await transporter.sendMail({
+        from: this.config.from,
+        subject: input.subject,
+        text: input.text,
+        to: input.to,
+      });
     } finally {
-      client.close();
+      transporter.close();
     }
   }
 }
 
-class SmtpClient {
-  private buffer = '';
-  private socket: Socket | TLSSocket;
+export class SmtpEmailSenderPool implements EmailSender {
+  private readonly selectProfileIndex: (profileCount: number) => number;
+  private readonly senders: EmailSender[];
 
-  private constructor(
-    socket: Socket | TLSSocket,
-    private readonly config: SmtpEmailSenderConfig,
-  ) {
-    this.socket = socket;
-    this.socket.setEncoding('utf8');
-    this.socket.setTimeout(config.timeoutMs);
-  }
-
-  static async connect(config: SmtpEmailSenderConfig) {
-    const socket = config.secure
-      ? connectTlsSocket({
-          host: config.host,
-          port: config.port,
-          servername: config.host,
-        })
-      : connectSocket({
-          host: config.host,
-          port: config.port,
-        });
-
-    socket.setTimeout(config.timeoutMs);
-    await waitForSocketEvent(socket, config.secure ? 'secureConnect' : 'connect');
-
-    return new SmtpClient(socket, config);
-  }
-
-  async expect(expectedCodes: number[]) {
-    const response = await this.readResponse();
-
-    if (!expectedCodes.includes(response.code)) {
-      throw new AppError('SMTP_RESPONSE_INVALID', 'SMTP server returned an unexpected response.', 502);
+  constructor(configs: SmtpEmailSenderConfig[], options: SmtpEmailSenderPoolOptions = {}) {
+    if (configs.length === 0) {
+      throw new AppError('EMAIL_SMTP_PROFILES_EMPTY', 'At least one SMTP profile is required.', 500);
     }
 
-    return response;
+    this.selectProfileIndex = options.selectProfileIndex ?? randomInt;
+    this.senders = configs.map(options.createSender ?? ((config) => new SmtpEmailSender(config)));
   }
 
-  async ehlo() {
-    await this.command('EHLO localhost', [250]);
+  async send(input: SendEmailInput) {
+    await this.getRandomSender().send(input);
   }
 
-  async startTls() {
-    await this.command('STARTTLS', [220]);
+  private getRandomSender() {
+    const profileIndex = this.selectProfileIndex(this.senders.length);
 
-    this.socket.removeAllListeners();
-    this.buffer = '';
-    this.socket = connectTlsSocket({
-      socket: this.socket,
-      servername: this.config.host,
-    });
-    this.socket.setEncoding('utf8');
-    this.socket.setTimeout(this.config.timeoutMs);
-
-    await waitForSocketEvent(this.socket, 'secureConnect');
-  }
-
-  async authPlain(username: string, password: string) {
-    const token = Buffer.from(`\u0000${username}\u0000${password}`, 'utf8').toString('base64');
-
-    await this.command(`AUTH PLAIN ${token}`, [235]);
-  }
-
-  async sendMail(from: string, to: string, message: string) {
-    await this.command(`MAIL FROM:<${extractEmailAddress(from)}>`, [250]);
-    await this.command(`RCPT TO:<${extractEmailAddress(to)}>`, [250, 251]);
-    await this.command('DATA', [354]);
-    await this.write(`${dotStuff(message)}\r\n.\r\n`);
-    await this.expect([250]);
-  }
-
-  async quit() {
-    await this.command('QUIT', [221]);
-  }
-
-  close() {
-    this.socket.destroy();
-  }
-
-  private async command(value: string, expectedCodes: number[]) {
-    await this.write(`${value}\r\n`);
-    return this.expect(expectedCodes);
-  }
-
-  private async write(value: string) {
-    if (!this.socket.write(value, 'utf8')) {
-      await once(this.socket, 'drain');
+    if (!Number.isInteger(profileIndex) || profileIndex < 0 || profileIndex >= this.senders.length) {
+      throw new AppError('SMTP_PROFILE_SELECTION_INVALID', 'SMTP profile selection returned an invalid index.', 500);
     }
-  }
 
-  private async readResponse(): Promise<SmtpResponse> {
-    const lines: string[] = [];
-
-    while (true) {
-      const line = await this.readLine();
-      lines.push(line);
-
-      const match = /^(\d{3})([ -])/.exec(line);
-
-      if (match?.[2] === ' ') {
-        return {
-          code: Number(match[1]),
-          message: lines.join('\n'),
-        };
-      }
-    }
-  }
-
-  private async readLine() {
-    while (true) {
-      const lineEnd = this.buffer.indexOf('\n');
-
-      if (lineEnd >= 0) {
-        const line = this.buffer.slice(0, lineEnd + 1);
-        this.buffer = this.buffer.slice(lineEnd + 1);
-
-        return line.replace(/\r?\n$/, '');
-      }
-
-      const chunk = await this.readChunk();
-      this.buffer += chunk;
-    }
-  }
-
-  private async readChunk() {
-    return new Promise<string>((resolve, reject) => {
-      const cleanup = () => {
-        this.socket.off('close', handleClose);
-        this.socket.off('data', handleData);
-        this.socket.off('error', handleError);
-        this.socket.off('timeout', handleTimeout);
-      };
-      const handleClose = () => {
-        cleanup();
-        reject(new AppError('SMTP_CONNECTION_CLOSED', 'SMTP connection was closed unexpectedly.', 502));
-      };
-      const handleData = (chunk: Buffer | string) => {
-        cleanup();
-        resolve(String(chunk));
-      };
-      const handleError = (error: Error) => {
-        cleanup();
-        reject(error);
-      };
-      const handleTimeout = () => {
-        cleanup();
-        reject(new AppError('SMTP_TIMEOUT', 'SMTP request timed out.', 502));
-      };
-
-      this.socket.once('close', handleClose);
-      this.socket.once('data', handleData);
-      this.socket.once('error', handleError);
-      this.socket.once('timeout', handleTimeout);
-    });
+    return this.senders[profileIndex]!;
   }
 }
 
@@ -485,55 +352,28 @@ function throwInvalidVerificationCode(): never {
   throw new AppError('EMAIL_VERIFICATION_INVALID', 'Email verification code is invalid or expired.', 400);
 }
 
-function createMessage(from: string, input: SendEmailInput) {
-  return [
-    `From: ${sanitizeHeader(from)}`,
-    `To: ${sanitizeHeader(input.to)}`,
-    `Subject: ${sanitizeHeader(input.subject)}`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    input.text,
-  ].join('\r\n');
-}
+function createSmtpTransport(config: SmtpEmailSenderConfig) {
+  const options: SMTPTransport.Options = {
+    connectionTimeout: config.timeoutMs,
+    greetingTimeout: config.timeoutMs,
+    host: config.host,
+    ignoreTLS: !config.secure && !config.startTls,
+    port: config.port,
+    requireTLS: !config.secure && config.startTls,
+    secure: config.secure,
+    socketTimeout: config.timeoutMs,
+    tls: {
+      servername: config.host,
+    },
+    ...(config.username && config.password
+      ? {
+          auth: {
+            pass: config.password,
+            user: config.username,
+          },
+        }
+      : {}),
+  };
 
-function dotStuff(message: string) {
-  return message.replace(/\r?\n/g, '\r\n').replace(/^\./gm, '..');
-}
-
-function sanitizeHeader(value: string) {
-  return value.replace(/[\r\n]+/g, ' ').trim();
-}
-
-function extractEmailAddress(value: string) {
-  const match = /<([^<>]+)>/.exec(value);
-
-  return sanitizeHeader(match?.[1] ?? value);
-}
-
-function waitForSocketEvent(socket: Socket | TLSSocket, event: 'connect' | 'secureConnect') {
-  return new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
-      socket.off(event, handleReady);
-      socket.off('error', handleError);
-      socket.off('timeout', handleTimeout);
-    };
-    const handleError = (error: Error) => {
-      cleanup();
-      reject(error);
-    };
-    const handleReady = () => {
-      cleanup();
-      resolve();
-    };
-    const handleTimeout = () => {
-      cleanup();
-      reject(new AppError('SMTP_TIMEOUT', 'SMTP request timed out.', 502));
-    };
-
-    socket.once(event, handleReady);
-    socket.once('error', handleError);
-    socket.once('timeout', handleTimeout);
-  });
+  return nodemailer.createTransport(options);
 }

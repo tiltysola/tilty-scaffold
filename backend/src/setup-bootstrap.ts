@@ -1,18 +1,17 @@
-import { existsSync } from 'fs';
-import { createServer, type Server } from 'http';
-import { resolve } from 'path';
+import { createServer } from 'http';
 import { z } from 'zod';
 
 import { createApp, shouldSkipGlobalRateLimit } from './app';
 import { configureLogger, flushLogger, logger } from './core/logger';
+import { closeServer, frontendDistDirectory, listen, warnIfFrontendEntryFileMissing } from './core/server';
 import { createCacheStore } from './infra/cache';
 import { createSetupOnlyModule } from './modules/setup';
 
-const frontendDistDirectory = resolve(__dirname, '../../frontend/dist');
-const frontendEntryFilePath = resolve(frontendDistDirectory, 'index.html');
+const defaultAppDomain = 'http://localhost:8011';
 
 const setupRuntimeEnvSchema = z.object({
-  CORS_ORIGINS: z.string().min(1).default('http://localhost:8011'),
+  APP_DOMAIN: z.string().min(1).default(defaultAppDomain),
+  APP_CORS_ORIGINS: z.string().min(1).optional(),
   GLOBAL_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(1000),
   GLOBAL_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   LOG_PENDING_WRITE_MAX: z.coerce.number().int().positive().default(1000),
@@ -21,7 +20,7 @@ const setupRuntimeEnvSchema = z.object({
   LOG_WRITE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   SERVER_HOST: z.string().default('0.0.0.0'),
   SERVER_PORT: z.coerce.number().int().positive().default(3000),
-  TRUST_PROXY: z.enum(['true', 'false']).default('false'),
+  SERVER_TRUST_PROXY: z.enum(['true', 'false']).default('false'),
 });
 
 export async function bootstrapSetup() {
@@ -36,7 +35,7 @@ export async function bootstrapSetup() {
   warnIfFrontendEntryFileMissing();
 
   const app = createApp([createSetupOnlyModule()], {
-    corsOrigins: parseCommaSeparatedValues(setupRuntimeConfig.CORS_ORIGINS),
+    corsOrigins: parseCommaSeparatedValues(setupRuntimeConfig.APP_CORS_ORIGINS ?? setupRuntimeConfig.APP_DOMAIN),
     frontendFiles: {
       root: frontendDistDirectory,
     },
@@ -49,7 +48,7 @@ export async function bootstrapSetup() {
     },
     requestLogEnabled: setupRuntimeConfig.LOG_REQUEST_ENABLED === 'true',
     setupRedirect: { mode: 'setup' },
-    trustProxy: setupRuntimeConfig.TRUST_PROXY === 'true',
+    trustProxy: setupRuntimeConfig.SERVER_TRUST_PROXY === 'true',
   });
   const server = createServer(app.callback());
 
@@ -70,14 +69,6 @@ export async function bootstrapSetup() {
   process.once('SIGTERM', shutdown);
 }
 
-function warnIfFrontendEntryFileMissing() {
-  if (!existsSync(frontendEntryFilePath)) {
-    logger.warn(
-      `Frontend entry file was not found at ${frontendEntryFilePath}. Backend-served browser routes require npm run build:frontend.`,
-    );
-  }
-}
-
 function loadSetupRuntimeEnv() {
   return setupRuntimeEnvSchema.parse(process.env);
 }
@@ -87,33 +78,4 @@ function parseCommaSeparatedValues(value: string) {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function listen(server: Server, port: number, host: string) {
-  return new Promise<void>((resolve, reject) => {
-    const handleError = (error: Error) => {
-      server.off('listening', handleListening);
-      reject(error);
-    };
-    const handleListening = () => {
-      server.off('error', handleError);
-      resolve();
-    };
-
-    server.once('error', handleError);
-    server.once('listening', handleListening);
-    server.listen(port, host);
-  });
-}
-
-function closeServer(server: Server) {
-  return new Promise<void>((resolve, reject) => {
-    server.close((err) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve();
-      }
-    });
-  });
 }

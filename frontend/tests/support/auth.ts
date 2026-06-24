@@ -8,6 +8,8 @@ export function createSession(expiresAt: string): AuthSession {
       username: 'test_user',
       displayName: 'Test User',
       email: 'user@example.com',
+      emailVerified: false,
+      phoneVerified: false,
       roles: [],
       permissions: [],
     },

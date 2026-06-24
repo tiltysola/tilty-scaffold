@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { MemoryCacheStore } from '../src/infra/cache';
-import { type EmailSender, EmailVerificationService } from '../src/modules/auth/auth.email';
+import {
+  type EmailSender,
+  EmailVerificationService,
+  type SmtpEmailSenderConfig,
+  SmtpEmailSenderPool,
+} from '../src/modules/auth/auth.email';
 
 describe('email verification service', () => {
   it('shares email verification records through the configured cache store', async () => {
@@ -83,6 +88,42 @@ describe('email verification service', () => {
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(2);
     expect(sentCount).toBe(1);
+  });
+
+  it('sends through the selected SMTP profile for each delivery', async () => {
+    const configs: SmtpEmailSenderConfig[] = [
+      {
+        from: 'Tilty <primary@example.com>',
+        host: 'smtp-primary.example.com',
+        port: 465,
+        secure: true,
+        startTls: false,
+        timeoutMs: 5_000,
+      },
+      {
+        from: 'Tilty <secondary@example.com>',
+        host: 'smtp-secondary.example.com',
+        port: 587,
+        secure: false,
+        startTls: true,
+        timeoutMs: 5_000,
+      },
+    ];
+    const selectedHosts: string[] = [];
+    const selectedIndexes = [1, 0];
+    const sender = new SmtpEmailSenderPool(configs, {
+      createSender: (config) => ({
+        send: async () => {
+          selectedHosts.push(config.host);
+        },
+      }),
+      selectProfileIndex: () => selectedIndexes.shift() ?? 0,
+    });
+
+    await sender.send({ subject: 'Test', text: 'First', to: 'first@example.com' });
+    await sender.send({ subject: 'Test', text: 'Second', to: 'second@example.com' });
+
+    expect(selectedHosts).toEqual(['smtp-secondary.example.com', 'smtp-primary.example.com']);
   });
 });
 

@@ -14,15 +14,16 @@ import {
 import { AccessControlService } from './access-control/access-control.service';
 import { createAuthModule } from './auth';
 import { type AuthCookieConfig, defaultAuthCookieConfig } from './auth/auth.controller';
-import { EmailVerificationService, SmtpEmailSender, type SmtpEmailSenderConfig } from './auth/auth.email';
+import { EmailVerificationService, type SmtpEmailSenderConfig, SmtpEmailSenderPool } from './auth/auth.email';
 import { AuthService, type AuthTokenConfig, defaultAuthTokenConfig } from './auth/auth.service';
-import { type SsoConfig, SsoService } from './auth/auth.sso';
+import { type AliyunSmsProfileConfig, AliyunSmsSenderPool, SmsVerificationService } from './auth/auth.sms';
+import { SsoService, type SsoServiceConfig } from './auth/auth.sso';
 import { createDemoModule } from './demo';
 import { createDocsModule } from './docs';
 import { createHealthModule, type ReadinessCheck } from './health';
 import { createLockedSetupModule } from './setup';
 import { createUsersModule } from './users';
-import { initUserModel, type UserModel } from './users/user.model';
+import { initSsoIdentityModel, initUserModel, type SsoIdentityModel, type UserModel } from './users/user.model';
 import { UserService } from './users/user.service';
 
 interface ServiceConfig {
@@ -31,13 +32,20 @@ interface ServiceConfig {
   cacheStore?: CacheStore;
   email?: EmailServiceConfig;
   fileStorage?: FileStorage;
-  sso?: SsoConfig;
+  sms?: SmsServiceConfig;
+  sso?: SsoServiceConfig;
 }
 
 interface EmailServiceConfig {
   codeCooldownMs: number;
   codeExpiresInMs: number;
-  smtp: SmtpEmailSenderConfig;
+  smtpProfiles: SmtpEmailSenderConfig[];
+}
+
+interface SmsServiceConfig {
+  aliyunProfiles: AliyunSmsProfileConfig[];
+  codeCooldownMs: number;
+  codeExpiresInMs: number;
 }
 
 interface ModuleConfig {
@@ -51,6 +59,7 @@ interface Models {
   permission: typeof PermissionModel;
   role: typeof RoleModel;
   rolePermission: typeof RolePermissionModel;
+  ssoIdentity: typeof SsoIdentityModel;
   user: typeof UserModel;
   userRole: typeof UserRoleModel;
 }
@@ -63,18 +72,22 @@ interface Services {
 }
 
 export function initModels(sequelize: Sequelize): Models {
+  const user = initUserModel(sequelize);
+
   return {
     ...initAccessControlModels(sequelize),
-    user: initUserModel(sequelize),
+    ssoIdentity: initSsoIdentityModel(sequelize),
+    user,
   };
 }
 
 export function createServices(models: Models, config: ServiceConfig): Services {
   const accessControl = new AccessControlService(models);
-  const user = new UserService(models.user);
+  const user = new UserService(models.user, models.ssoIdentity);
   const cacheStore = config.cacheStore ?? new MemoryCacheStore();
   const authTokens = config.authTokens ?? defaultAuthTokenConfig;
   const emailVerification = createEmailVerificationService(config.email, cacheStore, config.authTokenSecret);
+  const smsVerification = createSmsVerificationService(config.sms, cacheStore, config.authTokenSecret);
 
   return {
     accessControl,
@@ -86,10 +99,32 @@ export function createServices(models: Models, config: ServiceConfig): Services 
       config.fileStorage,
       authTokens,
       cacheStore,
+      smsVerification,
     ),
     sso: new SsoService(user, accessControl, config.authTokenSecret, config.sso, cacheStore, authTokens),
     user,
   };
+}
+
+function createSmsVerificationService(
+  config: SmsServiceConfig | undefined,
+  cacheStore: CacheStore,
+  verificationSecret: string,
+) {
+  if (!config) {
+    return new SmsVerificationService();
+  }
+
+  const sender = new AliyunSmsSenderPool(config.aliyunProfiles);
+
+  return new SmsVerificationService({
+    cacheStore,
+    codeCooldownMs: config.codeCooldownMs,
+    codeExpiresInMs: config.codeExpiresInMs,
+    phoneCountryCodes: sender.getPhoneCountryCodes(),
+    sender,
+    verificationSecret,
+  });
 }
 
 export function createModules(services: Services, config?: ModuleConfig): BackendModule[] {
@@ -128,7 +163,7 @@ function createEmailVerificationService(
     cacheStore,
     codeCooldownMs: config.codeCooldownMs,
     codeExpiresInMs: config.codeExpiresInMs,
-    sender: new SmtpEmailSender(config.smtp),
+    sender: new SmtpEmailSenderPool(config.smtpProfiles),
     verificationSecret,
   });
 }

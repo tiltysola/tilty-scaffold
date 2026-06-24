@@ -6,12 +6,12 @@ import { SystemRole } from '@tilty/shared/access-control';
 import { hasMatchingPasswordConfirmation } from '@tilty/shared/validation';
 
 import {
-  getEnvFilePath,
+  getConfigFilePath,
   getEnvValidationMessage,
-  hasEnvFile,
+  hasConfigFile,
   isSetupLocked,
+  loadConfigFileSource,
   loadEnv,
-  loadEnvFileSource,
 } from '../../config/env';
 import { AppError } from '../../core/errors';
 import { createCacheStore } from '../../infra/cache';
@@ -22,10 +22,14 @@ import { initAccessControlModels } from '../access-control/access-control.model'
 import { AccessControlService } from '../access-control/access-control.service';
 import { hashPassword } from '../auth/auth.crypto';
 import { SmtpEmailSender } from '../auth/auth.email';
+import { checkAliyunSmsProfiles } from '../auth/auth.sms';
 import { testSsoDiscovery } from '../auth/auth.sso';
 import { initUserModel } from '../users/user.model';
 
 type SetupMode = 'locked' | 'setup';
+interface EnvironmentValidationOptions {
+  relaxedSms?: boolean;
+}
 type SetupCompletionLock = {
   fileHandle: Awaited<ReturnType<typeof open>>;
   lockFilePath: string;
@@ -35,79 +39,71 @@ const setupLockedMessage = 'Setup is locked because SETUP_LOCKED is true.';
 
 const setupEnvSchema = z
   .object({
-    AUTH_ACCESS_TOKEN_COOKIE_NAME: z.string().trim().max(128),
-    AUTH_ACCESS_TOKEN_TTL_SECONDS: z.string().trim().max(16),
-    AUTH_COOKIE_SAME_SITE: z.string().trim().max(16),
-    AUTH_COOKIE_SECURE: z.string().trim().max(16),
-    AUTH_RATE_LIMIT_MAX: z.string().trim().max(16),
-    AUTH_RATE_LIMIT_WINDOW_MS: z.string().trim().max(16),
-    AUTH_REFRESH_TOKEN_COOKIE_NAME: z.string().trim().max(128),
-    AUTH_REFRESH_TOKEN_TTL_SECONDS: z.string().trim().max(16),
-    AUTH_TOKEN_SECRET: z.string().trim().max(256),
-    CACHE_REDIS_REQUEST_TIMEOUT_MS: z.string().trim().max(16),
-    CACHE_REDIS_URL: z.string().trim().max(1024),
-    CACHE_STORE: z.string().trim().max(16),
-    CORS_ORIGINS: z.string().trim().max(2048),
-    DATABASE_CONNECT_TIMEOUT_MS: z.string().trim().max(16),
+    NODE_ENV: z.string().trim().max(32),
+    SERVER_HOST: z.string().trim().max(255),
+    SERVER_PORT: z.string().trim().max(16),
+    APP_DOMAIN: z.string().trim().max(1024),
+    APP_CORS_ORIGINS: z.string().trim().max(2048),
+    SERVER_TRUST_PROXY: z.string().trim().max(16),
+    SERVER_MULTI_INSTANCE_ENABLED: z.string().trim().max(16),
     DATABASE_DIALECT: z.string().trim().max(16),
-    DATABASE_POOL_ACQUIRE_MS: z.string().trim().max(16),
-    DATABASE_POOL_IDLE_MS: z.string().trim().max(16),
+    DATABASE_STORAGE: z.string().trim().max(1024),
+    DATABASE_URL: z.string().trim().max(2048),
+    DATABASE_SSL: z.string().trim().max(16),
+    DATABASE_CONNECT_TIMEOUT_MS: z.string().trim().max(16),
     DATABASE_POOL_MAX: z.string().trim().max(16),
     DATABASE_POOL_MIN: z.string().trim().max(16),
-    DATABASE_SSL: z.string().trim().max(16),
-    DATABASE_STORAGE: z.string().trim().max(1024),
+    DATABASE_POOL_ACQUIRE_MS: z.string().trim().max(16),
+    DATABASE_POOL_IDLE_MS: z.string().trim().max(16),
     DATABASE_SYNC: z.string().trim().max(16),
-    DATABASE_URL: z.string().trim().max(2048),
-    EMAIL_VERIFICATION_CODE_COOLDOWN_MS: z.string().trim().max(16),
-    EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS: z.string().trim().max(16),
-    EMAIL_VERIFICATION_SERVICE: z.string().trim().max(16),
+    CACHE_STORE: z.string().trim().max(16),
+    CACHE_REDIS_URL: z.string().trim().max(1024),
+    CACHE_REDIS_REQUEST_TIMEOUT_MS: z.string().trim().max(16),
+    FILE_STORAGE_DRIVER: z.string().trim().max(16),
+    FILE_UPLOAD_MAX_BYTES: z.string().trim().max(16),
+    FILE_PUBLIC_BASE_URL: z.string().trim().max(1024),
     FILE_LOCAL_ROOT: z.string().trim().max(1024),
     FILE_OSS_ACCESS_KEY_ID: z.string().trim().max(512),
     FILE_OSS_ACCESS_KEY_SECRET: z.string().trim().max(512),
     FILE_OSS_BUCKET: z.string().trim().max(256),
     FILE_OSS_ENDPOINT: z.string().trim().max(512),
-    FILE_OSS_PUBLIC_BASE_URL: z.string().trim().max(1024),
     FILE_OSS_REGION: z.string().trim().max(128),
-    FILE_PUBLIC_BASE_URL: z.string().trim().max(1024),
-    FILE_STORAGE_DRIVER: z.string().trim().max(16),
-    FILE_UPLOAD_MAX_BYTES: z.string().trim().max(16),
-    GLOBAL_RATE_LIMIT_MAX: z.string().trim().max(16),
-    GLOBAL_RATE_LIMIT_WINDOW_MS: z.string().trim().max(16),
-    LOG_LOCAL_PATH: z.string().trim().max(1024),
-    LOG_PENDING_WRITE_MAX: z.string().trim().max(16),
-    LOG_REQUEST_ENABLED: z.string().trim().max(16),
-    LOG_SLS_ACCESS_KEY_ID: z.string().trim().max(512),
-    LOG_SLS_ACCESS_KEY_SECRET: z.string().trim().max(512),
-    LOG_SLS_ENDPOINT: z.string().trim().max(512),
-    LOG_SLS_LOGSTORE: z.string().trim().max(256),
-    LOG_SLS_PROJECT: z.string().trim().max(256),
-    LOG_SLS_SOURCE: z.string().trim().max(128),
-    LOG_SLS_TOPIC: z.string().trim().max(128),
-    LOG_TARGETS: z.string().trim().max(128),
-    LOG_WRITE_TIMEOUT_MS: z.string().trim().max(16),
-    MULTI_INSTANCE_ENABLED: z.string().trim().max(16),
-    NODE_ENV: z.string().trim().max(32),
+    FILE_OSS_PUBLIC_BASE_URL: z.string().trim().max(1024),
     SCHEDULER_ENABLED: z.string().trim().max(16),
     SCHEDULER_LOCK_TTL_MS: z.string().trim().max(16),
-    SERVER_HOST: z.string().trim().max(255),
-    SERVER_PORT: z.string().trim().max(16),
-    SMTP_FROM: z.string().trim().max(512),
-    SMTP_HOST: z.string().trim().max(512),
-    SMTP_PASSWORD: z.string().trim().max(512),
-    SMTP_PORT: z.string().trim().max(16),
-    SMTP_REQUEST_TIMEOUT_MS: z.string().trim().max(16),
-    SMTP_SECURE: z.string().trim().max(16),
-    SMTP_STARTTLS: z.string().trim().max(16),
-    SMTP_USERNAME: z.string().trim().max(512),
-    SSO_CLIENT_ID: z.string().trim().max(512),
-    SSO_CLIENT_SECRET: z.string().trim().max(512),
+    AUTH_TOKEN_SECRET: z.string().trim().max(256),
+    AUTH_ACCESS_TOKEN_TTL_SECONDS: z.string().trim().max(16),
+    AUTH_REFRESH_TOKEN_TTL_SECONDS: z.string().trim().max(16),
+    AUTH_ACCESS_TOKEN_COOKIE_NAME: z.string().trim().max(128),
+    AUTH_REFRESH_TOKEN_COOKIE_NAME: z.string().trim().max(128),
+    AUTH_COOKIE_SAME_SITE: z.string().trim().max(16),
+    AUTH_COOKIE_SECURE: z.string().trim().max(16),
+    AUTH_RATE_LIMIT_WINDOW_MS: z.string().trim().max(16),
+    AUTH_RATE_LIMIT_MAX: z.string().trim().max(16),
+    GLOBAL_RATE_LIMIT_WINDOW_MS: z.string().trim().max(16),
+    GLOBAL_RATE_LIMIT_MAX: z.string().trim().max(16),
+    LOG_REQUEST_ENABLED: z.string().trim().max(16),
+    LOG_TARGETS: z.string().trim().max(128),
+    LOG_PENDING_WRITE_MAX: z.string().trim().max(16),
+    LOG_WRITE_TIMEOUT_MS: z.string().trim().max(16),
+    LOG_LOCAL_PATH: z.string().trim().max(1024),
+    LOG_SLS_ENDPOINT: z.string().trim().max(512),
+    LOG_SLS_PROJECT: z.string().trim().max(256),
+    LOG_SLS_LOGSTORE: z.string().trim().max(256),
+    LOG_SLS_ACCESS_KEY_ID: z.string().trim().max(512),
+    LOG_SLS_ACCESS_KEY_SECRET: z.string().trim().max(512),
+    LOG_SLS_TOPIC: z.string().trim().max(128),
+    LOG_SLS_SOURCE: z.string().trim().max(128),
+    EMAIL_VERIFICATION_SERVICE: z.string().trim().max(16),
+    EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS: z.string().trim().max(16),
+    EMAIL_VERIFICATION_CODE_COOLDOWN_MS: z.string().trim().max(16),
+    EMAIL_SMTP_PROFILES: z.string().trim().max(16384),
+    SMS_VERIFICATION_SERVICE: z.string().trim().max(16),
+    SMS_VERIFICATION_CODE_EXPIRES_IN_MS: z.string().trim().max(16),
+    SMS_VERIFICATION_CODE_COOLDOWN_MS: z.string().trim().max(16),
+    SMS_ALICLOUD_PROFILES: z.string().trim().max(8192),
     SSO_ENABLED: z.string().trim().max(16),
-    SSO_FRONTEND_CALLBACK_URL: z.string().trim().max(1024),
-    SSO_ISSUER_URL: z.string().trim().max(1024),
-    SSO_REDIRECT_URI: z.string().trim().max(1024),
-    SSO_REQUEST_TIMEOUT_MS: z.string().trim().max(16),
-    SSO_SCOPES: z.string().trim().max(256),
-    TRUST_PROXY: z.string().trim().max(16),
+    SSO_PROFILES: z.string().trim().max(32768),
   })
   .strict();
 
@@ -142,12 +138,103 @@ const setupCompleteSchema = z.object({
 const setupEnvironmentInputSchema = z.object({
   environment: setupEnvSchema,
 });
+const setupStepIdSchema = z.enum(['administrator', 'runtime', 'scheduler', 'security']);
+const setupEnvironmentValidationInputSchema = setupEnvironmentInputSchema.extend({
+  stepId: setupStepIdSchema.optional(),
+});
 const setupDatabaseDialectSchema = z.enum(['mysql', 'postgres', 'sqlite']);
 const setupCacheStoreSchema = z.enum(['memory', 'redis']);
 const setupFileStorageDriverSchema = z.enum(['local', 'oss']);
 
 export type SetupEnvironment = z.infer<typeof setupEnvSchema>;
 type SetupCompleteInput = z.infer<typeof setupCompleteSchema>;
+type SetupStepId = z.infer<typeof setupStepIdSchema>;
+
+const profileEnvironmentKeySet = new Set<keyof SetupEnvironment>([
+  'EMAIL_SMTP_PROFILES',
+  'SMS_ALICLOUD_PROFILES',
+  'SSO_PROFILES',
+]);
+const emptyOptionalConfigKeySet = new Set<keyof SetupEnvironment>([
+  'CACHE_REDIS_URL',
+  'DATABASE_URL',
+  'FILE_OSS_ACCESS_KEY_ID',
+  'FILE_OSS_ACCESS_KEY_SECRET',
+  'FILE_OSS_BUCKET',
+  'FILE_OSS_ENDPOINT',
+  'FILE_OSS_REGION',
+  'FILE_OSS_PUBLIC_BASE_URL',
+  'LOG_SLS_ENDPOINT',
+  'LOG_SLS_PROJECT',
+  'LOG_SLS_LOGSTORE',
+  'LOG_SLS_ACCESS_KEY_ID',
+  'LOG_SLS_ACCESS_KEY_SECRET',
+]);
+const setupValidationAuthTokenSecret = 'setup-validation-auth-token-secret-minimum-32-characters';
+const runtimeEnvironmentKeys = [
+  'NODE_ENV',
+  'SERVER_HOST',
+  'SERVER_PORT',
+  'APP_DOMAIN',
+  'APP_CORS_ORIGINS',
+  'SERVER_TRUST_PROXY',
+  'SERVER_MULTI_INSTANCE_ENABLED',
+] as const satisfies Array<keyof SetupEnvironment>;
+const schedulerEnvironmentKeys = ['SCHEDULER_ENABLED', 'SCHEDULER_LOCK_TTL_MS'] as const satisfies Array<
+  keyof SetupEnvironment
+>;
+const securityEnvironmentKeys = [
+  'AUTH_TOKEN_SECRET',
+  'AUTH_ACCESS_TOKEN_TTL_SECONDS',
+  'AUTH_REFRESH_TOKEN_TTL_SECONDS',
+  'AUTH_ACCESS_TOKEN_COOKIE_NAME',
+  'AUTH_REFRESH_TOKEN_COOKIE_NAME',
+  'AUTH_COOKIE_SAME_SITE',
+  'AUTH_COOKIE_SECURE',
+  'AUTH_RATE_LIMIT_WINDOW_MS',
+  'AUTH_RATE_LIMIT_MAX',
+  'GLOBAL_RATE_LIMIT_WINDOW_MS',
+  'GLOBAL_RATE_LIMIT_MAX',
+] as const satisfies Array<keyof SetupEnvironment>;
+const fileStorageEnvironmentKeys = [
+  'FILE_STORAGE_DRIVER',
+  'FILE_UPLOAD_MAX_BYTES',
+  'FILE_PUBLIC_BASE_URL',
+  'FILE_LOCAL_ROOT',
+  'FILE_OSS_ACCESS_KEY_ID',
+  'FILE_OSS_ACCESS_KEY_SECRET',
+  'FILE_OSS_BUCKET',
+  'FILE_OSS_ENDPOINT',
+  'FILE_OSS_REGION',
+  'FILE_OSS_PUBLIC_BASE_URL',
+] as const satisfies Array<keyof SetupEnvironment>;
+const loggingEnvironmentKeys = [
+  'LOG_REQUEST_ENABLED',
+  'LOG_TARGETS',
+  'LOG_PENDING_WRITE_MAX',
+  'LOG_WRITE_TIMEOUT_MS',
+  'LOG_LOCAL_PATH',
+  'LOG_SLS_ENDPOINT',
+  'LOG_SLS_PROJECT',
+  'LOG_SLS_LOGSTORE',
+  'LOG_SLS_ACCESS_KEY_ID',
+  'LOG_SLS_ACCESS_KEY_SECRET',
+  'LOG_SLS_TOPIC',
+  'LOG_SLS_SOURCE',
+] as const satisfies Array<keyof SetupEnvironment>;
+const emailEnvironmentKeys = [
+  'EMAIL_VERIFICATION_SERVICE',
+  'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS',
+  'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
+  'EMAIL_SMTP_PROFILES',
+] as const satisfies Array<keyof SetupEnvironment>;
+const smsEnvironmentKeys = [
+  'SMS_VERIFICATION_SERVICE',
+  'SMS_VERIFICATION_CODE_EXPIRES_IN_MS',
+  'SMS_VERIFICATION_CODE_COOLDOWN_MS',
+  'SMS_ALICLOUD_PROFILES',
+] as const satisfies Array<keyof SetupEnvironment>;
+const ssoEnvironmentKeys = ['SSO_ENABLED', 'SSO_PROFILES'] as const satisfies Array<keyof SetupEnvironment>;
 
 let setupCompletionInProgress = false;
 
@@ -159,7 +246,7 @@ export class SetupService {
 
     return {
       environment: getDefaultSetupEnvironment(),
-      environmentFileLoaded: hasEnvFile(),
+      environmentFileLoaded: hasConfigFile(),
     };
   }
 
@@ -178,9 +265,13 @@ export class SetupService {
   validateEnvironment(input: unknown) {
     this.assertSetupAvailable();
 
-    const { environment } = setupEnvironmentInputSchema.parse(input);
+    const { environment, stepId } = setupEnvironmentValidationInputSchema.parse(input);
 
-    assertValidEnvironment(environment);
+    if (stepId) {
+      assertValidSetupStepEnvironment(environment, stepId);
+    } else {
+      assertValidEnvironment(environment);
+    }
 
     return {
       valid: true,
@@ -258,7 +349,7 @@ export class SetupService {
     this.assertSetupAvailable();
 
     const { environment } = setupEnvironmentInputSchema.parse(input);
-    const envSource = assertValidEnvironment(environment);
+    const envSource = assertValidLoggingEnvironment(environment);
     const logTargets = parseLogTargets(environment.LOG_TARGETS);
 
     if (!logTargets.includes('sls')) {
@@ -322,7 +413,7 @@ export class SetupService {
     this.assertSetupAvailable();
 
     const { environment } = setupEnvironmentInputSchema.parse(input);
-    const envSource = assertValidEnvironment(environment);
+    const environmentConfig = loadEnv(assertValidEmailEnvironment(environment));
 
     if (environment.EMAIL_VERIFICATION_SERVICE.trim() !== 'smtp') {
       return {
@@ -332,20 +423,7 @@ export class SetupService {
     }
 
     try {
-      await new SmtpEmailSender({
-        from: envSource.SMTP_FROM!,
-        host: envSource.SMTP_HOST!,
-        port: Number(envSource.SMTP_PORT),
-        secure: envSource.SMTP_SECURE === 'true',
-        startTls: envSource.SMTP_STARTTLS === 'true',
-        timeoutMs: Number(envSource.SMTP_REQUEST_TIMEOUT_MS),
-        ...(envSource.SMTP_USERNAME
-          ? {
-              password: envSource.SMTP_PASSWORD!,
-              username: envSource.SMTP_USERNAME,
-            }
-          : {}),
-      }).check();
+      await Promise.all(environmentConfig.email!.smtpProfiles.map((profile) => new SmtpEmailSender(profile).check()));
 
       return {
         connected: true,
@@ -356,11 +434,41 @@ export class SetupService {
     }
   }
 
+  async testSms(input: unknown) {
+    this.assertSetupAvailable();
+
+    const { environment } = setupEnvironmentInputSchema.parse(input);
+    const environmentConfig = loadEnv(assertValidSmsEnvironment(environment));
+
+    if (!environmentConfig.sms) {
+      return {
+        connected: true,
+        service: 'off',
+      } as const;
+    }
+
+    try {
+      await checkAliyunSmsProfiles(environmentConfig.sms.aliyunProfiles);
+
+      return {
+        connected: true,
+        service: 'aliyun',
+        profileCountryCodes: environmentConfig.sms.aliyunProfiles.map((profile) => profile.phoneCountryCode),
+      } as const;
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      throw new AppError('SETUP_SMS_CONNECTION_FAILED', getConnectionErrorMessage(error), 400);
+    }
+  }
+
   async testSso(input: unknown) {
     this.assertSetupAvailable();
 
     const { environment } = setupEnvironmentInputSchema.parse(input);
-    const environmentConfig = loadEnv(assertValidEnvironment(environment));
+    const environmentConfig = loadEnv(assertValidSsoEnvironment(environment));
 
     if (!environmentConfig.sso) {
       return {
@@ -370,11 +478,12 @@ export class SetupService {
     }
 
     try {
-      await testSsoDiscovery(environmentConfig.sso);
+      const result = await testSsoDiscovery(environmentConfig.sso);
 
       return {
         connected: true,
         enabled: true,
+        providerIds: result.providerIds,
       } as const;
     } catch (error) {
       throw new AppError('SETUP_SSO_CONNECTION_FAILED', getConnectionErrorMessage(error), 400);
@@ -399,7 +508,7 @@ export class SetupService {
       this.assertSetupAvailable();
 
       const administratorCreated = await provisionDatabase(setupEnvironmentSource, setupRequest.administrator);
-      await writeEnvironmentFile(setupEnvironmentSource);
+      await writeConfigFile(setupEnvironmentSource);
 
       return {
         administratorCreated,
@@ -501,10 +610,10 @@ function normalizeTableName(tableName: unknown) {
   return '';
 }
 
-function assertValidEnvironment(environment: SetupEnvironment) {
-  assertRequiredEnvironment(environment);
+function assertValidEnvironment(environment: SetupEnvironment, options: EnvironmentValidationOptions = {}) {
+  assertRequiredEnvironment(environment, options);
 
-  const environmentSource = toEnvironmentSource(environment);
+  const environmentSource = toEnvironmentSource(environment, options);
   const validationMessage = getEnvValidationMessage(environmentSource);
 
   if (validationMessage) {
@@ -514,7 +623,10 @@ function assertValidEnvironment(environment: SetupEnvironment) {
   return environmentSource;
 }
 
-function toEnvironmentSource(environment: SetupEnvironment): NodeJS.ProcessEnv {
+function toEnvironmentSource(
+  environment: SetupEnvironment,
+  options: EnvironmentValidationOptions = {},
+): NodeJS.ProcessEnv {
   const environmentSource: NodeJS.ProcessEnv = {};
 
   for (const [key, value] of Object.entries(environment)) {
@@ -525,7 +637,184 @@ function toEnvironmentSource(environment: SetupEnvironment): NodeJS.ProcessEnv {
     }
   }
 
+  if (options.relaxedSms && environmentSource.SMS_VERIFICATION_SERVICE === 'aliyun') {
+    environmentSource.SMS_VERIFICATION_SERVICE = 'off';
+  }
+
   return environmentSource;
+}
+
+function assertValidSetupStepEnvironment(environment: SetupEnvironment, stepId: SetupStepId) {
+  if (stepId === 'administrator') {
+    return;
+  }
+
+  if (stepId === 'runtime') {
+    assertValidRuntimeEnvironment(environment);
+    return;
+  }
+
+  if (stepId === 'scheduler') {
+    assertValidEnvironmentFields(environment, schedulerEnvironmentKeys, schedulerEnvironmentKeys);
+    return;
+  }
+
+  assertValidEnvironmentFields(environment, securityEnvironmentKeys, securityEnvironmentKeys);
+}
+
+function assertValidRuntimeEnvironment(environment: SetupEnvironment) {
+  assertRequiredFields(environment, runtimeEnvironmentKeys);
+  assertHttpOrigin(environment.APP_DOMAIN, 'APP_DOMAIN');
+  assertAllowedValue(environment.NODE_ENV, 'NODE_ENV', ['development', 'test', 'production']);
+  assertAllowedValue(environment.SERVER_TRUST_PROXY, 'SERVER_TRUST_PROXY', ['false', 'true']);
+  assertAllowedValue(environment.SERVER_MULTI_INSTANCE_ENABLED, 'SERVER_MULTI_INSTANCE_ENABLED', ['false', 'true']);
+  parsePositiveInteger(environment.SERVER_PORT, 'SERVER_PORT');
+}
+
+function assertValidFileStorageEnvironment(environment: SetupEnvironment) {
+  const driver = setupFileStorageDriverSchema.parse(environment.FILE_STORAGE_DRIVER.trim());
+  const requiredFields: Array<keyof SetupEnvironment> =
+    driver === 'local'
+      ? ['FILE_STORAGE_DRIVER', 'FILE_UPLOAD_MAX_BYTES', 'FILE_PUBLIC_BASE_URL', 'FILE_LOCAL_ROOT']
+      : [
+          'FILE_STORAGE_DRIVER',
+          'FILE_UPLOAD_MAX_BYTES',
+          'FILE_OSS_ACCESS_KEY_ID',
+          'FILE_OSS_ACCESS_KEY_SECRET',
+          'FILE_OSS_BUCKET',
+          'FILE_OSS_ENDPOINT',
+          'FILE_OSS_REGION',
+        ];
+
+  return assertValidEnvironmentFields(environment, fileStorageEnvironmentKeys, requiredFields);
+}
+
+function assertValidLoggingEnvironment(environment: SetupEnvironment) {
+  const requiredFields: Array<keyof SetupEnvironment> = [
+    'LOG_REQUEST_ENABLED',
+    'LOG_TARGETS',
+    'LOG_PENDING_WRITE_MAX',
+    'LOG_WRITE_TIMEOUT_MS',
+  ];
+  const logTargets = parseLogTargets(environment.LOG_TARGETS);
+
+  if (logTargets.includes('local')) {
+    requiredFields.push('LOG_LOCAL_PATH');
+  }
+
+  if (logTargets.includes('sls')) {
+    requiredFields.push(
+      'LOG_SLS_ENDPOINT',
+      'LOG_SLS_PROJECT',
+      'LOG_SLS_LOGSTORE',
+      'LOG_SLS_ACCESS_KEY_ID',
+      'LOG_SLS_ACCESS_KEY_SECRET',
+      'LOG_SLS_TOPIC',
+      'LOG_SLS_SOURCE',
+    );
+  }
+
+  return assertValidEnvironmentFields(environment, loggingEnvironmentKeys, requiredFields);
+}
+
+function assertValidEmailEnvironment(environment: SetupEnvironment) {
+  const requiredFields: Array<keyof SetupEnvironment> = ['EMAIL_VERIFICATION_SERVICE'];
+
+  if (environment.EMAIL_VERIFICATION_SERVICE.trim() === 'smtp') {
+    requiredFields.push(
+      'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS',
+      'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
+      'EMAIL_SMTP_PROFILES',
+    );
+  }
+
+  return assertValidEnvironmentFields(environment, emailEnvironmentKeys, requiredFields);
+}
+
+function assertValidSmsEnvironment(environment: SetupEnvironment) {
+  const requiredFields: Array<keyof SetupEnvironment> = ['SMS_VERIFICATION_SERVICE'];
+
+  if (environment.SMS_VERIFICATION_SERVICE.trim() === 'aliyun') {
+    requiredFields.push(
+      'SMS_VERIFICATION_CODE_EXPIRES_IN_MS',
+      'SMS_VERIFICATION_CODE_COOLDOWN_MS',
+      'SMS_ALICLOUD_PROFILES',
+    );
+  }
+
+  return assertValidEnvironmentFields(environment, smsEnvironmentKeys, requiredFields);
+}
+
+function assertValidSsoEnvironment(environment: SetupEnvironment) {
+  const requiredFields: Array<keyof SetupEnvironment> = ['SSO_ENABLED'];
+
+  if (environment.SSO_ENABLED.trim() === 'true') {
+    requiredFields.push('SSO_PROFILES');
+  }
+
+  return assertValidEnvironmentFields(environment, ssoEnvironmentKeys, requiredFields);
+}
+
+function assertValidEnvironmentFields(
+  environment: SetupEnvironment,
+  keys: readonly (keyof SetupEnvironment)[],
+  requiredKeys: readonly (keyof SetupEnvironment)[],
+) {
+  assertRequiredFields(environment, requiredKeys);
+
+  const environmentSource = toStepEnvironmentSource(environment, keys);
+  const validationMessage = getEnvValidationMessage(environmentSource);
+
+  if (validationMessage) {
+    throw new AppError('SETUP_ENV_INVALID', validationMessage, 400);
+  }
+
+  return environmentSource;
+}
+
+function toStepEnvironmentSource(environment: SetupEnvironment, keys: readonly (keyof SetupEnvironment)[]) {
+  const stepEnvironment: SetupEnvironment = {
+    ...defaultSetupEnvironment,
+    AUTH_TOKEN_SECRET: setupValidationAuthTokenSecret,
+    DATABASE_STORAGE: ':memory:',
+    SERVER_MULTI_INSTANCE_ENABLED: 'false',
+    NODE_ENV: 'development',
+  };
+
+  for (const key of keys) {
+    stepEnvironment[key] = environment[key];
+  }
+
+  return toEnvironmentSource(stepEnvironment);
+}
+
+function assertAllowedValue(value: string, label: string, allowedValues: readonly string[]) {
+  const normalized = value.trim();
+
+  if (!allowedValues.includes(normalized)) {
+    throw new AppError('SETUP_ENV_INVALID', `${label} must be one of: ${allowedValues.join(', ')}.`, 400);
+  }
+}
+
+function assertHttpOrigin(value: string, label: string) {
+  try {
+    const url = new URL(value.trim());
+
+    if (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      !url.username &&
+      !url.password &&
+      url.pathname === '/' &&
+      !url.search &&
+      !url.hash
+    ) {
+      return;
+    }
+  } catch {
+    // Normalize all parsing failures to the setup validation error below.
+  }
+
+  throw new AppError('SETUP_ENV_INVALID', `${label} must be an http:// or https:// origin.`, 400);
 }
 
 function toDatabaseConfig(environment: SetupEnvironment) {
@@ -584,27 +873,11 @@ function toCacheConfig(environment: SetupEnvironment) {
 
 function toFileStorageConfig(environment: SetupEnvironment) {
   const driver = setupFileStorageDriverSchema.parse(environment.FILE_STORAGE_DRIVER.trim());
+  const environmentConfig = loadEnv(assertValidFileStorageEnvironment(environment));
 
   if (driver === 'local') {
-    assertRequiredFields(environment, ['FILE_LOCAL_ROOT', 'FILE_PUBLIC_BASE_URL', 'FILE_UPLOAD_MAX_BYTES']);
-
-    return {
-      driver,
-      publicBaseUrl: environment.FILE_PUBLIC_BASE_URL.trim(),
-      root: environment.FILE_LOCAL_ROOT.trim(),
-    } as const;
+    return environmentConfig.fileStorage;
   }
-
-  assertRequiredFields(environment, [
-    'FILE_OSS_ACCESS_KEY_ID',
-    'FILE_OSS_ACCESS_KEY_SECRET',
-    'FILE_OSS_BUCKET',
-    'FILE_OSS_ENDPOINT',
-    'FILE_UPLOAD_MAX_BYTES',
-    'FILE_OSS_REGION',
-  ]);
-
-  const environmentConfig = loadEnv(assertValidEnvironment(environment));
 
   if (environmentConfig.fileStorage.driver !== 'oss') {
     throw new AppError('SETUP_ENV_INVALID', 'OSS file storage configuration is invalid.', 400);
@@ -620,51 +893,53 @@ function parseLogTargets(value: string) {
     .filter(Boolean);
 }
 
-function assertRequiredEnvironment(environment: SetupEnvironment) {
+function assertRequiredEnvironment(environment: SetupEnvironment, options: EnvironmentValidationOptions = {}) {
   assertRequiredFields(environment, [
-    'AUTH_ACCESS_TOKEN_COOKIE_NAME',
-    'AUTH_ACCESS_TOKEN_TTL_SECONDS',
-    'AUTH_COOKIE_SAME_SITE',
-    'AUTH_COOKIE_SECURE',
-    'AUTH_RATE_LIMIT_MAX',
-    'AUTH_RATE_LIMIT_WINDOW_MS',
-    'AUTH_REFRESH_TOKEN_COOKIE_NAME',
-    'AUTH_REFRESH_TOKEN_TTL_SECONDS',
-    'AUTH_TOKEN_SECRET',
-    'CACHE_STORE',
-    'CORS_ORIGINS',
-    'DATABASE_DIALECT',
-    'DATABASE_SYNC',
-    'EMAIL_VERIFICATION_SERVICE',
-    'FILE_STORAGE_DRIVER',
-    'FILE_UPLOAD_MAX_BYTES',
-    'GLOBAL_RATE_LIMIT_MAX',
-    'GLOBAL_RATE_LIMIT_WINDOW_MS',
-    'LOG_PENDING_WRITE_MAX',
-    'LOG_REQUEST_ENABLED',
-    'LOG_TARGETS',
-    'LOG_WRITE_TIMEOUT_MS',
-    'MULTI_INSTANCE_ENABLED',
     'NODE_ENV',
-    'SCHEDULER_ENABLED',
-    'SCHEDULER_LOCK_TTL_MS',
     'SERVER_HOST',
     'SERVER_PORT',
+    'APP_DOMAIN',
+    'APP_CORS_ORIGINS',
+    'SERVER_TRUST_PROXY',
+    'SERVER_MULTI_INSTANCE_ENABLED',
+    'DATABASE_DIALECT',
+    'DATABASE_SYNC',
+    'CACHE_STORE',
+    'FILE_STORAGE_DRIVER',
+    'FILE_UPLOAD_MAX_BYTES',
+    'SCHEDULER_ENABLED',
+    'SCHEDULER_LOCK_TTL_MS',
+    'AUTH_TOKEN_SECRET',
+    'AUTH_ACCESS_TOKEN_TTL_SECONDS',
+    'AUTH_REFRESH_TOKEN_TTL_SECONDS',
+    'AUTH_ACCESS_TOKEN_COOKIE_NAME',
+    'AUTH_REFRESH_TOKEN_COOKIE_NAME',
+    'AUTH_COOKIE_SAME_SITE',
+    'AUTH_COOKIE_SECURE',
+    'AUTH_RATE_LIMIT_WINDOW_MS',
+    'AUTH_RATE_LIMIT_MAX',
+    'GLOBAL_RATE_LIMIT_WINDOW_MS',
+    'GLOBAL_RATE_LIMIT_MAX',
+    'LOG_REQUEST_ENABLED',
+    'LOG_TARGETS',
+    'LOG_PENDING_WRITE_MAX',
+    'LOG_WRITE_TIMEOUT_MS',
+    'EMAIL_VERIFICATION_SERVICE',
+    'SMS_VERIFICATION_SERVICE',
     'SSO_ENABLED',
-    'TRUST_PROXY',
   ]);
 
   if (environment.DATABASE_DIALECT.trim() === 'sqlite') {
     assertRequiredFields(environment, ['DATABASE_STORAGE']);
   } else {
     assertRequiredFields(environment, [
+      'DATABASE_URL',
+      'DATABASE_SSL',
       'DATABASE_CONNECT_TIMEOUT_MS',
-      'DATABASE_POOL_ACQUIRE_MS',
-      'DATABASE_POOL_IDLE_MS',
       'DATABASE_POOL_MAX',
       'DATABASE_POOL_MIN',
-      'DATABASE_SSL',
-      'DATABASE_URL',
+      'DATABASE_POOL_ACQUIRE_MS',
+      'DATABASE_POOL_IDLE_MS',
     ]);
   }
 
@@ -692,43 +967,38 @@ function assertRequiredEnvironment(environment: SetupEnvironment) {
 
   if (logTargets.includes('sls')) {
     assertRequiredFields(environment, [
+      'LOG_SLS_ENDPOINT',
+      'LOG_SLS_PROJECT',
+      'LOG_SLS_LOGSTORE',
       'LOG_SLS_ACCESS_KEY_ID',
       'LOG_SLS_ACCESS_KEY_SECRET',
-      'LOG_SLS_ENDPOINT',
-      'LOG_SLS_LOGSTORE',
-      'LOG_SLS_PROJECT',
-      'LOG_SLS_SOURCE',
       'LOG_SLS_TOPIC',
+      'LOG_SLS_SOURCE',
     ]);
   }
 
   if (environment.EMAIL_VERIFICATION_SERVICE.trim() === 'smtp') {
     assertRequiredFields(environment, [
-      'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
       'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS',
-      'SMTP_FROM',
-      'SMTP_HOST',
-      'SMTP_PORT',
-      'SMTP_REQUEST_TIMEOUT_MS',
-      'SMTP_SECURE',
-      'SMTP_STARTTLS',
+      'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
+      'EMAIL_SMTP_PROFILES',
+    ]);
+  }
+
+  if (!options.relaxedSms && environment.SMS_VERIFICATION_SERVICE.trim() === 'aliyun') {
+    assertRequiredFields(environment, [
+      'SMS_VERIFICATION_CODE_EXPIRES_IN_MS',
+      'SMS_VERIFICATION_CODE_COOLDOWN_MS',
+      'SMS_ALICLOUD_PROFILES',
     ]);
   }
 
   if (environment.SSO_ENABLED.trim() === 'true') {
-    assertRequiredFields(environment, [
-      'SSO_CLIENT_ID',
-      'SSO_CLIENT_SECRET',
-      'SSO_FRONTEND_CALLBACK_URL',
-      'SSO_ISSUER_URL',
-      'SSO_REDIRECT_URI',
-      'SSO_REQUEST_TIMEOUT_MS',
-      'SSO_SCOPES',
-    ]);
+    assertRequiredFields(environment, ['SSO_PROFILES']);
   }
 }
 
-function assertRequiredFields(environment: SetupEnvironment, keys: Array<keyof SetupEnvironment>) {
+function assertRequiredFields(environment: SetupEnvironment, keys: readonly (keyof SetupEnvironment)[]) {
   const missing = keys.filter((key) => !environment[key].trim());
 
   if (missing.length > 0) {
@@ -761,7 +1031,7 @@ function getConnectionErrorMessage(error: unknown) {
 }
 
 async function acquireSetupCompletionLock(): Promise<SetupCompletionLock> {
-  const setupCompletionLockFilePath = `${getEnvFilePath()}.setup.lock`;
+  const setupCompletionLockFilePath = `${getConfigFilePath()}.setup.lock`;
   let setupCompletionLockFileHandle: Awaited<ReturnType<typeof open>> | undefined;
 
   try {
@@ -791,16 +1061,16 @@ async function releaseSetupCompletionLock(lock: SetupCompletionLock) {
   await unlink(lock.lockFilePath).catch(() => undefined);
 }
 
-async function writeEnvironmentFile(setupEnvironmentSource: NodeJS.ProcessEnv) {
+async function writeConfigFile(setupEnvironmentSource: NodeJS.ProcessEnv) {
   if (isSetupLocked()) {
     throw new AppError('SETUP_LOCKED', setupLockedMessage, 403);
   }
 
-  const environmentFilePath = getEnvFilePath();
-  const temporaryEnvironmentFilePath = `${environmentFilePath}.${process.pid}.${randomUUID()}.tmp`;
+  const configFilePath = getConfigFilePath();
+  const temporaryConfigFilePath = `${configFilePath}.${process.pid}.${randomUUID()}.tmp`;
 
   try {
-    await writeFile(temporaryEnvironmentFilePath, renderEnvironmentFile(setupEnvironmentSource), {
+    await writeFile(temporaryConfigFilePath, renderConfigFile(setupEnvironmentSource), {
       encoding: 'utf8',
       flag: 'wx',
       mode: 0o600,
@@ -808,46 +1078,122 @@ async function writeEnvironmentFile(setupEnvironmentSource: NodeJS.ProcessEnv) {
     if (isSetupLocked()) {
       throw new AppError('SETUP_LOCKED', setupLockedMessage, 403);
     }
-    await rename(temporaryEnvironmentFilePath, environmentFilePath);
+    await rename(temporaryConfigFilePath, configFilePath);
   } catch (error) {
-    await unlink(temporaryEnvironmentFilePath).catch(() => undefined);
+    await unlink(temporaryConfigFilePath).catch(() => undefined);
     throw error;
   }
 }
 
-function renderEnvironmentFile(setupEnvironmentSource: NodeJS.ProcessEnv) {
-  const environmentFileLines = [
+function renderConfigFile(setupEnvironmentSource: NodeJS.ProcessEnv) {
+  const configFileLines = [
     '# Generated by the setup process.',
     '# Do not commit this file.',
     '',
     '# Setup',
-    'SETUP_LOCKED=true',
+    '# Setup lock state.',
+    '# Missing or false enables setup; true locks setup.',
+    'SETUP_LOCKED = true',
     '',
   ];
+  const profileEntries: Array<[keyof SetupEnvironment, string]> = [];
 
   for (const environmentGroup of envGroups) {
-    environmentFileLines.push(`# ${environmentGroup.name}`);
+    configFileLines.push(`# ${environmentGroup.name}`);
 
     for (const environmentKey of environmentGroup.keys) {
       const environmentValue = setupEnvironmentSource[environmentKey];
 
       if (environmentValue !== undefined) {
-        environmentFileLines.push(`${environmentKey}=${formatEnvValue(environmentValue)}`);
+        if (profileEnvironmentKeySet.has(environmentKey)) {
+          profileEntries.push([environmentKey, environmentValue]);
+        } else if (emptyOptionalConfigKeySet.has(environmentKey) && environmentValue.trim() === '') {
+          continue;
+        } else {
+          pushConfigCommentLines(configFileLines, environmentKey);
+          configFileLines.push(`${environmentKey} = ${formatTomlValue(environmentValue)}`);
+        }
       }
     }
 
-    environmentFileLines.push('');
+    configFileLines.push('');
   }
 
-  return `${environmentFileLines.join('\n').trimEnd()}\n`;
+  const renderedProfiles = renderProfileTables(profileEntries);
+
+  if (renderedProfiles.length > 0) {
+    configFileLines.push('# Profile Arrays', ...renderedProfiles, '');
+  }
+
+  return `${configFileLines.join('\n').trimEnd()}\n`;
 }
 
-function formatEnvValue(value: string) {
-  if (/^[A-Za-z0-9_./:@,+-]+$/.test(value)) {
-    return value;
+function renderProfileTables(profileEntries: Array<[keyof SetupEnvironment, string]>) {
+  const lines: string[] = [];
+
+  for (const [environmentKey, environmentValue] of profileEntries) {
+    const profiles = parseProfileEnvironmentValue(environmentKey, environmentValue);
+
+    if (profiles.length > 0) {
+      pushConfigCommentLines(lines, environmentKey);
+    }
+
+    for (const profile of profiles) {
+      lines.push(`[[${environmentKey}]]`);
+
+      for (const [key, value] of Object.entries(profile)) {
+        lines.push(`${key} = ${formatTomlValue(value)}`);
+      }
+
+      lines.push('');
+    }
   }
 
-  return JSON.stringify(value);
+  return lines;
+}
+
+function pushConfigCommentLines(lines: string[], environmentKey: keyof SetupEnvironment) {
+  const comments = setupConfigComments[environmentKey];
+
+  if (comments) {
+    lines.push(...comments.map((comment) => `# ${comment}`));
+  }
+}
+
+function parseProfileEnvironmentValue(environmentKey: keyof SetupEnvironment, value: string) {
+  try {
+    const parsed = JSON.parse(value);
+
+    if (Array.isArray(parsed)) {
+      return parsed.filter((profile): profile is Record<string, unknown> =>
+        Boolean(profile && typeof profile === 'object'),
+      );
+    }
+  } catch {
+    throw new AppError('SETUP_ENV_INVALID', `${environmentKey} must be a JSON array.`, 400);
+  }
+
+  throw new AppError('SETUP_ENV_INVALID', `${environmentKey} must be a JSON array.`, 400);
+}
+
+function formatTomlValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(formatTomlValue).join(', ')}]`;
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false';
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  if (value === undefined || value === null) {
+    return '""';
+  }
+
+  return JSON.stringify(String(value));
 }
 
 function getDefaultSetupEnvironment() {
@@ -864,7 +1210,7 @@ function getDefaultSetupEnvironment() {
 }
 
 function getExistingSetupEnvironment() {
-  const environmentFileSource = loadEnvFileSource();
+  const environmentFileSource = loadConfigFileSource();
   const existingSetupEnvironment: Partial<SetupEnvironment> = {};
 
   for (const environmentKey of Object.keys(defaultSetupEnvironment) as Array<keyof SetupEnvironment>) {
@@ -883,101 +1229,99 @@ function generateSecret() {
 }
 
 const defaultSetupEnvironment = {
-  AUTH_ACCESS_TOKEN_COOKIE_NAME: 'tilty_scaffold_access_token',
-  AUTH_ACCESS_TOKEN_TTL_SECONDS: '900',
-  AUTH_COOKIE_SAME_SITE: 'lax',
-  AUTH_COOKIE_SECURE: 'auto',
-  AUTH_RATE_LIMIT_MAX: '10',
-  AUTH_RATE_LIMIT_WINDOW_MS: '60000',
-  AUTH_REFRESH_TOKEN_COOKIE_NAME: 'tilty_scaffold_refresh_token',
-  AUTH_REFRESH_TOKEN_TTL_SECONDS: '2592000',
-  AUTH_TOKEN_SECRET: '',
-  CACHE_REDIS_REQUEST_TIMEOUT_MS: '10000',
-  CACHE_REDIS_URL: 'redis://localhost:6379/0',
-  CACHE_STORE: 'memory',
-  CORS_ORIGINS: 'http://localhost:8011',
-  DATABASE_CONNECT_TIMEOUT_MS: '10000',
+  NODE_ENV: 'development',
+  SERVER_HOST: '0.0.0.0',
+  SERVER_PORT: '3000',
+  APP_DOMAIN: 'http://localhost:8011',
+  APP_CORS_ORIGINS: 'http://localhost:8011',
+  SERVER_TRUST_PROXY: 'false',
+  SERVER_MULTI_INSTANCE_ENABLED: 'false',
   DATABASE_DIALECT: 'sqlite',
-  DATABASE_POOL_ACQUIRE_MS: '30000',
-  DATABASE_POOL_IDLE_MS: '10000',
+  DATABASE_STORAGE: './data/database.sqlite',
+  DATABASE_URL: '',
+  DATABASE_SSL: 'false',
+  DATABASE_CONNECT_TIMEOUT_MS: '10000',
   DATABASE_POOL_MAX: '10',
   DATABASE_POOL_MIN: '0',
-  DATABASE_SSL: 'false',
-  DATABASE_STORAGE: './data/database.sqlite',
+  DATABASE_POOL_ACQUIRE_MS: '30000',
+  DATABASE_POOL_IDLE_MS: '10000',
   DATABASE_SYNC: 'off',
-  DATABASE_URL: '',
-  EMAIL_VERIFICATION_CODE_COOLDOWN_MS: '60000',
-  EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS: '600000',
-  EMAIL_VERIFICATION_SERVICE: 'off',
+  CACHE_STORE: 'memory',
+  CACHE_REDIS_URL: 'redis://localhost:6379/0',
+  CACHE_REDIS_REQUEST_TIMEOUT_MS: '10000',
+  FILE_STORAGE_DRIVER: 'local',
+  FILE_UPLOAD_MAX_BYTES: '2097152',
+  FILE_PUBLIC_BASE_URL: '/uploads',
   FILE_LOCAL_ROOT: './data/uploads',
   FILE_OSS_ACCESS_KEY_ID: '',
   FILE_OSS_ACCESS_KEY_SECRET: '',
   FILE_OSS_BUCKET: '',
   FILE_OSS_ENDPOINT: '',
-  FILE_OSS_PUBLIC_BASE_URL: '',
   FILE_OSS_REGION: '',
-  FILE_PUBLIC_BASE_URL: '/uploads',
-  FILE_STORAGE_DRIVER: 'local',
-  FILE_UPLOAD_MAX_BYTES: '2097152',
-  GLOBAL_RATE_LIMIT_MAX: '1000',
-  GLOBAL_RATE_LIMIT_WINDOW_MS: '60000',
-  LOG_LOCAL_PATH: './logs/backend.log',
-  LOG_PENDING_WRITE_MAX: '1000',
-  LOG_REQUEST_ENABLED: 'true',
-  LOG_SLS_ACCESS_KEY_ID: '',
-  LOG_SLS_ACCESS_KEY_SECRET: '',
-  LOG_SLS_ENDPOINT: '',
-  LOG_SLS_LOGSTORE: '',
-  LOG_SLS_PROJECT: '',
-  LOG_SLS_SOURCE: 'backend',
-  LOG_SLS_TOPIC: 'tilty-scaffold',
-  LOG_TARGETS: 'console',
-  LOG_WRITE_TIMEOUT_MS: '5000',
-  MULTI_INSTANCE_ENABLED: 'false',
-  NODE_ENV: 'development',
+  FILE_OSS_PUBLIC_BASE_URL: '',
   SCHEDULER_ENABLED: 'true',
   SCHEDULER_LOCK_TTL_MS: '300000',
-  SERVER_HOST: '0.0.0.0',
-  SERVER_PORT: '3000',
-  SMTP_FROM: '',
-  SMTP_HOST: '',
-  SMTP_PASSWORD: '',
-  SMTP_PORT: '465',
-  SMTP_REQUEST_TIMEOUT_MS: '10000',
-  SMTP_SECURE: 'true',
-  SMTP_STARTTLS: 'false',
-  SMTP_USERNAME: '',
-  SSO_CLIENT_ID: '',
-  SSO_CLIENT_SECRET: '',
+  AUTH_TOKEN_SECRET: '',
+  AUTH_ACCESS_TOKEN_TTL_SECONDS: '900',
+  AUTH_REFRESH_TOKEN_TTL_SECONDS: '2592000',
+  AUTH_ACCESS_TOKEN_COOKIE_NAME: 'tilty_scaffold_access_token',
+  AUTH_REFRESH_TOKEN_COOKIE_NAME: 'tilty_scaffold_refresh_token',
+  AUTH_COOKIE_SAME_SITE: 'lax',
+  AUTH_COOKIE_SECURE: 'auto',
+  AUTH_RATE_LIMIT_WINDOW_MS: '60000',
+  AUTH_RATE_LIMIT_MAX: '10',
+  GLOBAL_RATE_LIMIT_WINDOW_MS: '60000',
+  GLOBAL_RATE_LIMIT_MAX: '1000',
+  LOG_REQUEST_ENABLED: 'true',
+  LOG_TARGETS: 'console',
+  LOG_PENDING_WRITE_MAX: '1000',
+  LOG_WRITE_TIMEOUT_MS: '5000',
+  LOG_LOCAL_PATH: './logs/backend.log',
+  LOG_SLS_ENDPOINT: '',
+  LOG_SLS_PROJECT: '',
+  LOG_SLS_LOGSTORE: '',
+  LOG_SLS_ACCESS_KEY_ID: '',
+  LOG_SLS_ACCESS_KEY_SECRET: '',
+  LOG_SLS_TOPIC: 'tilty-scaffold',
+  LOG_SLS_SOURCE: 'backend',
+  EMAIL_VERIFICATION_SERVICE: 'off',
+  EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS: '600000',
+  EMAIL_VERIFICATION_CODE_COOLDOWN_MS: '60000',
+  EMAIL_SMTP_PROFILES: '[]',
+  SMS_VERIFICATION_SERVICE: 'off',
+  SMS_VERIFICATION_CODE_EXPIRES_IN_MS: '600000',
+  SMS_VERIFICATION_CODE_COOLDOWN_MS: '60000',
+  SMS_ALICLOUD_PROFILES: '[]',
   SSO_ENABLED: 'false',
-  SSO_FRONTEND_CALLBACK_URL: 'http://localhost:8011/login',
-  SSO_ISSUER_URL: '',
-  SSO_REDIRECT_URI: '',
-  SSO_REQUEST_TIMEOUT_MS: '10000',
-  SSO_SCOPES: 'openid profile email',
-  TRUST_PROXY: 'false',
+  SSO_PROFILES: '[]',
 } satisfies SetupEnvironment;
 
 const envGroups = [
   {
     name: 'Runtime',
-    keys: ['NODE_ENV', 'SERVER_HOST', 'SERVER_PORT', 'TRUST_PROXY', 'MULTI_INSTANCE_ENABLED', 'CORS_ORIGINS'],
+    keys: [
+      'NODE_ENV',
+      'SERVER_HOST',
+      'SERVER_PORT',
+      'APP_DOMAIN',
+      'APP_CORS_ORIGINS',
+      'SERVER_TRUST_PROXY',
+      'SERVER_MULTI_INSTANCE_ENABLED',
+    ],
   },
   {
-    name: 'Logging',
+    name: 'Database',
     keys: [
-      'LOG_REQUEST_ENABLED',
-      'LOG_TARGETS',
-      'LOG_LOCAL_PATH',
-      'LOG_PENDING_WRITE_MAX',
-      'LOG_WRITE_TIMEOUT_MS',
-      'LOG_SLS_ENDPOINT',
-      'LOG_SLS_PROJECT',
-      'LOG_SLS_LOGSTORE',
-      'LOG_SLS_ACCESS_KEY_ID',
-      'LOG_SLS_ACCESS_KEY_SECRET',
-      'LOG_SLS_TOPIC',
-      'LOG_SLS_SOURCE',
+      'DATABASE_DIALECT',
+      'DATABASE_STORAGE',
+      'DATABASE_URL',
+      'DATABASE_SSL',
+      'DATABASE_CONNECT_TIMEOUT_MS',
+      'DATABASE_POOL_MAX',
+      'DATABASE_POOL_MIN',
+      'DATABASE_POOL_ACQUIRE_MS',
+      'DATABASE_POOL_IDLE_MS',
+      'DATABASE_SYNC',
     ],
   },
   {
@@ -985,7 +1329,7 @@ const envGroups = [
     keys: ['CACHE_STORE', 'CACHE_REDIS_URL', 'CACHE_REDIS_REQUEST_TIMEOUT_MS'],
   },
   {
-    name: 'Files',
+    name: 'File Storage',
     keys: [
       'FILE_STORAGE_DRIVER',
       'FILE_UPLOAD_MAX_BYTES',
@@ -1000,30 +1344,11 @@ const envGroups = [
     ],
   },
   {
-    name: 'Rate limits',
-    keys: ['AUTH_RATE_LIMIT_WINDOW_MS', 'AUTH_RATE_LIMIT_MAX', 'GLOBAL_RATE_LIMIT_WINDOW_MS', 'GLOBAL_RATE_LIMIT_MAX'],
-  },
-  {
-    name: 'Database',
-    keys: [
-      'DATABASE_DIALECT',
-      'DATABASE_STORAGE',
-      'DATABASE_URL',
-      'DATABASE_CONNECT_TIMEOUT_MS',
-      'DATABASE_POOL_MAX',
-      'DATABASE_POOL_MIN',
-      'DATABASE_POOL_ACQUIRE_MS',
-      'DATABASE_POOL_IDLE_MS',
-      'DATABASE_SSL',
-      'DATABASE_SYNC',
-    ],
-  },
-  {
     name: 'Scheduler',
     keys: ['SCHEDULER_ENABLED', 'SCHEDULER_LOCK_TTL_MS'],
   },
   {
-    name: 'Authentication',
+    name: 'Security',
     keys: [
       'AUTH_TOKEN_SECRET',
       'AUTH_ACCESS_TOKEN_TTL_SECONDS',
@@ -1032,6 +1357,27 @@ const envGroups = [
       'AUTH_REFRESH_TOKEN_COOKIE_NAME',
       'AUTH_COOKIE_SAME_SITE',
       'AUTH_COOKIE_SECURE',
+      'AUTH_RATE_LIMIT_WINDOW_MS',
+      'AUTH_RATE_LIMIT_MAX',
+      'GLOBAL_RATE_LIMIT_WINDOW_MS',
+      'GLOBAL_RATE_LIMIT_MAX',
+    ],
+  },
+  {
+    name: 'Logging',
+    keys: [
+      'LOG_REQUEST_ENABLED',
+      'LOG_TARGETS',
+      'LOG_PENDING_WRITE_MAX',
+      'LOG_WRITE_TIMEOUT_MS',
+      'LOG_LOCAL_PATH',
+      'LOG_SLS_ENDPOINT',
+      'LOG_SLS_PROJECT',
+      'LOG_SLS_LOGSTORE',
+      'LOG_SLS_ACCESS_KEY_ID',
+      'LOG_SLS_ACCESS_KEY_SECRET',
+      'LOG_SLS_TOPIC',
+      'LOG_SLS_SOURCE',
     ],
   },
   {
@@ -1040,27 +1386,110 @@ const envGroups = [
       'EMAIL_VERIFICATION_SERVICE',
       'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS',
       'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
-      'SMTP_HOST',
-      'SMTP_PORT',
-      'SMTP_SECURE',
-      'SMTP_STARTTLS',
-      'SMTP_FROM',
-      'SMTP_USERNAME',
-      'SMTP_PASSWORD',
-      'SMTP_REQUEST_TIMEOUT_MS',
+      'EMAIL_SMTP_PROFILES',
+    ],
+  },
+  {
+    name: 'SMS',
+    keys: [
+      'SMS_VERIFICATION_SERVICE',
+      'SMS_VERIFICATION_CODE_EXPIRES_IN_MS',
+      'SMS_VERIFICATION_CODE_COOLDOWN_MS',
+      'SMS_ALICLOUD_PROFILES',
     ],
   },
   {
     name: 'SSO',
-    keys: [
-      'SSO_ENABLED',
-      'SSO_ISSUER_URL',
-      'SSO_CLIENT_ID',
-      'SSO_CLIENT_SECRET',
-      'SSO_REDIRECT_URI',
-      'SSO_FRONTEND_CALLBACK_URL',
-      'SSO_SCOPES',
-      'SSO_REQUEST_TIMEOUT_MS',
-    ],
+    keys: ['SSO_ENABLED', 'SSO_PROFILES'],
   },
 ] satisfies Array<{ name: string; keys: Array<keyof SetupEnvironment> }>;
+
+const setupConfigComments: Partial<Record<keyof SetupEnvironment, string[]>> = {
+  NODE_ENV: ['Runtime mode. Options: development, test, production.'],
+  SERVER_HOST: ['HTTP server bind host. Use 0.0.0.0 for all interfaces or 127.0.0.1 for local-only access.'],
+  SERVER_PORT: ['HTTP server bind port.'],
+  APP_DOMAIN: ['Primary public application origin, including protocol. Used for default CORS and callback URLs.'],
+  APP_CORS_ORIGINS: ['Comma-separated browser CORS origin allowlist. Production must not include *.'],
+  SERVER_TRUST_PROXY: ['Whether Koa trusts reverse proxy headers. Enable only behind a trusted reverse proxy.'],
+  SERVER_MULTI_INSTANCE_ENABLED: [
+    'Whether multiple backend instances may run at the same time.',
+    'true requires Redis cache, MySQL or PostgreSQL, and OSS file storage.',
+  ],
+  DATABASE_DIALECT: ['Database driver used by Sequelize. Options: sqlite, mysql, postgres.'],
+  DATABASE_STORAGE: ['SQLite database file path. Used only when DATABASE_DIALECT is sqlite.'],
+  DATABASE_URL: ['MySQL or PostgreSQL connection URL. Required when DATABASE_DIALECT is mysql or postgres.'],
+  DATABASE_SSL: ['Whether database SSL should be enabled for MySQL or PostgreSQL.'],
+  DATABASE_CONNECT_TIMEOUT_MS: ['Database connection timeout in milliseconds.'],
+  DATABASE_POOL_MAX: ['Maximum database connection pool size per backend instance.'],
+  DATABASE_POOL_MIN: ['Minimum database connection pool size per backend instance.'],
+  DATABASE_POOL_ACQUIRE_MS: ['Maximum time to acquire a database connection from the pool, in milliseconds.'],
+  DATABASE_POOL_IDLE_MS: ['Maximum idle time before a pooled database connection is released, in milliseconds.'],
+  DATABASE_SYNC: ['Sequelize model sync behavior at startup. Production requires off. Options: off, alter, force.'],
+  CACHE_STORE: ['Cache backend for transient state. Options: memory, redis. Use redis for multi-instance deployments.'],
+  CACHE_REDIS_URL: ['Redis connection URL for cache storage. Required only when CACHE_STORE is redis.'],
+  CACHE_REDIS_REQUEST_TIMEOUT_MS: ['Redis connection and command timeout in milliseconds.'],
+  FILE_STORAGE_DRIVER: ['Uploaded file storage backend. Options: local, oss. Use oss for multi-instance deployments.'],
+  FILE_UPLOAD_MAX_BYTES: ['Maximum accepted avatar upload size in bytes.'],
+  FILE_PUBLIC_BASE_URL: ['Public URL base returned for local uploaded files. May be a backend-relative path or URL.'],
+  FILE_LOCAL_ROOT: ['Local uploaded file storage directory. Relative paths resolve from the backend directory.'],
+  FILE_OSS_ACCESS_KEY_ID: ['Aliyun OSS access key ID. Required only when FILE_STORAGE_DRIVER is oss.'],
+  FILE_OSS_ACCESS_KEY_SECRET: ['Aliyun OSS access key secret. Required only when FILE_STORAGE_DRIVER is oss.'],
+  FILE_OSS_BUCKET: ['Aliyun OSS bucket name. Required only when FILE_STORAGE_DRIVER is oss.'],
+  FILE_OSS_ENDPOINT: ['Aliyun OSS endpoint for the bucket. Required only when FILE_STORAGE_DRIVER is oss.'],
+  FILE_OSS_REGION: ['Aliyun OSS region for request signing. Required only when FILE_STORAGE_DRIVER is oss.'],
+  FILE_OSS_PUBLIC_BASE_URL: ['Public URL base returned for OSS uploaded files. Optional CDN or custom domain.'],
+  SCHEDULER_ENABLED: ['Whether scheduled jobs should be registered and started.'],
+  SCHEDULER_LOCK_TTL_MS: ['Redis lock TTL for scheduled jobs in multi-instance deployments, in milliseconds.'],
+  AUTH_TOKEN_SECRET: ['Secret used to sign authentication tokens. Must be at least 32 characters.'],
+  AUTH_ACCESS_TOKEN_TTL_SECONDS: ['Access token lifetime in seconds.'],
+  AUTH_REFRESH_TOKEN_TTL_SECONDS: ['Refresh token lifetime in seconds. Must be greater than access token lifetime.'],
+  AUTH_ACCESS_TOKEN_COOKIE_NAME: ['HttpOnly cookie name for the access token.'],
+  AUTH_REFRESH_TOKEN_COOKIE_NAME: [
+    'HttpOnly cookie name for the refresh token. Must differ from the access cookie name.',
+  ],
+  AUTH_COOKIE_SAME_SITE: ['Authentication cookie SameSite policy. Options: lax, strict, none.'],
+  AUTH_COOKIE_SECURE: ['Authentication cookie Secure policy. Production requires true. Options: auto, true, false.'],
+  AUTH_RATE_LIMIT_WINDOW_MS: ['Rate limit window for authentication-sensitive routes, in milliseconds.'],
+  AUTH_RATE_LIMIT_MAX: ['Maximum requests allowed per authentication rate limit window.'],
+  GLOBAL_RATE_LIMIT_WINDOW_MS: ['Global per-IP rate limit window in milliseconds.'],
+  GLOBAL_RATE_LIMIT_MAX: ['Maximum requests allowed per IP in the global rate limit window.'],
+  LOG_REQUEST_ENABLED: ['Whether request access logs are written.'],
+  LOG_TARGETS: ['Comma-separated log output targets. Options: console, local, sls.'],
+  LOG_PENDING_WRITE_MAX: ['Maximum number of pending asynchronous log sink writes.'],
+  LOG_WRITE_TIMEOUT_MS: ['Maximum time to wait for an asynchronous log sink write, in milliseconds.'],
+  LOG_LOCAL_PATH: ['Local JSONL log file path. Used only when LOG_TARGETS includes local.'],
+  LOG_SLS_ENDPOINT: ['Aliyun Simple Log Service endpoint. Required only when LOG_TARGETS includes sls.'],
+  LOG_SLS_PROJECT: ['Aliyun Simple Log Service project. Required only when LOG_TARGETS includes sls.'],
+  LOG_SLS_LOGSTORE: ['Aliyun Simple Log Service logstore. Required only when LOG_TARGETS includes sls.'],
+  LOG_SLS_ACCESS_KEY_ID: ['Aliyun Simple Log Service access key ID. Required only when LOG_TARGETS includes sls.'],
+  LOG_SLS_ACCESS_KEY_SECRET: [
+    'Aliyun Simple Log Service access key secret. Required only when LOG_TARGETS includes sls.',
+  ],
+  LOG_SLS_TOPIC: ['Aliyun Simple Log Service topic label. Used only when LOG_TARGETS includes sls.'],
+  LOG_SLS_SOURCE: ['Aliyun Simple Log Service source label. Used only when LOG_TARGETS includes sls.'],
+  EMAIL_VERIFICATION_SERVICE: ['Email verification delivery service. Options: off, smtp.'],
+  EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS: ['Email verification code lifetime in milliseconds.'],
+  EMAIL_VERIFICATION_CODE_COOLDOWN_MS: [
+    'Minimum time between verification code sends for the same email and purpose, in milliseconds.',
+  ],
+  EMAIL_SMTP_PROFILES: [
+    'SMTP profile table array. Required only when EMAIL_VERIFICATION_SERVICE is smtp.',
+    'Each profile requires from, host, port, secure, startTls, and timeoutMs.',
+    'username and password are optional and must be configured together when used.',
+  ],
+  SMS_VERIFICATION_SERVICE: ['SMS verification delivery service. Options: off, aliyun.'],
+  SMS_VERIFICATION_CODE_EXPIRES_IN_MS: ['SMS verification code lifetime in milliseconds.'],
+  SMS_VERIFICATION_CODE_COOLDOWN_MS: [
+    'Minimum time between verification code sends for the same phone number and purpose, in milliseconds.',
+  ],
+  SMS_ALICLOUD_PROFILES: [
+    'Aliyun SMS profile table array. Required only when SMS_VERIFICATION_SERVICE is aliyun.',
+    'Configure one profile per supported phone country code: +86, +852, and +853.',
+  ],
+  SSO_ENABLED: ['Whether single sign-on login and binding are enabled.'],
+  SSO_PROFILES: [
+    'SSO provider profile table array. Required only when SSO_ENABLED is true.',
+    'Configure one profile for each OAuth 2.0 or OpenID Connect provider.',
+    'Profile IDs must be unique and are used for account binding.',
+  ],
+};

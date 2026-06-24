@@ -53,6 +53,11 @@ export function createSetupModule(service: SetupService): BackendModule {
       },
       {
         method: 'post',
+        path: '/test/sms',
+        handlers: [controller.testSms],
+      },
+      {
+        method: 'post',
         path: '/test/sso',
         handlers: [controller.testSso],
       },
@@ -106,6 +111,10 @@ class SetupController {
 
   testEmail: Middleware = async (ctx) => {
     ctx.body = ok(await this.service.testEmail(ctx.request.body));
+  };
+
+  testSms: Middleware = async (ctx) => {
+    ctx.body = ok(await this.service.testSms(ctx.request.body));
   };
 
   testSso: Middleware = async (ctx) => {

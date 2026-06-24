@@ -25,6 +25,9 @@ import { type AuthTokenConfig, createAuthSession } from './auth.service';
 import { assertPasswordConfirmation } from './auth.validation';
 
 type JoseModule = typeof import('jose', { with: { 'resolution-mode': 'import' } });
+type SsoCallbackMode = 'bind' | 'login';
+type SsoProviderPurpose = 'binding' | 'login';
+export type SsoProtocol = 'oauth2' | 'oidc';
 
 export interface SsoConfig {
   clientId: string;
@@ -36,12 +39,90 @@ export interface SsoConfig {
   scopes: string[];
 }
 
+export interface SsoProviderConfig {
+  id: string;
+  name: string;
+  iconUrl?: string | undefined;
+  protocol: SsoProtocol;
+  loginEnabled: boolean;
+  bindingEnabled: boolean;
+  clientId: string;
+  clientSecret: string;
+  frontendCallbackUrl: string;
+  redirectUri: string;
+  requestTimeoutMs: number;
+  scopes: string[];
+  issuerUrl?: string | undefined;
+  authorizationUrl?: string | undefined;
+  tokenUrl?: string | undefined;
+  userInfoUrl?: string | undefined;
+  subjectField?: string | undefined;
+  emailField?: string | undefined;
+  emailVerifiedField?: string | undefined;
+  displayNameField?: string | undefined;
+  usernameField?: string | undefined;
+}
+
+export interface SsoProfilesConfig {
+  profiles: SsoProviderConfig[];
+}
+
+export type SsoServiceConfig = SsoConfig | SsoProfilesConfig;
+
 export interface SsoCallbackInput {
   code?: string | undefined;
   error?: string | undefined;
   errorDescription?: string | undefined;
   state?: string | undefined;
 }
+
+interface SsoPublicProvider {
+  id: string;
+  name: string;
+  iconUrl?: string | undefined;
+  protocol: SsoProtocol;
+  loginEnabled: boolean;
+  bindingEnabled: boolean;
+}
+
+interface NormalizedSsoConfig {
+  loginEnabled: boolean;
+  profiles: NormalizedSsoProviderConfig[];
+}
+
+interface BaseSsoProviderConfig {
+  id: string;
+  name: string;
+  iconUrl?: string | undefined;
+  protocol: SsoProtocol;
+  loginEnabled: boolean;
+  bindingEnabled: boolean;
+  clientId: string;
+  clientSecret: string;
+  frontendCallbackUrl: string;
+  redirectUri: string;
+  requestTimeoutMs: number;
+  scopes: string[];
+}
+
+interface OidcProviderConfig extends BaseSsoProviderConfig {
+  protocol: 'oidc';
+  issuerUrl: string;
+}
+
+interface OAuth2ProviderConfig extends BaseSsoProviderConfig {
+  protocol: 'oauth2';
+  authorizationUrl: string;
+  tokenUrl: string;
+  userInfoUrl: string;
+  subjectField: string;
+  emailField: string;
+  emailVerifiedField: string;
+  displayNameField: string;
+  usernameField: string;
+}
+
+type NormalizedSsoProviderConfig = OAuth2ProviderConfig | OidcProviderConfig;
 
 interface OidcDiscoveryDocument {
   authorization_endpoint: string;
@@ -51,8 +132,17 @@ interface OidcDiscoveryDocument {
   token_endpoint: string;
 }
 
-interface OidcTokenResponse {
+interface SsoTokenResponse {
+  access_token?: string;
   id_token?: string;
+}
+
+interface SsoClaims {
+  email: string;
+  emailVerified: boolean;
+  displayName: string;
+  providerSubject: string;
+  username: string;
 }
 
 interface OidcIdTokenPayload {
@@ -86,7 +176,7 @@ interface IdTokenVerifier {
 
 interface IdTokenVerifierInput {
   algorithms: string[];
-  config: SsoConfig;
+  config: OidcProviderConfig;
   discovery: OidcDiscoveryDocument;
   idToken: string;
   jose: JoseModule;
@@ -101,6 +191,22 @@ interface OneTimeTokenRecord {
   expiresAt: number;
   subject: string;
   used: boolean;
+}
+
+interface VerifiedSsoIdentity {
+  email: string;
+  providerId: string;
+  providerName: string;
+  providerSubject: string;
+}
+
+interface SsoIdentityListItem {
+  providerId: string;
+  providerName: string;
+  providerSubject: string;
+  email: string;
+  createdAt: string;
+  iconUrl?: string | undefined;
 }
 
 let joseModule: Promise<JoseModule> | undefined;
@@ -121,7 +227,7 @@ const idTokenVerifiers: IdTokenVerifier[] = [
   {
     algorithms: ['RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512', 'ES256', 'ES384', 'ES512', 'EdDSA'],
     async verify({ algorithms, config, discovery, idToken, jose, verifyOptions }) {
-      if (!isAllowedProviderUrl(discovery.jwks_uri, config)) {
+      if (!discovery.jwks_uri || !isAllowedProviderUrl(discovery.jwks_uri, config)) {
         throw new AppError('SSO_DISCOVERY_INVALID', 'SSO discovery document is invalid.', 502);
       }
 
@@ -145,55 +251,62 @@ const ssoBindCacheKeyPrefix = 'auth:sso-bind:';
 const ssoHandoffCacheKeyPrefix = 'auth:sso-handoff:';
 const ssoStateCacheKeyPrefix = 'auth:sso-state:';
 const maxTokenConsumeAttempts = 3;
+const defaultOAuth2SubjectField = 'sub';
+const defaultOAuth2EmailField = 'email';
+const defaultOAuth2EmailVerifiedField = 'email_verified';
+const defaultOAuth2DisplayNameField = 'name';
+const defaultOAuth2UsernameField = 'preferred_username';
 
 export class SsoService {
-  private discovery: Promise<OidcDiscoveryDocument> | undefined;
   private readonly cacheStore: CacheStore;
+  private readonly config: NormalizedSsoConfig | undefined;
+  private readonly discoveryByProviderId = new Map<string, Promise<OidcDiscoveryDocument>>();
 
   constructor(
     private readonly userService: UserService,
     private readonly accessControl: AccessControlService,
     private readonly tokenSecret: string,
-    private readonly config: SsoConfig | undefined,
+    config: SsoServiceConfig | undefined,
     cacheStore: CacheStore,
     private readonly tokenConfig: AuthTokenConfig,
   ) {
     this.cacheStore = cacheStore;
+    this.config = normalizeSsoConfig(config);
   }
 
   getPublicConfig() {
-    return this.config
-      ? {
-          enabled: true,
-        }
-      : {
-          enabled: false,
-        };
+    if (!this.config) {
+      return {
+        enabled: false,
+        loginEnabled: false,
+        providers: [],
+      };
+    }
+
+    return {
+      enabled: this.config.profiles.length > 0,
+      loginEnabled: this.config.loginEnabled,
+      providers: this.config.profiles.map(toPublicProvider),
+    };
   }
 
-  async createLoginUrl(redirectPath = '/dashboard') {
-    const config = this.requireConfig();
-    const discovery = await this.getDiscovery();
-    const nonce = randomBytes(16).toString('base64url');
-    const state = await createSsoStateToken(
-      {
-        nonce,
-        redirectPath,
-      },
-      this.tokenSecret,
-    );
-    const url = new URL(discovery.authorization_endpoint);
+  async createLoginUrl(redirectPath = '/dashboard', providerId?: string | undefined) {
+    const provider = this.requireProvider(providerId, 'login');
 
-    await this.storeOneTimeToken(getSsoStateCacheKey(state.tokenId), nonce, ssoStateTtlMs);
+    return this.createAuthorizationUrl(provider, {
+      mode: 'login',
+      redirectPath,
+    });
+  }
 
-    url.searchParams.set('client_id', config.clientId);
-    url.searchParams.set('redirect_uri', config.redirectUri);
-    url.searchParams.set('response_type', 'code');
-    url.searchParams.set('scope', config.scopes.join(' '));
-    url.searchParams.set('state', state.token);
-    url.searchParams.set('nonce', nonce);
+  async createBindUrl(userId: string, redirectPath = '/profile', providerId?: string | undefined) {
+    const provider = this.requireProvider(providerId, 'binding');
 
-    return url.toString();
+    return this.createAuthorizationUrl(provider, {
+      mode: 'bind',
+      redirectPath,
+      userId,
+    });
   }
 
   async handleCallback(input: SsoCallbackInput) {
@@ -211,39 +324,50 @@ export class SsoService {
     }
 
     const state = await verifySsoStateToken(input.state, this.tokenSecret);
-    await this.consumeOneTimeToken(getSsoStateCacheKey(state.jti), state.nonce);
-    const tokenResponse = await this.exchangeCode(input.code);
+    const mode = state.mode ?? 'login';
+    const provider = this.requireProvider(state.providerId, mode === 'bind' ? 'binding' : 'login');
 
-    if (!tokenResponse.id_token) {
-      throw new AppError('SSO_ID_TOKEN_MISSING', 'SSO identity token is missing.', 401);
-    }
+    await this.consumeOneTimeToken(getSsoStateCacheKey(state.jti), getSsoStateSubject(provider.id, state.nonce));
 
-    const claims = await this.verifyIdToken(tokenResponse.id_token, state.nonce);
-    const discovery = await this.getDiscovery();
-    const ssoSubject = getSsoSubject(claims, discovery.issuer);
-    const email = getSsoEmail(claims);
+    const claims = await this.fetchSsoClaims(provider, input.code, state.nonce);
 
-    if (claims.email_verified !== true) {
+    if (claims.emailVerified !== true) {
       throw new AppError('SSO_EMAIL_UNVERIFIED', 'SSO profile email is not verified.', 401);
     }
 
-    const displayName = getDisplayName(claims, email);
-    const username = getUsername(claims, email);
-    const user = await this.userService.findBySsoSubject(ssoSubject);
+    const identity = toVerifiedIdentity(provider, claims);
+
+    if (mode === 'bind') {
+      if (!state.userId) {
+        throwInvalidSsoToken();
+      }
+
+      const user = await this.userService.findById(state.userId);
+
+      if (!user || !user.available) {
+        throwInvalidSsoToken();
+      }
+
+      await this.userService.bindSsoIdentity(user, identity);
+
+      return this.createProfileBindCallbackUrl(provider, state.redirectPath);
+    }
+
+    const user = await this.findUserBySsoIdentity(identity);
 
     if (user) {
       if (!user.available) {
         throw new AppError('USER_UNAVAILABLE', 'User is not available.', 403);
       }
 
-      return this.createSessionCallbackUrl(user, state.redirectPath);
+      return this.createSessionCallbackUrl(provider, user, state.redirectPath);
     }
 
-    return this.createBindCallbackUrl({
-      username,
-      displayName,
-      email,
-      ssoSubject,
+    return this.createBindCallbackUrl(provider, {
+      ...identity,
+      username: claims.username,
+      displayName: claims.displayName,
+      email: claims.email,
       redirectPath: state.redirectPath,
     });
   }
@@ -267,11 +391,13 @@ export class SsoService {
     assertPasswordConfirmation(input);
 
     const bind = await verifySsoBindToken(input.token, this.tokenSecret);
+    const identity = getVerifiedIdentityFromBindToken(bind);
     const tokenKey = getSsoBindCacheKey(bind.jti);
+    const tokenSubject = getSsoBindTokenSubject(identity);
 
-    await this.requireOneTimeToken(tokenKey, bind.ssoSubject);
+    await this.requireOneTimeToken(tokenKey, tokenSubject);
 
-    const existingBySubject = await this.userService.findBySsoSubject(bind.ssoSubject);
+    const existingBySubject = await this.findUserBySsoIdentity(identity);
 
     if (existingBySubject) {
       throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
@@ -289,14 +415,16 @@ export class SsoService {
       throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
     }
 
-    await this.consumeOneTimeToken(tokenKey, bind.ssoSubject);
+    await this.consumeOneTimeToken(tokenKey, tokenSubject);
     const credentials = await hashPassword(input.password);
     const user = await this.userService.createWithSso({
       username: input.username,
       displayName: input.displayName,
       email: bind.email,
+      emailVerified: true,
       ...credentials,
-      ssoSubject: bind.ssoSubject,
+      providerId: identity.providerId,
+      providerSubject: identity.providerSubject,
     });
 
     await this.bootstrapRootRoleForFirstUser(user);
@@ -308,9 +436,11 @@ export class SsoService {
     this.requireConfig();
 
     const bind = await verifySsoBindToken(input.token, this.tokenSecret);
+    const identity = getVerifiedIdentityFromBindToken(bind);
     const tokenKey = getSsoBindCacheKey(bind.jti);
+    const tokenSubject = getSsoBindTokenSubject(identity);
 
-    await this.requireOneTimeToken(tokenKey, bind.ssoSubject);
+    await this.requireOneTimeToken(tokenKey, tokenSubject);
 
     const user = await this.userService.findByLoginIdentifier(input.identifier);
 
@@ -324,15 +454,326 @@ export class SsoService {
       throwInvalidCredentials();
     }
 
-    if (user.ssoSubject && user.ssoSubject !== bind.ssoSubject) {
-      throw new AppError('USER_SSO_SUBJECT_EXISTS', 'The user is already associated with another SSO identity.', 409);
-    }
+    const boundUser = await this.userService.bindSsoIdentity(user, identity);
 
-    await this.consumeOneTimeToken(tokenKey, bind.ssoSubject);
-
-    const boundUser = await this.userService.bindSsoSubject(user, bind.ssoSubject);
+    await this.consumeOneTimeToken(tokenKey, tokenSubject);
 
     return createAuthSession(boundUser, this.tokenSecret, this.tokenConfig, this.cacheStore, this.accessControl);
+  }
+
+  async listUserIdentities(userId: string): Promise<SsoIdentityListItem[]> {
+    const identities = await this.userService.listSsoIdentities(userId);
+
+    return identities.map((identity) => {
+      const provider = this.config?.profiles.find((profile) => profile.id === identity.providerId);
+
+      return {
+        providerId: identity.providerId,
+        providerName: provider?.name ?? identity.providerId,
+        providerSubject: identity.providerSubject,
+        email: identity.email,
+        createdAt: identity.createdAt.toISOString(),
+        ...(provider?.iconUrl ? { iconUrl: provider.iconUrl } : {}),
+      };
+    });
+  }
+
+  private async createAuthorizationUrl(
+    provider: NormalizedSsoProviderConfig,
+    input: {
+      mode: SsoCallbackMode;
+      redirectPath: string;
+      userId?: string | undefined;
+    },
+  ) {
+    const authorizationUrl =
+      provider.protocol === 'oidc'
+        ? (await this.getDiscovery(provider)).authorization_endpoint
+        : provider.authorizationUrl;
+    const nonce = randomBytes(16).toString('base64url');
+    const state = await createSsoStateToken(
+      {
+        mode: input.mode,
+        nonce,
+        providerId: provider.id,
+        redirectPath: input.redirectPath,
+        ...(input.userId ? { userId: input.userId } : {}),
+      },
+      this.tokenSecret,
+    );
+    const url = new URL(authorizationUrl);
+
+    await this.storeOneTimeToken(
+      getSsoStateCacheKey(state.tokenId),
+      getSsoStateSubject(provider.id, nonce),
+      ssoStateTtlMs,
+    );
+
+    url.searchParams.set('client_id', provider.clientId);
+    url.searchParams.set('redirect_uri', provider.redirectUri);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', provider.scopes.join(' '));
+    url.searchParams.set('state', state.token);
+
+    if (provider.protocol === 'oidc') {
+      url.searchParams.set('nonce', nonce);
+    }
+
+    return url.toString();
+  }
+
+  private async fetchSsoClaims(provider: NormalizedSsoProviderConfig, code: string, expectedNonce: string) {
+    const tokenResponse = await this.exchangeCode(provider, code);
+
+    if (provider.protocol === 'oidc') {
+      if (!tokenResponse.id_token) {
+        throw new AppError('SSO_ID_TOKEN_MISSING', 'SSO identity token is missing.', 401);
+      }
+
+      return this.verifyOidcClaims(provider, tokenResponse.id_token, expectedNonce);
+    }
+
+    if (!tokenResponse.access_token) {
+      throw new AppError('SSO_ACCESS_TOKEN_MISSING', 'SSO access token is missing.', 401);
+    }
+
+    return this.fetchOAuth2Claims(provider, tokenResponse.access_token);
+  }
+
+  private async verifyOidcClaims(
+    provider: OidcProviderConfig,
+    idToken: string,
+    expectedNonce: string,
+  ): Promise<SsoClaims> {
+    const discovery = await this.getDiscovery(provider);
+    const jose = await loadJose();
+
+    try {
+      const protectedHeader = jose.decodeProtectedHeader(idToken);
+      const algorithm = protectedHeader.alg;
+
+      if (!algorithm) {
+        throw new AppError('SSO_ID_TOKEN_INVALID', 'SSO identity token is invalid.', 401);
+      }
+
+      const verifier = findIdTokenVerifier(algorithm);
+      const algorithms = getVerifierAlgorithms(discovery, verifier);
+
+      if (!algorithms.includes(algorithm)) {
+        throw new AppError('SSO_ID_TOKEN_INVALID', 'SSO identity token is invalid.', 401);
+      }
+
+      const payload = await verifier.verify({
+        algorithms,
+        config: provider,
+        discovery,
+        idToken,
+        jose,
+        verifyOptions: {
+          audience: provider.clientId,
+          issuer: discovery.issuer,
+          requiredClaims: ['sub'],
+        },
+      });
+
+      if (payload.nonce !== expectedNonce) {
+        throw new AppError('SSO_NONCE_INVALID', 'SSO nonce is invalid.', 401);
+      }
+
+      return {
+        providerSubject: getProviderSubject(payload.sub),
+        email: getSsoEmail(payload.email),
+        emailVerified: payload.email_verified === true,
+        displayName: getDisplayName(payload.name, payload.preferred_username, payload.email),
+        username: getUsername(payload.preferred_username, payload.email),
+      };
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      throw new AppError('SSO_ID_TOKEN_INVALID', 'SSO identity token is invalid.', 401);
+    }
+  }
+
+  private async fetchOAuth2Claims(provider: OAuth2ProviderConfig, accessToken: string): Promise<SsoClaims> {
+    let profile: unknown;
+
+    try {
+      const response = await fetch(provider.userInfoUrl, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        signal: AbortSignal.timeout(provider.requestTimeoutMs),
+      });
+
+      profile = await readJson<unknown>(response, 'SSO_USERINFO_FAILED');
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      throw new AppError('SSO_USERINFO_FAILED', 'SSO profile could not be loaded.', 502);
+    }
+
+    return {
+      providerSubject: getProviderSubject(getMappedValue(profile, provider.subjectField)),
+      email: getSsoEmail(getMappedValue(profile, provider.emailField)),
+      emailVerified: getMappedValue(profile, provider.emailVerifiedField) === true,
+      displayName: getDisplayName(
+        getMappedValue(profile, provider.displayNameField),
+        getMappedValue(profile, provider.usernameField),
+        getMappedValue(profile, provider.emailField),
+      ),
+      username: getUsername(
+        getMappedValue(profile, provider.usernameField),
+        getMappedValue(profile, provider.emailField),
+      ),
+    };
+  }
+
+  private async exchangeCode(provider: NormalizedSsoProviderConfig, code: string) {
+    const tokenEndpoint =
+      provider.protocol === 'oidc' ? (await this.getDiscovery(provider)).token_endpoint : provider.tokenUrl;
+    const body = new URLSearchParams({
+      client_id: provider.clientId,
+      client_secret: provider.clientSecret,
+      code,
+      grant_type: 'authorization_code',
+      redirect_uri: provider.redirectUri,
+    });
+
+    try {
+      const response = await fetch(tokenEndpoint, {
+        body,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        method: 'POST',
+        signal: AbortSignal.timeout(provider.requestTimeoutMs),
+      });
+
+      return await readJson<SsoTokenResponse>(response, 'SSO_TOKEN_EXCHANGE_FAILED');
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      throw new AppError('SSO_TOKEN_EXCHANGE_FAILED', 'SSO token exchange could not be completed.', 502);
+    }
+  }
+
+  private async getDiscovery(provider: OidcProviderConfig) {
+    const cacheKey = getDiscoveryCacheKey(provider);
+    const cached = await this.cacheStore.get<OidcDiscoveryDocument>(cacheKey);
+
+    if (cached) {
+      validateDiscovery(cached, provider);
+      return cached;
+    }
+
+    const currentDiscovery =
+      this.discoveryByProviderId.get(provider.id) ?? this.fetchAndCacheDiscovery(provider, cacheKey);
+
+    this.discoveryByProviderId.set(provider.id, currentDiscovery);
+
+    try {
+      return await currentDiscovery;
+    } finally {
+      this.discoveryByProviderId.delete(provider.id);
+    }
+  }
+
+  private async fetchAndCacheDiscovery(provider: OidcProviderConfig, cacheKey: string) {
+    const discovery = await fetchDiscovery(provider);
+
+    await this.cacheStore.set(cacheKey, discovery, ssoDiscoveryCacheTtlMs);
+
+    return discovery;
+  }
+
+  private async findUserBySsoIdentity(identity: VerifiedSsoIdentity) {
+    return this.userService.findBySsoIdentity(identity.providerId, identity.providerSubject);
+  }
+
+  private requireConfig() {
+    if (!this.config) {
+      throw new AppError('SSO_DISABLED', 'SSO authentication is disabled.', 404);
+    }
+
+    return this.config;
+  }
+
+  private requireProvider(providerId: string | undefined, purpose: SsoProviderPurpose) {
+    const config = this.requireConfig();
+    const provider = providerId
+      ? config.profiles.find((candidate) => candidate.id === providerId)
+      : config.profiles.find((candidate) => isProviderEnabledForPurpose(candidate, purpose));
+
+    if (!provider) {
+      throw new AppError('SSO_PROVIDER_NOT_FOUND', 'SSO provider was not found.', 404);
+    }
+
+    if (!isProviderEnabledForPurpose(provider, purpose)) {
+      const code = purpose === 'login' ? 'SSO_LOGIN_DISABLED' : 'SSO_BINDING_DISABLED';
+
+      throw new AppError(code, 'SSO provider is disabled for this operation.', 403);
+    }
+
+    return provider;
+  }
+
+  private async createSessionCallbackUrl(provider: NormalizedSsoProviderConfig, user: UserModel, redirectPath: string) {
+    const handoffToken = await createSsoHandoffToken(this.tokenSecret);
+    const callbackUrl = new URL(provider.frontendCallbackUrl);
+
+    await this.storeOneTimeToken(getSsoHandoffCacheKey(handoffToken.tokenId), user.id, ssoHandoffTtlMs);
+
+    setCallbackFragment(callbackUrl, {
+      redirect: redirectPath,
+      sso_token: handoffToken.token,
+    });
+
+    return callbackUrl.toString();
+  }
+
+  private async createProfileBindCallbackUrl(provider: NormalizedSsoProviderConfig, redirectPath: string) {
+    const callbackUrl = new URL(provider.frontendCallbackUrl);
+
+    setCallbackFragment(callbackUrl, {
+      redirect: redirectPath,
+      sso_profile_bind: 'success',
+      sso_provider_id: provider.id,
+      sso_provider_name: provider.name,
+    });
+
+    return callbackUrl.toString();
+  }
+
+  private async createBindCallbackUrl(
+    provider: NormalizedSsoProviderConfig,
+    input: VerifiedSsoIdentity & {
+      username: string;
+      displayName: string;
+      redirectPath: string;
+    },
+  ) {
+    const bindToken = await createSsoBindToken(input, this.tokenSecret);
+    const callbackUrl = new URL(provider.frontendCallbackUrl);
+
+    await this.storeOneTimeToken(getSsoBindCacheKey(bindToken.tokenId), getSsoBindTokenSubject(input), ssoBindTtlMs);
+
+    setCallbackFragment(callbackUrl, {
+      redirect: input.redirectPath,
+      sso_bind_token: bindToken.token,
+      sso_display_name: input.displayName,
+      sso_email: input.email,
+      sso_provider_id: provider.id,
+      sso_provider_name: provider.name,
+      sso_username: input.username,
+    });
+
+    return callbackUrl.toString();
   }
 
   private async bootstrapRootRoleForFirstUser(user: UserModel) {
@@ -397,168 +838,126 @@ export class SsoService {
       }
     }
 
-    throw new AppError('SSO_TOKEN_CONFLICT', 'SSO token state changed. Try again.', 409);
-  }
-
-  private async exchangeCode(code: string) {
-    const config = this.requireConfig();
-    const discovery = await this.getDiscovery();
-    const body = new URLSearchParams({
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-      code,
-      grant_type: 'authorization_code',
-      redirect_uri: config.redirectUri,
-    });
-
-    try {
-      const response = await fetch(discovery.token_endpoint, {
-        body,
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        method: 'POST',
-        signal: AbortSignal.timeout(config.requestTimeoutMs),
-      });
-
-      return await readJson<OidcTokenResponse>(response, 'SSO_TOKEN_EXCHANGE_FAILED');
-    } catch (error) {
-      if (error instanceof AppError) {
-        throw error;
-      }
-
-      throw new AppError('SSO_TOKEN_EXCHANGE_FAILED', 'SSO token exchange could not be completed.', 502);
-    }
-  }
-
-  private async verifyIdToken(idToken: string, expectedNonce: string) {
-    const config = this.requireConfig();
-    const discovery = await this.getDiscovery();
-    const jose = await loadJose();
-
-    try {
-      const protectedHeader = jose.decodeProtectedHeader(idToken);
-      const algorithm = protectedHeader.alg;
-
-      if (!algorithm) {
-        throw new AppError('SSO_ID_TOKEN_INVALID', 'SSO identity token is invalid.', 401);
-      }
-
-      const verifier = findIdTokenVerifier(algorithm);
-      const algorithms = getVerifierAlgorithms(discovery, verifier);
-
-      if (!algorithms.includes(algorithm)) {
-        throw new AppError('SSO_ID_TOKEN_INVALID', 'SSO identity token is invalid.', 401);
-      }
-
-      const payload = await verifier.verify({
-        algorithms,
-        config,
-        discovery,
-        idToken,
-        jose,
-        verifyOptions: {
-          audience: config.clientId,
-          issuer: discovery.issuer,
-          requiredClaims: ['sub'],
-        },
-      });
-
-      if (payload.nonce !== expectedNonce) {
-        throw new AppError('SSO_NONCE_INVALID', 'SSO nonce is invalid.', 401);
-      }
-
-      return payload;
-    } catch (error) {
-      if (error instanceof AppError) {
-        throw error;
-      }
-
-      throw new AppError('SSO_ID_TOKEN_INVALID', 'SSO identity token is invalid.', 401);
-    }
-  }
-
-  private async getDiscovery() {
-    const config = this.requireConfig();
-    const cacheKey = getDiscoveryCacheKey(config);
-    const cached = await this.cacheStore.get<OidcDiscoveryDocument>(cacheKey);
-
-    if (cached) {
-      validateDiscovery(cached, config);
-      return cached;
-    }
-
-    this.discovery ??= this.fetchAndCacheDiscovery(config, cacheKey);
-
-    try {
-      return await this.discovery;
-    } finally {
-      this.discovery = undefined;
-    }
-  }
-
-  private async fetchAndCacheDiscovery(config: SsoConfig, cacheKey: string) {
-    const discovery = await fetchDiscovery(config);
-
-    await this.cacheStore.set(cacheKey, discovery, ssoDiscoveryCacheTtlMs);
-
-    return discovery;
-  }
-
-  private requireConfig() {
-    if (!this.config) {
-      throw new AppError('SSO_DISABLED', 'SSO authentication is disabled.', 404);
-    }
-
-    return this.config;
-  }
-
-  private async createSessionCallbackUrl(user: UserModel, redirectPath: string) {
-    const config = this.requireConfig();
-    const handoffToken = await createSsoHandoffToken(this.tokenSecret);
-    const callbackUrl = new URL(config.frontendCallbackUrl);
-
-    await this.storeOneTimeToken(getSsoHandoffCacheKey(handoffToken.tokenId), user.id, ssoHandoffTtlMs);
-
-    setCallbackFragment(callbackUrl, {
-      redirect: redirectPath,
-      sso_token: handoffToken.token,
-    });
-
-    return callbackUrl.toString();
-  }
-
-  private async createBindCallbackUrl(input: {
-    username: string;
-    displayName: string;
-    email: string;
-    ssoSubject: string;
-    redirectPath: string;
-  }) {
-    const config = this.requireConfig();
-    const bindToken = await createSsoBindToken(input, this.tokenSecret);
-    const callbackUrl = new URL(config.frontendCallbackUrl);
-
-    await this.storeOneTimeToken(getSsoBindCacheKey(bindToken.tokenId), input.ssoSubject, ssoBindTtlMs);
-
-    setCallbackFragment(callbackUrl, {
-      redirect: input.redirectPath,
-      sso_bind_token: bindToken.token,
-      sso_display_name: input.displayName,
-      sso_email: input.email,
-      sso_username: input.username,
-    });
-
-    return callbackUrl.toString();
+    throw new AppError('SSO_TOKEN_CONFLICT', 'SSO token state changed. Submit the request again.', 409);
   }
 }
 
-export async function testSsoDiscovery(config: SsoConfig) {
-  await fetchDiscovery(config);
+export async function testSsoDiscovery(config: SsoServiceConfig) {
+  const normalized = normalizeSsoConfig(config);
+
+  if (!normalized) {
+    return {
+      connected: true,
+      providerIds: [],
+    } as const;
+  }
+
+  for (const provider of normalized.profiles) {
+    if (provider.protocol === 'oidc') {
+      await fetchDiscovery(provider);
+    }
+  }
 
   return {
     connected: true,
+    providerIds: normalized.profiles.map((provider) => provider.id),
   } as const;
+}
+
+function normalizeSsoConfig(config: SsoServiceConfig | undefined): NormalizedSsoConfig | undefined {
+  if (!config) {
+    return undefined;
+  }
+
+  if ('profiles' in config) {
+    const profiles = config.profiles.map(normalizeSsoProviderConfig);
+
+    return profiles.length > 0
+      ? {
+          loginEnabled: profiles.some((profile) => profile.loginEnabled),
+          profiles,
+        }
+      : undefined;
+  }
+
+  const issuerUrl = config.issuerUrl.replace(/\/+$/, '');
+
+  return {
+    loginEnabled: true,
+    profiles: [
+      {
+        id: getDefaultProviderId(issuerUrl),
+        name: 'SSO',
+        protocol: 'oidc',
+        loginEnabled: true,
+        bindingEnabled: true,
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        frontendCallbackUrl: config.frontendCallbackUrl,
+        issuerUrl,
+        redirectUri: config.redirectUri,
+        requestTimeoutMs: config.requestTimeoutMs,
+        scopes: config.scopes,
+      },
+    ],
+  };
+}
+
+function normalizeSsoProviderConfig(profile: SsoProviderConfig): NormalizedSsoProviderConfig {
+  const base = {
+    id: profile.id,
+    name: profile.name,
+    ...(profile.iconUrl ? { iconUrl: profile.iconUrl } : {}),
+    protocol: profile.protocol,
+    loginEnabled: profile.loginEnabled,
+    bindingEnabled: profile.bindingEnabled,
+    clientId: profile.clientId,
+    clientSecret: profile.clientSecret,
+    frontendCallbackUrl: profile.frontendCallbackUrl,
+    redirectUri: profile.redirectUri,
+    requestTimeoutMs: profile.requestTimeoutMs,
+    scopes: profile.scopes,
+  };
+
+  if (profile.protocol === 'oauth2') {
+    return {
+      ...base,
+      protocol: 'oauth2',
+      authorizationUrl: profile.authorizationUrl!,
+      tokenUrl: profile.tokenUrl!,
+      userInfoUrl: profile.userInfoUrl!,
+      subjectField: profile.subjectField ?? defaultOAuth2SubjectField,
+      emailField: profile.emailField ?? defaultOAuth2EmailField,
+      emailVerifiedField: profile.emailVerifiedField ?? defaultOAuth2EmailVerifiedField,
+      displayNameField: profile.displayNameField ?? defaultOAuth2DisplayNameField,
+      usernameField: profile.usernameField ?? defaultOAuth2UsernameField,
+    };
+  }
+
+  return {
+    ...base,
+    protocol: 'oidc',
+    issuerUrl: profile.issuerUrl!.replace(/\/+$/, ''),
+  };
+}
+
+function toPublicProvider(provider: NormalizedSsoProviderConfig): SsoPublicProvider {
+  return {
+    id: provider.id,
+    name: provider.name,
+    ...(provider.iconUrl ? { iconUrl: provider.iconUrl } : {}),
+    protocol: provider.protocol,
+    loginEnabled: provider.loginEnabled,
+    bindingEnabled: provider.bindingEnabled,
+  };
+}
+
+function isProviderEnabledForPurpose(provider: NormalizedSsoProviderConfig, purpose: SsoProviderPurpose) {
+  if (purpose === 'login') {
+    return provider.loginEnabled;
+  }
+
+  return provider.bindingEnabled;
 }
 
 function setCallbackFragment(url: URL, values: Record<string, string>) {
@@ -587,12 +986,12 @@ function getVerifierAlgorithms(discovery: OidcDiscoveryDocument, verifier: IdTok
   );
 }
 
-async function fetchDiscovery(config: SsoConfig) {
+async function fetchDiscovery(provider: OidcProviderConfig) {
   let discovery: OidcDiscoveryDocument;
 
   try {
-    const response = await fetch(`${config.issuerUrl}/.well-known/openid-configuration`, {
-      signal: AbortSignal.timeout(config.requestTimeoutMs),
+    const response = await fetch(`${provider.issuerUrl}/.well-known/openid-configuration`, {
+      signal: AbortSignal.timeout(provider.requestTimeoutMs),
     });
 
     discovery = await readJson<OidcDiscoveryDocument>(response, 'SSO_DISCOVERY_FAILED');
@@ -604,24 +1003,24 @@ async function fetchDiscovery(config: SsoConfig) {
     throw new AppError('SSO_DISCOVERY_FAILED', 'SSO discovery could not be completed.', 502);
   }
 
-  validateDiscovery(discovery, config);
+  validateDiscovery(discovery, provider);
 
   return discovery;
 }
 
-function validateDiscovery(discovery: OidcDiscoveryDocument, config: SsoConfig) {
+function validateDiscovery(discovery: OidcDiscoveryDocument, provider: OidcProviderConfig) {
   if (
-    discovery.issuer !== config.issuerUrl ||
-    !isAllowedProviderUrl(discovery.authorization_endpoint, config) ||
-    !isAllowedProviderUrl(discovery.token_endpoint, config) ||
-    (discovery.jwks_uri !== undefined && !isAllowedProviderUrl(discovery.jwks_uri, config))
+    discovery.issuer !== provider.issuerUrl ||
+    !isAllowedProviderUrl(discovery.authorization_endpoint, provider) ||
+    !isAllowedProviderUrl(discovery.token_endpoint, provider) ||
+    (discovery.jwks_uri !== undefined && !isAllowedProviderUrl(discovery.jwks_uri, provider))
   ) {
     throw new AppError('SSO_DISCOVERY_INVALID', 'SSO discovery document is invalid.', 502);
   }
 }
 
-function getDiscoveryCacheKey(config: SsoConfig) {
-  return `sso:discovery:${config.issuerUrl}`;
+function getDiscoveryCacheKey(provider: OidcProviderConfig) {
+  return `sso:discovery:${provider.id}:${provider.issuerUrl}`;
 }
 
 function getSsoStateCacheKey(tokenId: string) {
@@ -634,6 +1033,14 @@ function getSsoHandoffCacheKey(tokenId: string) {
 
 function getSsoBindCacheKey(tokenId: string) {
   return `${ssoBindCacheKeyPrefix}${tokenId}`;
+}
+
+function getSsoStateSubject(providerId: string, nonce: string) {
+  return `${providerId}:${nonce}`;
+}
+
+function getSsoBindTokenSubject(identity: Pick<VerifiedSsoIdentity, 'providerId' | 'providerSubject'>) {
+  return `${identity.providerId}:${identity.providerSubject}`;
 }
 
 async function readJson<T>(response: Response, code: string): Promise<T> {
@@ -652,18 +1059,38 @@ async function readJson<T>(response: Response, code: string): Promise<T> {
   }
 }
 
-function getUsername(claims: OidcIdTokenPayload, email: string) {
-  return normalizeUsername(getClaimString(claims.preferred_username) ?? email.split('@')[0] ?? '');
+function toVerifiedIdentity(provider: NormalizedSsoProviderConfig, claims: SsoClaims): VerifiedSsoIdentity {
+  return {
+    providerId: provider.id,
+    providerName: provider.name,
+    providerSubject: claims.providerSubject,
+    email: claims.email,
+  };
 }
 
-function getDisplayName(claims: OidcIdTokenPayload, email: string) {
-  return (getClaimString(claims.name) ?? getClaimString(claims.preferred_username) ?? email.split('@')[0] ?? '')
-    .slice(0, 64)
-    .trim();
+function getVerifiedIdentityFromBindToken(bind: Awaited<ReturnType<typeof verifySsoBindToken>>): VerifiedSsoIdentity {
+  return {
+    providerId: bind.providerId,
+    providerName: bind.providerName,
+    providerSubject: bind.providerSubject,
+    email: bind.email,
+  };
 }
 
-function getSsoEmail(claims: OidcIdTokenPayload) {
-  const email = getClaimString(claims.email);
+function getUsername(usernameValue: unknown, emailValue: unknown) {
+  const email = getClaimString(emailValue);
+
+  return normalizeUsername(getClaimString(usernameValue) ?? email?.split('@')[0] ?? '');
+}
+
+function getDisplayName(nameValue: unknown, usernameValue: unknown, emailValue: unknown) {
+  const email = getClaimString(emailValue);
+
+  return (getClaimString(nameValue) ?? getClaimString(usernameValue) ?? email?.split('@')[0] ?? '').slice(0, 64).trim();
+}
+
+function getSsoEmail(value: unknown) {
+  const email = getClaimString(value);
 
   if (!email) {
     throw new AppError('SSO_EMAIL_MISSING', 'SSO profile email is missing.', 401);
@@ -690,28 +1117,42 @@ function normalizeUsername(value: string) {
   return normalized.length >= 3 ? normalized : '';
 }
 
-function getSsoSubject(claims: OidcIdTokenPayload, issuer: string) {
-  const providerSubject = getClaimString(claims.sub);
+function getProviderSubject(value: unknown) {
+  const providerSubject = getClaimString(value);
 
   if (!providerSubject) {
     throw new AppError('SSO_SUBJECT_MISSING', 'SSO profile subject is missing.', 401);
   }
 
-  return `${providerSubject}@${new URL(issuer).host.toLowerCase()}`;
+  return providerSubject;
 }
 
 function getClaimString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function isAllowedProviderUrl(value: unknown, config: SsoConfig): value is string {
+function getMappedValue(value: unknown, field: string) {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  return field.split('.').reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== 'object') {
+      return undefined;
+    }
+
+    return (current as Record<string, unknown>)[segment];
+  }, value);
+}
+
+function isAllowedProviderUrl(value: unknown, provider: OidcProviderConfig): value is string {
   if (typeof value !== 'string') {
     return false;
   }
 
   try {
     const url = new URL(value);
-    const issuer = new URL(config.issuerUrl);
+    const issuer = new URL(provider.issuerUrl);
 
     if (url.username || url.password) {
       return false;
@@ -728,6 +1169,14 @@ function isAllowedProviderUrl(value: unknown, config: SsoConfig): value is strin
     return issuer.protocol !== 'https:' || url.protocol === 'https:';
   } catch {
     return false;
+  }
+}
+
+function getDefaultProviderId(issuerUrl: string) {
+  try {
+    return new URL(issuerUrl).host.toLowerCase();
+  } catch {
+    return 'default';
   }
 }
 

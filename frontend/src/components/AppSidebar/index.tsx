@@ -146,7 +146,7 @@ const Index = ({ children }: AppSidebarProps) => {
   const navigate = useNavigate();
   const sidebarUser = {
     avatarUrl: session?.user.avatarUrl,
-    name: session?.user.displayName ?? 'Signed-in user',
+    name: session?.user.displayName ?? 'Unknown User',
     username: session?.user.username ?? '',
   };
   const navItems = createNavItems(session?.user.permissions);
@@ -174,7 +174,7 @@ const Index = ({ children }: AppSidebarProps) => {
         navigate(routePath('login'), { replace: true });
       })
       .catch((error) => {
-        toast.error(getApiErrorMessage(error, 'Sign out failed.'));
+        toast.error(getApiErrorMessage(error, 'Sign out could not be completed.'));
         setSigningOut(false);
       });
   };

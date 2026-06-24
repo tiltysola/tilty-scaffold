@@ -37,8 +37,11 @@ interface RefreshTokenPayload {
 
 interface SsoStatePayload {
   jti: string;
+  mode?: 'bind' | 'login';
   nonce: string;
+  providerId?: string;
   redirectPath: string;
+  userId?: string;
   iat: number;
   exp: number;
   type: 'sso_state';
@@ -53,7 +56,9 @@ interface SsoHandoffPayload {
 
 interface SsoBindPayload {
   jti: string;
-  ssoSubject: string;
+  providerId: string;
+  providerName: string;
+  providerSubject: string;
   username: string;
   displayName: string;
   email: string;
@@ -184,8 +189,11 @@ export async function createSsoStateToken(
     token: await signToken(
       {
         jti: tokenId,
+        ...(payload.mode ? { mode: payload.mode } : {}),
         nonce: payload.nonce,
+        ...(payload.providerId ? { providerId: payload.providerId } : {}),
         redirectPath: payload.redirectPath,
+        ...(payload.userId ? { userId: payload.userId } : {}),
         type: 'sso_state',
       },
       secret,
@@ -249,7 +257,9 @@ export async function createSsoBindToken(
     token: await signToken(
       {
         jti: tokenId,
-        ssoSubject: payload.ssoSubject,
+        providerId: payload.providerId,
+        providerName: payload.providerName,
+        providerSubject: payload.providerSubject,
         username: payload.username,
         displayName: payload.displayName,
         email: payload.email,
@@ -363,8 +373,11 @@ function isSsoStatePayload(value: unknown): value is SsoStatePayload {
 
   return (
     typeof payload.jti === 'string' &&
+    (payload.mode === undefined || payload.mode === 'bind' || payload.mode === 'login') &&
     typeof payload.nonce === 'string' &&
+    (payload.providerId === undefined || typeof payload.providerId === 'string') &&
     typeof payload.redirectPath === 'string' &&
+    (payload.userId === undefined || typeof payload.userId === 'string') &&
     typeof payload.iat === 'number' &&
     typeof payload.exp === 'number' &&
     payload.type === 'sso_state'
@@ -395,7 +408,9 @@ function isSsoBindPayload(value: unknown): value is SsoBindPayload {
 
   return (
     typeof payload.jti === 'string' &&
-    typeof payload.ssoSubject === 'string' &&
+    typeof payload.providerId === 'string' &&
+    typeof payload.providerName === 'string' &&
+    typeof payload.providerSubject === 'string' &&
     typeof payload.username === 'string' &&
     typeof payload.displayName === 'string' &&
     typeof payload.email === 'string' &&

@@ -4,6 +4,14 @@ import { z } from 'zod';
 import { AppError } from '../../core/errors';
 import { ok } from '../../core/http';
 import { type AccessControlService, type UserAccess } from '../access-control/access-control.service';
+import { hashPassword } from '../auth/auth.crypto';
+import {
+  displayNameSchema,
+  emailSchema,
+  optionalPhoneNumberSchema,
+  passwordSchema,
+  usernameSchema,
+} from '../auth/auth.schemas';
 import { type UserModel } from './user.model';
 import { type UserService } from './user.service';
 
@@ -16,6 +24,20 @@ const listUsersQuerySchema = z.object({
 });
 const updateUserRolesSchema = z.object({
   roleKeys: z.array(z.string().trim().min(1).max(64)).max(50),
+});
+const updateUserSchema = z.object({
+  username: usernameSchema.optional(),
+  displayName: displayNameSchema.optional(),
+  email: emailSchema.optional(),
+  emailVerified: z.boolean().optional(),
+  phoneNumber: optionalPhoneNumberSchema,
+  phoneVerified: z.boolean().optional(),
+  password: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    passwordSchema.optional(),
+  ),
+  available: z.boolean().optional(),
+  roleKeys: z.array(z.string().trim().min(1).max(64)).max(50).optional(),
 });
 
 export class UserController {
@@ -45,7 +67,7 @@ export class UserController {
   updateRoles: Middleware = async (ctx) => {
     const userId = userIdSchema.parse((ctx as { params?: Record<string, string> }).params?.id);
     const input = updateUserRolesSchema.parse(ctx.request.body);
-    const user = await this.userService.findById(userId);
+    const user = await this.userService.findManagedById(userId);
 
     if (!user) {
       throw new AppError('USER_NOT_FOUND', 'User was not found.', 404);
@@ -55,6 +77,48 @@ export class UserController {
 
     ctx.body = ok(toUserListItem(user, access));
   };
+
+  update: Middleware = async (ctx) => {
+    const userId = userIdSchema.parse((ctx as { params?: Record<string, string> }).params?.id);
+    const input = updateUserSchema.parse(ctx.request.body);
+    const user = await this.userService.findManagedById(userId);
+
+    if (!user) {
+      throw new AppError('USER_NOT_FOUND', 'User was not found.', 404);
+    }
+
+    const { password, roleKeys, ...userInput } = input;
+    const credentials = password ? await hashPassword(password) : undefined;
+    let access: UserAccess | undefined;
+    const updatedUser = await this.userService.transaction(async (transaction) => {
+      if (
+        Object.prototype.hasOwnProperty.call(userInput, 'available') &&
+        user.available &&
+        userInput.available === false
+      ) {
+        await this.accessControl.assertCanDisableUser(user.id, { transaction });
+      }
+
+      const managedUser = await this.userService.updateManagedUser(
+        user,
+        {
+          ...userInput,
+          ...(credentials ?? {}),
+        },
+        { transaction },
+      );
+
+      if (roleKeys !== undefined) {
+        access = await this.accessControl.replaceUserRoles(managedUser.id, roleKeys, {
+          transaction,
+        });
+      }
+
+      return managedUser;
+    });
+
+    ctx.body = ok(toUserListItem(updatedUser, access ?? (await this.accessControl.getUserAccess(updatedUser.id))));
+  };
 }
 
 function toUserListItem(user: UserModel, access: UserAccess = { roles: [], permissions: [] }) {
@@ -63,6 +127,9 @@ function toUserListItem(user: UserModel, access: UserAccess = { roles: [], permi
     username: user.username,
     displayName: user.displayName,
     email: user.email,
+    emailVerified: user.emailVerified,
+    ...(user.phoneNumber ? { phoneNumber: user.phoneNumber } : {}),
+    phoneVerified: user.phoneVerified,
     ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
     available: user.available,
     roles: access.roles,

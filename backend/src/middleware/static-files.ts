@@ -1,23 +1,16 @@
 import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import { type Middleware } from 'koa';
-import { isAbsolute, relative, resolve } from 'path';
+import { contentType, lookup } from 'mime-types';
+import { resolve } from 'path';
 
 import { AppError } from '../core/errors';
-import { resolveApplicationPath } from '../core/files';
+import { isPathInside, resolveApplicationPath } from '../core/files';
 
 export interface StaticFilesConfig {
   root: string;
   urlPrefix: string;
 }
-
-const contentTypes: Record<string, string> = {
-  gif: 'image/gif',
-  jpeg: 'image/jpeg',
-  jpg: 'image/jpeg',
-  png: 'image/png',
-  webp: 'image/webp',
-};
 
 export function staticFilesMiddleware(config: StaticFilesConfig): Middleware {
   const root = resolveApplicationPath(config.root, 'FILE_LOCAL_ROOT');
@@ -56,7 +49,8 @@ export function staticFilesMiddleware(config: StaticFilesConfig): Middleware {
     ctx.set('Cache-Control', 'public, max-age=31536000, immutable');
     ctx.set('Cross-Origin-Resource-Policy', 'same-site');
     ctx.length = fileStat.size;
-    ctx.type = contentTypes[filePath.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream';
+    const mimeType = lookup(filePath) || 'application/octet-stream';
+    ctx.type = contentType(mimeType) || mimeType;
     ctx.body = ctx.method === 'HEAD' ? undefined : createReadStream(filePath);
   };
 }
@@ -77,10 +71,4 @@ function normalizeUrlPrefix(value: string) {
   }
 
   return prefix;
-}
-
-function isPathInside(root: string, target: string) {
-  const relativePath = relative(root, target);
-
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
 }

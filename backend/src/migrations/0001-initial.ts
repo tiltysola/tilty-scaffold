@@ -24,6 +24,20 @@ export const up: MigrationFn<QueryInterface> = async ({ context: queryInterface 
       allowNull: false,
       unique: true,
     },
+    emailVerified: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    phoneNumber: {
+      type: DataTypes.STRING(32),
+      allowNull: true,
+    },
+    phoneVerified: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
     avatarUrl: {
       type: DataTypes.STRING(1024),
       allowNull: true,
@@ -38,10 +52,6 @@ export const up: MigrationFn<QueryInterface> = async ({ context: queryInterface 
     },
     passwordSalt: {
       type: DataTypes.STRING(64),
-      allowNull: true,
-    },
-    ssoSubject: {
-      type: DataTypes.STRING(512),
       allowNull: true,
     },
     available: {
@@ -79,8 +89,59 @@ export const up: MigrationFn<QueryInterface> = async ({ context: queryInterface 
     ],
     name: 'users_created_at_email',
   });
-  await queryInterface.addIndex('users', ['ssoSubject'], {
-    name: 'users_sso_subject',
+  await queryInterface.addIndex('users', ['phoneNumber'], {
+    name: 'users_phone_number',
+    unique: true,
+  });
+
+  await queryInterface.createTable('user_sso_identities', {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+      allowNull: false,
+    },
+    userId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      references: {
+        model: 'users',
+        key: 'id',
+      },
+      onDelete: 'CASCADE',
+      onUpdate: 'CASCADE',
+    },
+    providerId: {
+      type: DataTypes.STRING(64),
+      allowNull: false,
+    },
+    providerSubject: {
+      type: DataTypes.STRING(512),
+      allowNull: false,
+    },
+    email: {
+      type: DataTypes.STRING(255),
+      allowNull: false,
+    },
+    createdAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+    updatedAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+  });
+
+  await queryInterface.addIndex('user_sso_identities', ['providerId', 'providerSubject'], {
+    name: 'user_sso_identities_provider_subject',
+    unique: true,
+  });
+  await queryInterface.addIndex('user_sso_identities', ['userId'], {
+    name: 'user_sso_identities_user_id',
+  });
+  await queryInterface.addIndex('user_sso_identities', ['userId', 'providerId'], {
+    name: 'user_sso_identities_user_provider',
     unique: true,
   });
 
@@ -245,5 +306,6 @@ export const down: MigrationFn<QueryInterface> = async ({ context: queryInterfac
   await queryInterface.dropTable('role_permissions');
   await queryInterface.dropTable('roles');
   await queryInterface.dropTable('permissions');
+  await queryInterface.dropTable('user_sso_identities');
   await queryInterface.dropTable('users');
 };

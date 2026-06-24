@@ -1,0 +1,361 @@
+# Backend runtime configuration.
+# Copy this file to config.toml for manual configuration.
+
+# Setup
+
+# Setup lock state.
+# Missing or false enables setup; true locks setup.
+SETUP_LOCKED = true
+
+# Runtime
+
+# Runtime mode.
+# Options: development, test, production.
+# Production enables stricter validation for secrets, CORS, cookies, and database sync.
+NODE_ENV = "development"
+
+# HTTP server bind host.
+# Use 0.0.0.0 to listen on all network interfaces.
+# Use 127.0.0.1 to accept only local machine connections.
+SERVER_HOST = "0.0.0.0"
+
+# HTTP server bind port.
+SERVER_PORT = "3000"
+
+# Primary public application origin, including protocol.
+# Used as the default browser origin and callback URL base.
+APP_DOMAIN = "http://localhost:8011"
+
+# Comma-separated CORS origin allowlist.
+# Defaults to APP_DOMAIN when omitted.
+# Production must not include *.
+APP_CORS_ORIGINS = "http://localhost:8011"
+
+# Whether Koa trusts reverse proxy headers such as X-Forwarded-For.
+# Enable only behind a trusted reverse proxy that controls those headers.
+SERVER_TRUST_PROXY = "false"
+
+# Whether multiple backend instances may run at the same time.
+# true requires CACHE_STORE = "redis", DATABASE_DIALECT = "mysql" or "postgres",
+# and FILE_STORAGE_DRIVER = "oss".
+# Scheduler jobs use Redis locks when this and SCHEDULER_ENABLED are true.
+SERVER_MULTI_INSTANCE_ENABLED = "false"
+
+# Database
+
+# Database driver used by Sequelize.
+# Options: sqlite, mysql, postgres.
+# sqlite is intended for local development or single-instance lightweight deployments.
+# Use mysql or postgres for multi-instance deployments.
+DATABASE_DIALECT = "sqlite"
+
+# SQLite database file path.
+# Used only when DATABASE_DIALECT is sqlite.
+# Use :memory: for a database that is erased when the process exits.
+# Relative paths resolve from the backend application directory.
+DATABASE_STORAGE = "./data/database.sqlite"
+
+# MySQL or PostgreSQL connection URL.
+# Required when DATABASE_DIALECT is mysql or postgres.
+# Ignored when DATABASE_DIALECT is sqlite.
+# DATABASE_URL = "mysql://root:password@localhost:3306/tilty_scaffold"
+# DATABASE_URL = "postgres://postgres:password@localhost:5432/tilty_scaffold"
+
+# Whether database SSL should be enabled.
+# Used only when DATABASE_DIALECT is mysql or postgres.
+DATABASE_SSL = "false"
+
+# Database connection timeout in milliseconds.
+# Used only when DATABASE_DIALECT is mysql or postgres.
+DATABASE_CONNECT_TIMEOUT_MS = "10000"
+
+# Maximum database connection pool size per backend instance.
+# Total connections across all backend instances must stay below the database limit.
+DATABASE_POOL_MAX = "10"
+
+# Minimum database connection pool size per backend instance.
+DATABASE_POOL_MIN = "0"
+
+# Maximum time to acquire a database connection from the pool, in milliseconds.
+DATABASE_POOL_ACQUIRE_MS = "30000"
+
+# Maximum idle time before a pooled database connection is released, in milliseconds.
+DATABASE_POOL_IDLE_MS = "10000"
+
+# Sequelize model sync behavior at startup.
+# Options: off, alter, force.
+# off uses migrations and is required in production.
+# alter is intended only for local prototype workflows.
+# force drops and recreates synced tables and deletes data.
+DATABASE_SYNC = "off"
+
+# Cache
+
+# Cache backend for cross-request transient state.
+# Options: memory, redis.
+# Use redis for multi-instance deployments.
+# Stores rate limits, refresh tokens, email verification state, SSO tokens,
+# OIDC metadata, and scheduler locks.
+CACHE_STORE = "memory"
+
+# Redis connection URL for cache storage.
+# Required only when CACHE_STORE is redis.
+# Supports redis:// and rediss:// URLs with an optional non-negative database path.
+CACHE_REDIS_URL = "redis://localhost:6379/0"
+
+# Redis request timeout in milliseconds.
+# Used only when CACHE_STORE is redis.
+# Applies to connection establishment and individual cache commands.
+CACHE_REDIS_REQUEST_TIMEOUT_MS = "10000"
+
+# File Storage
+
+# Uploaded file storage backend.
+# Options: local, oss.
+# Use oss for multi-instance deployments.
+FILE_STORAGE_DRIVER = "local"
+
+# Maximum accepted avatar upload size in bytes.
+# Uploads are buffered in the backend process; keep this value conservative.
+FILE_UPLOAD_MAX_BYTES = "2097152"
+
+# Public URL base returned for uploaded files in local storage mode.
+# Used only when FILE_STORAGE_DRIVER is local.
+# May be a backend-relative path such as /uploads or an absolute public URL.
+# Backend-relative paths must begin with a single / and must not use //.
+# Absolute public URLs must use HTTPS in production.
+FILE_PUBLIC_BASE_URL = "/uploads"
+
+# Local uploaded file storage directory.
+# Used only when FILE_STORAGE_DRIVER is local.
+# Relative paths resolve from the backend application directory.
+FILE_LOCAL_ROOT = "./data/uploads"
+
+# Aliyun OSS access key ID.
+# Required only when FILE_STORAGE_DRIVER is oss.
+# FILE_OSS_ACCESS_KEY_ID = "oss-access-key-id"
+
+# Aliyun OSS access key secret.
+# Required only when FILE_STORAGE_DRIVER is oss.
+# FILE_OSS_ACCESS_KEY_SECRET = "oss-access-key-secret"
+
+# Aliyun OSS bucket name.
+# Required only when FILE_STORAGE_DRIVER is oss.
+# FILE_OSS_BUCKET = "tilty-scaffold"
+
+# Aliyun OSS endpoint for the bucket.
+# Required only when FILE_STORAGE_DRIVER is oss.
+# Example: oss-cn-hangzhou.aliyuncs.com
+# FILE_OSS_ENDPOINT = "oss-cn-hangzhou.aliyuncs.com"
+
+# Aliyun OSS region for request signing.
+# Required only when FILE_STORAGE_DRIVER is oss.
+# Example: oss-cn-hangzhou
+# FILE_OSS_REGION = "oss-cn-hangzhou"
+
+# Public URL base returned for uploaded files in OSS storage mode.
+# Optional CDN or custom domain.
+# When omitted, URLs default to https://<bucket>.<endpoint>/<object-key>.
+# FILE_OSS_PUBLIC_BASE_URL = "https://cdn.example.com"
+
+# Scheduler
+
+# Whether scheduled jobs should be registered and started.
+# Use false for tests, maintenance scripts, or API-only diagnostics.
+# In multi-instance deployments, Redis locks select one executor per job trigger.
+SCHEDULER_ENABLED = "true"
+
+# Redis lock TTL for scheduled jobs in multi-instance deployments, in milliseconds.
+# Used only when SERVER_MULTI_INSTANCE_ENABLED is true and SCHEDULER_ENABLED is true.
+SCHEDULER_LOCK_TTL_MS = "300000"
+
+# Security
+
+# Secret used to sign authentication tokens.
+# Must be at least 32 characters.
+# Production requires a unique non-example value.
+AUTH_TOKEN_SECRET = "development-auth-token-secret-change-before-production"
+
+# Access token lifetime in seconds.
+AUTH_ACCESS_TOKEN_TTL_SECONDS = "900"
+
+# Refresh token lifetime in seconds.
+# Must be greater than AUTH_ACCESS_TOKEN_TTL_SECONDS.
+AUTH_REFRESH_TOKEN_TTL_SECONDS = "2592000"
+
+# HttpOnly cookie name for the access token.
+AUTH_ACCESS_TOKEN_COOKIE_NAME = "tilty_scaffold_access_token"
+
+# HttpOnly cookie name for the refresh token.
+# Must be different from AUTH_ACCESS_TOKEN_COOKIE_NAME.
+AUTH_REFRESH_TOKEN_COOKIE_NAME = "tilty_scaffold_refresh_token"
+
+# Authentication cookie SameSite policy.
+# Options: lax, strict, none.
+AUTH_COOKIE_SAME_SITE = "lax"
+
+# Authentication cookie Secure policy.
+# Options: auto, true, false.
+# Production requires true. Required when AUTH_COOKIE_SAME_SITE is none.
+AUTH_COOKIE_SECURE = "auto"
+
+# Rate limit window for authentication-sensitive routes, in milliseconds.
+AUTH_RATE_LIMIT_WINDOW_MS = "60000"
+
+# Maximum requests allowed per rate limit window for authentication-sensitive routes.
+AUTH_RATE_LIMIT_MAX = "10"
+
+# Global per-IP rate limit window, in milliseconds.
+# Health checks and CORS preflight requests are excluded.
+GLOBAL_RATE_LIMIT_WINDOW_MS = "60000"
+
+# Maximum requests allowed per IP in the global rate limit window.
+GLOBAL_RATE_LIMIT_MAX = "1000"
+
+# Logging
+
+# Whether request access logs are written.
+LOG_REQUEST_ENABLED = "true"
+
+# Comma-separated log output targets.
+# Options: console, local, sls.
+# Use multiple values, such as console,local, when more than one target is needed.
+LOG_TARGETS = "console"
+
+# Maximum number of pending asynchronous log sink writes.
+LOG_PENDING_WRITE_MAX = "1000"
+
+# Maximum time to wait for an asynchronous log sink write, in milliseconds.
+LOG_WRITE_TIMEOUT_MS = "5000"
+
+# Local JSONL log file path.
+# Used only when LOG_TARGETS includes local.
+# Relative paths resolve from the backend application directory.
+LOG_LOCAL_PATH = "./logs/backend.log"
+
+# Aliyun Simple Log Service endpoint.
+# Required only when LOG_TARGETS includes sls.
+# LOG_SLS_ENDPOINT = "cn-hangzhou.log.aliyuncs.com"
+
+# Aliyun Simple Log Service project.
+# Required only when LOG_TARGETS includes sls.
+# LOG_SLS_PROJECT = "tilty-scaffold"
+
+# Aliyun Simple Log Service logstore.
+# Required only when LOG_TARGETS includes sls.
+# LOG_SLS_LOGSTORE = "backend"
+
+# Aliyun Simple Log Service access key ID.
+# Required only when LOG_TARGETS includes sls.
+# LOG_SLS_ACCESS_KEY_ID = "sls-access-key-id"
+
+# Aliyun Simple Log Service access key secret.
+# Required only when LOG_TARGETS includes sls.
+# LOG_SLS_ACCESS_KEY_SECRET = "sls-access-key-secret"
+
+# Aliyun Simple Log Service topic label.
+# Used only when LOG_TARGETS includes sls.
+LOG_SLS_TOPIC = "tilty-scaffold"
+
+# Aliyun Simple Log Service source label.
+# Used only when LOG_TARGETS includes sls.
+LOG_SLS_SOURCE = "backend"
+
+# Email
+
+# Email verification delivery service.
+# Options: off, smtp.
+# off disables registration email verification and password recovery delivery.
+# smtp sends verification codes through a randomly selected EMAIL_SMTP_PROFILES entry.
+EMAIL_VERIFICATION_SERVICE = "off"
+
+# Email verification code lifetime in milliseconds.
+# Used only when EMAIL_VERIFICATION_SERVICE is smtp.
+EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS = "600000"
+
+# Minimum time between verification code sends for the same email and purpose, in milliseconds.
+# Used only when EMAIL_VERIFICATION_SERVICE is smtp.
+EMAIL_VERIFICATION_CODE_COOLDOWN_MS = "60000"
+
+# SMTP profiles are table arrays.
+# Required only when EMAIL_VERIFICATION_SERVICE is smtp.
+# Each profile requires from, host, port, secure, startTls, and timeoutMs.
+# username and password are optional and must be configured together when used.
+# [[EMAIL_SMTP_PROFILES]]
+# from = "Tilty Scaffold <noreply@example.com>"
+# host = "smtp.example.com"
+# password = "smtp-password"
+# port = 465
+# secure = true
+# startTls = false
+# timeoutMs = 10000
+# username = "noreply@example.com"
+
+# SMS
+
+# SMS verification delivery service.
+# Options: off, aliyun.
+# Aliyun validates SMS profiles for phone verification workflows.
+SMS_VERIFICATION_SERVICE = "off"
+
+# SMS verification code lifetime in milliseconds.
+# Used only when SMS_VERIFICATION_SERVICE is aliyun.
+SMS_VERIFICATION_CODE_EXPIRES_IN_MS = "600000"
+
+# Minimum time between verification code sends for the same phone number and purpose, in milliseconds.
+# Used only when SMS_VERIFICATION_SERVICE is aliyun.
+SMS_VERIFICATION_CODE_COOLDOWN_MS = "60000"
+
+# Aliyun SMS profiles are table arrays.
+# Required only when SMS_VERIFICATION_SERVICE is aliyun.
+# Configure one profile per supported phone country code.
+# Supported phoneCountryCode values are +86, +852, and +853.
+# +86 uses Dysmsapi 2017-05-25 SendSms and requires signName and templateCode.
+# [[SMS_ALICLOUD_PROFILES]]
+# phoneCountryCode = "+86"
+# apiVersion = "2017-05-25"
+# operation = "SendSms"
+# regionId = "cn-hangzhou"
+# endpoint = "dysmsapi.aliyuncs.com"
+# accessKeyId = "domestic-key"
+# accessKeySecret = "domestic-secret"
+# signName = "Tilty"
+# templateCode = "SMS_100000001"
+
+# +852 and +853 use Dysmsapi 2018-05-01 SendMessageToGlobe,
+# ap-southeast-1, and require messageTemplate.
+# [[SMS_ALICLOUD_PROFILES]]
+# phoneCountryCode = "+852"
+# apiVersion = "2018-05-01"
+# operation = "SendMessageToGlobe"
+# regionId = "ap-southeast-1"
+# endpoint = "dysmsapi.ap-southeast-1.aliyuncs.com"
+# accessKeyId = "global-key"
+# accessKeySecret = "global-secret"
+# senderId = "Tilty"
+# messageTemplate = "Your verification code is ${code}."
+# type = "OTP"
+
+# SSO
+
+# Whether single sign-on login and binding are enabled.
+SSO_ENABLED = "false"
+
+# SSO provider profiles are table arrays.
+# Required only when SSO_ENABLED is true.
+# Configure one profile for each OAuth 2.0 or OpenID Connect provider.
+# Profile IDs must be unique and are used for account binding.
+# Production SSO URLs must use HTTPS.
+# [[SSO_PROFILES]]
+# id = "corporate"
+# name = "Corporate SSO"
+# protocol = "oidc"
+# loginEnabled = true
+# bindingEnabled = true
+# clientId = "client-id"
+# clientSecret = "client-secret"
+# frontendCallbackUrl = "http://localhost:8011/login"
+# redirectUri = "http://localhost:3000/api/auth/sso/callback"
+# requestTimeoutMs = 10000
+# scopes = ["openid", "profile", "email"]
+# issuerUrl = "https://identity.example.com"

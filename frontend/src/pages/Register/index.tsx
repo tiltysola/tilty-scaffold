@@ -148,6 +148,7 @@ const Index = () => {
                 id="username"
                 name="username"
                 onChange={handleChange('username')}
+                placeholder="alex_chen"
                 value={form.username}
               />
             </div>
@@ -159,6 +160,7 @@ const Index = () => {
                 id="displayName"
                 name="displayName"
                 onChange={handleChange('displayName')}
+                placeholder="Alex Chen"
                 value={form.displayName}
               />
             </div>
@@ -171,6 +173,7 @@ const Index = () => {
                   id="email"
                   name="email"
                   onChange={handleChange('email')}
+                  placeholder="alex@example.com"
                   type="email"
                   value={form.email}
                 />
@@ -198,6 +201,7 @@ const Index = () => {
                   name="emailVerificationCode"
                   onChange={handleChange('emailVerificationCode')}
                   pattern="[0-9]{6}"
+                  placeholder="000000"
                   value={form.emailVerificationCode}
                 />
               </div>
@@ -210,6 +214,7 @@ const Index = () => {
                 id="password"
                 name="password"
                 onChange={handleChange('password')}
+                placeholder="At least 8 characters"
                 type="password"
                 value={form.password}
               />
@@ -222,6 +227,7 @@ const Index = () => {
                 id="confirmPassword"
                 name="confirmPassword"
                 onChange={handleChange('confirmPassword')}
+                placeholder="Repeat password"
                 type="password"
                 value={form.confirmPassword}
               />

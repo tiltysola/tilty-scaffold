@@ -8,9 +8,13 @@ import {
   register,
   resetPassword,
   sendPasswordResetEmailVerification,
+  sendProfileEmailVerification,
+  sendProfilePhoneVerification,
   sendRegistrationEmailVerification,
   storeSession,
   updateCurrentUser,
+  verifyProfileEmail,
+  verifyProfilePhone,
 } from '../src/lib/auth';
 import { createApiSuccessResponse } from './support/api';
 import { createSession, createTestWindow } from './support/auth';
@@ -26,6 +30,8 @@ describe('auth API client', () => {
       vi.fn(async () => {
         return createApiSuccessResponse({
           passwordRecoveryEnabled: true,
+          phoneCountryCodes: ['+86'],
+          profileEmailVerificationEnabled: true,
           registrationEmailVerificationRequired: true,
         });
       }),
@@ -33,6 +39,8 @@ describe('auth API client', () => {
 
     await expect(fetchAuthConfig()).resolves.toEqual({
       passwordRecoveryEnabled: true,
+      phoneCountryCodes: ['+86'],
+      profileEmailVerificationEnabled: true,
       registrationEmailVerificationRequired: true,
     });
   });
@@ -72,6 +80,64 @@ describe('auth API client', () => {
     });
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(url);
+  });
+
+  it('requests profile email verification codes', async () => {
+    const window = createTestWindow();
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
+    const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
+      expect(init?.body).toBeUndefined();
+      expect(init?.method).toBe('POST');
+
+      return createApiSuccessResponse({
+        cooldownSeconds: 60,
+        expiresInSeconds: 600,
+      });
+    });
+
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('fetch', fetchMock);
+    storeSession(session);
+
+    await expect(sendProfileEmailVerification()).resolves.toEqual({
+      cooldownSeconds: 60,
+      expiresInSeconds: 600,
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me/email-verification');
+  });
+
+  it('requests profile phone verification codes', async () => {
+    const window = createTestWindow();
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
+    const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
+      expect(init?.body).toBe(
+        JSON.stringify({
+          phoneNumber: '+8613800138000',
+        }),
+      );
+      expect(init?.method).toBe('POST');
+
+      return createApiSuccessResponse({
+        cooldownSeconds: 60,
+        expiresInSeconds: 600,
+      });
+    });
+
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('fetch', fetchMock);
+    storeSession(session);
+
+    await expect(
+      sendProfilePhoneVerification({
+        phoneNumber: '+8613800138000',
+      }),
+    ).resolves.toEqual({
+      cooldownSeconds: 60,
+      expiresInSeconds: 600,
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me/phone-verification');
   });
 
   it('registers accounts and stores the returned session', async () => {
@@ -138,6 +204,7 @@ describe('auth API client', () => {
       expect(init?.body).toBe(
         JSON.stringify({
           displayName: 'Updated User',
+          phoneNumber: '+8613800138000',
         }),
       );
       expect(init?.method).toBe('PATCH');
@@ -152,9 +219,81 @@ describe('auth API client', () => {
     await expect(
       updateCurrentUser({
         displayName: 'Updated User',
+        phoneNumber: '+8613800138000',
       }),
     ).resolves.toEqual(updatedUser);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me');
+    expect(getStoredSession()).toEqual({
+      ...session,
+      user: updatedUser,
+    });
+  });
+
+  it('verifies the profile email and stores returned user metadata', async () => {
+    const window = createTestWindow();
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
+    const updatedUser = {
+      ...session.user,
+      emailVerified: true,
+    };
+    const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
+      expect(init?.body).toBe(
+        JSON.stringify({
+          emailVerificationCode: '123456',
+        }),
+      );
+      expect(init?.method).toBe('POST');
+
+      return createApiSuccessResponse(updatedUser);
+    });
+
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('fetch', fetchMock);
+    storeSession(session);
+
+    await expect(
+      verifyProfileEmail({
+        emailVerificationCode: '123456',
+      }),
+    ).resolves.toEqual(updatedUser);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me/email-verification/confirm');
+    expect(getStoredSession()).toEqual({
+      ...session,
+      user: updatedUser,
+    });
+  });
+
+  it('verifies the profile phone and stores returned user metadata', async () => {
+    const window = createTestWindow();
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
+    const updatedUser = {
+      ...session.user,
+      phoneNumber: '+8613800138000',
+      phoneVerified: true,
+    };
+    const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
+      expect(init?.body).toBe(
+        JSON.stringify({
+          phoneNumber: '+8613800138000',
+          phoneVerificationCode: '123456',
+        }),
+      );
+      expect(init?.method).toBe('POST');
+
+      return createApiSuccessResponse(updatedUser);
+    });
+
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('fetch', fetchMock);
+    storeSession(session);
+
+    await expect(
+      verifyProfilePhone({
+        phoneNumber: '+8613800138000',
+        phoneVerificationCode: '123456',
+      }),
+    ).resolves.toEqual(updatedUser);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me/phone-verification/confirm');
     expect(getStoredSession()).toEqual({
       ...session,
       user: updatedUser,

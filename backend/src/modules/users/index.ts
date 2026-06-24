@@ -31,6 +31,11 @@ export function createUsersModule(
       },
       {
         method: 'put',
+        path: '/:id',
+        handlers: [requirePermission(authService, options.cookies, SystemPermission.UserAdmin), controller.update],
+      },
+      {
+        method: 'put',
         path: '/:id/roles',
         handlers: [requirePermission(authService, options.cookies, SystemPermission.UserAdmin), controller.updateRoles],
       },

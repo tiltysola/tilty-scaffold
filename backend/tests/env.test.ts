@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
@@ -18,7 +18,7 @@ const validMultiInstanceEnv = {
   FILE_OSS_ENDPOINT: 'oss-cn-hangzhou.aliyuncs.com',
   FILE_OSS_REGION: 'oss-cn-hangzhou',
   FILE_STORAGE_DRIVER: 'oss',
-  MULTI_INSTANCE_ENABLED: 'true',
+  SERVER_MULTI_INSTANCE_ENABLED: 'true',
   SCHEDULER_ENABLED: 'false',
 } as const;
 
@@ -51,6 +51,7 @@ describe('environment configuration', () => {
       sameSite: 'lax',
       secure: 'auto',
     });
+    expect(env.appDomain).toBe('http://localhost:8011');
     expect(env.cache).toEqual({
       store: 'memory',
     });
@@ -140,16 +141,27 @@ describe('environment configuration', () => {
   it('rejects wildcard CORS origins in production', () => {
     const message = getEnvValidationMessage({
       AUTH_TOKEN_SECRET: authTokenSecret,
-      CORS_ORIGINS: '*',
+      APP_CORS_ORIGINS: '*',
       DATABASE_DIALECT: 'sqlite',
       DATABASE_SYNC: 'off',
       NODE_ENV: 'production',
     } as NodeJS.ProcessEnv);
 
-    expect(message).toContain('CORS_ORIGINS');
+    expect(message).toContain('APP_CORS_ORIGINS');
   });
 
-  it('requires a local environment file for process environment validation', async () => {
+  it('defaults CORS origins from the application domain', () => {
+    const env = loadEnv({
+      APP_DOMAIN: 'https://app.example.com',
+      AUTH_TOKEN_SECRET: authTokenSecret,
+      DATABASE_DIALECT: 'sqlite',
+    } as NodeJS.ProcessEnv);
+
+    expect(env.appDomain).toBe('https://app.example.com');
+    expect(env.corsOrigins).toEqual(['https://app.example.com']);
+  });
+
+  it('requires a local configuration file for process environment validation', async () => {
     const originalCwd = process.cwd();
     const originalEnv = process.env;
     const temporaryRoot = await mkdtemp(join(tmpdir(), 'tilty-env-'));
@@ -159,13 +171,150 @@ describe('environment configuration', () => {
       process.env = {
         AUTH_COOKIE_SECURE: 'true',
         AUTH_TOKEN_SECRET: authTokenSecret,
-        CORS_ORIGINS: 'https://app.example.com',
+        APP_CORS_ORIGINS: 'https://app.example.com',
         DATABASE_DIALECT: 'sqlite',
         DATABASE_SYNC: 'off',
         NODE_ENV: 'production',
       };
 
-      expect(getEnvValidationMessage()).toContain('Missing environment file');
+      expect(getEnvValidationMessage()).toContain('Missing configuration file');
+    } finally {
+      process.env = originalEnv;
+      process.chdir(originalCwd);
+      await rm(temporaryRoot, { force: true, recursive: true });
+    }
+  });
+
+  it('loads local TOML configuration with profile tables for process environment validation', async () => {
+    const originalCwd = process.cwd();
+    const originalEnv = process.env;
+    const temporaryRoot = await mkdtemp(join(tmpdir(), 'tilty-env-'));
+
+    try {
+      process.chdir(temporaryRoot);
+      process.env = {};
+      await writeFile(
+        'config.toml',
+        [
+          'SETUP_LOCKED = true',
+          `AUTH_TOKEN_SECRET = "${authTokenSecret}"`,
+          'DATABASE_DIALECT = "sqlite"',
+          'DATABASE_STORAGE = ":memory:"',
+          'EMAIL_VERIFICATION_SERVICE = "smtp"',
+          'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS = "300000"',
+          'EMAIL_VERIFICATION_CODE_COOLDOWN_MS = "30000"',
+          'SMS_VERIFICATION_SERVICE = "aliyun"',
+          'SMS_VERIFICATION_CODE_EXPIRES_IN_MS = "300000"',
+          'SMS_VERIFICATION_CODE_COOLDOWN_MS = "30000"',
+          'SSO_ENABLED = "true"',
+          '',
+          '[[EMAIL_SMTP_PROFILES]]',
+          'from = "Tilty <noreply@example.com>"',
+          'host = "smtp.example.com"',
+          'password = "smtp-password"',
+          'port = 465',
+          'secure = true',
+          'startTls = false',
+          'timeoutMs = 10000',
+          'username = "smtp-user"',
+          '',
+          '[[SMS_ALICLOUD_PROFILES]]',
+          'phoneCountryCode = "+86"',
+          'apiVersion = "2017-05-25"',
+          'operation = "SendSms"',
+          'regionId = "cn-hangzhou"',
+          'endpoint = "dysmsapi.aliyuncs.com"',
+          'accessKeyId = "sms-access-key-id"',
+          'accessKeySecret = "sms-access-key-secret"',
+          'signName = "Tilty"',
+          'templateCode = "SMS_100000001"',
+          '',
+          '[[SSO_PROFILES]]',
+          'id = "corporate"',
+          'name = "Corporate"',
+          'protocol = "oidc"',
+          'loginEnabled = true',
+          'bindingEnabled = true',
+          'clientId = "sso-client-id"',
+          'clientSecret = "sso-client-secret"',
+          'frontendCallbackUrl = "http://localhost:8011/auth/sso/callback"',
+          'redirectUri = "http://localhost:3000/api/auth/sso/callback"',
+          'requestTimeoutMs = 10000',
+          'scopes = ["openid", "email", "profile"]',
+          'issuerUrl = "https://idp.example.com"',
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+
+      expect(getEnvValidationMessage()).toBeNull();
+
+      const env = loadEnv();
+
+      expect(env.email?.smtpProfiles).toHaveLength(1);
+      expect(env.sms?.aliyunProfiles).toHaveLength(1);
+      expect(env.sso?.profiles).toHaveLength(1);
+    } finally {
+      process.env = originalEnv;
+      process.chdir(originalCwd);
+      await rm(temporaryRoot, { force: true, recursive: true });
+    }
+  });
+
+  it('does not let process environment values override local TOML configuration', async () => {
+    const originalCwd = process.cwd();
+    const originalEnv = process.env;
+    const temporaryRoot = await mkdtemp(join(tmpdir(), 'tilty-env-'));
+
+    try {
+      process.chdir(temporaryRoot);
+      process.env = {
+        DATABASE_STORAGE: './stale-env.sqlite',
+        EMAIL_SMTP_PROFILES: 'stale-env-value',
+        SMS_ALICLOUD_PROFILES: 'stale-env-value',
+        SSO_PROFILES: 'stale-env-value',
+      };
+      await writeFile(
+        'config.toml',
+        [
+          'SETUP_LOCKED = true',
+          `AUTH_TOKEN_SECRET = "${authTokenSecret}"`,
+          'DATABASE_DIALECT = "sqlite"',
+          'DATABASE_STORAGE = ":memory:"',
+          'EMAIL_VERIFICATION_SERVICE = "off"',
+          'SMS_VERIFICATION_SERVICE = "off"',
+          'SSO_ENABLED = "false"',
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+
+      expect(getEnvValidationMessage()).toBeNull();
+      expect(loadEnv().database).toEqual({
+        dialect: 'sqlite',
+        storage: ':memory:',
+      });
+    } finally {
+      process.env = originalEnv;
+      process.chdir(originalCwd);
+      await rm(temporaryRoot, { force: true, recursive: true });
+    }
+  });
+
+  it('loads the documented TOML configuration example', async () => {
+    const originalCwd = process.cwd();
+    const originalEnv = process.env;
+    const temporaryRoot = await mkdtemp(join(tmpdir(), 'tilty-env-'));
+
+    try {
+      const example = await readFile(join(originalCwd, 'config.toml.example'), 'utf8');
+
+      process.chdir(temporaryRoot);
+      process.env = {};
+      await writeFile('config.toml', example, 'utf8');
+
+      expect(getEnvValidationMessage()).toBeNull();
+      expect(() => loadEnv()).not.toThrow();
     } finally {
       process.env = originalEnv;
       process.chdir(originalCwd);
@@ -232,7 +381,7 @@ describe('environment configuration', () => {
     const message = getEnvValidationMessage({
       AUTH_COOKIE_SECURE: 'auto',
       AUTH_TOKEN_SECRET: authTokenSecret,
-      CORS_ORIGINS: 'https://app.example.com',
+      APP_CORS_ORIGINS: 'https://app.example.com',
       DATABASE_DIALECT: 'sqlite',
       DATABASE_SYNC: 'off',
       NODE_ENV: 'production',
@@ -478,35 +627,19 @@ describe('environment configuration', () => {
     });
   });
 
-  it('requires SMTP settings when email service uses SMTP', () => {
+  it('requires SMTP profiles when email service uses SMTP', () => {
     const message = getEnvValidationMessage({
       AUTH_TOKEN_SECRET: authTokenSecret,
       DATABASE_DIALECT: 'sqlite',
       EMAIL_VERIFICATION_SERVICE: 'smtp',
     } as NodeJS.ProcessEnv);
 
-    expect(message).toContain('SMTP_HOST');
-    expect(message).toContain('SMTP_FROM');
+    expect(message).toContain('EMAIL_SMTP_PROFILES');
   });
 
-  it('loads SMTP email configuration', () => {
-    const env = loadEnv({
-      AUTH_TOKEN_SECRET: authTokenSecret,
-      DATABASE_DIALECT: 'sqlite',
-      EMAIL_VERIFICATION_SERVICE: 'smtp',
-      EMAIL_VERIFICATION_CODE_COOLDOWN_MS: '30000',
-      EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS: '300000',
-      SMTP_FROM: 'Tilty <noreply@example.com>',
-      SMTP_HOST: 'smtp.example.com',
-      SMTP_PASSWORD: 'smtp-password',
-      SMTP_REQUEST_TIMEOUT_MS: '5000',
-      SMTP_USERNAME: 'smtp-user',
-    } as NodeJS.ProcessEnv);
-
-    expect(env.email).toEqual({
-      codeCooldownMs: 30_000,
-      codeExpiresInMs: 300_000,
-      smtp: {
+  it('loads SMTP email profile configuration', () => {
+    const profiles = [
+      {
         from: 'Tilty <noreply@example.com>',
         host: 'smtp.example.com',
         password: 'smtp-password',
@@ -516,6 +649,92 @@ describe('environment configuration', () => {
         timeoutMs: 5_000,
         username: 'smtp-user',
       },
+      {
+        from: 'Tilty Backup <backup@example.com>',
+        host: 'smtp-backup.example.com',
+        port: 587,
+        secure: false,
+        startTls: true,
+        timeoutMs: 10_000,
+      },
+    ];
+    const env = loadEnv({
+      AUTH_TOKEN_SECRET: authTokenSecret,
+      DATABASE_DIALECT: 'sqlite',
+      EMAIL_VERIFICATION_SERVICE: 'smtp',
+      EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS: '300000',
+      EMAIL_VERIFICATION_CODE_COOLDOWN_MS: '30000',
+      EMAIL_SMTP_PROFILES: JSON.stringify(profiles),
+    } as NodeJS.ProcessEnv);
+
+    expect(env.email).toEqual({
+      codeCooldownMs: 30_000,
+      codeExpiresInMs: 300_000,
+      smtpProfiles: profiles,
+    });
+  });
+
+  it('requires at least one SMTP profile when email service uses SMTP', () => {
+    const message = getEnvValidationMessage({
+      AUTH_TOKEN_SECRET: authTokenSecret,
+      DATABASE_DIALECT: 'sqlite',
+      EMAIL_VERIFICATION_SERVICE: 'smtp',
+      EMAIL_SMTP_PROFILES: '[]',
+    } as NodeJS.ProcessEnv);
+
+    expect(message).toContain('EMAIL_SMTP_PROFILES');
+  });
+
+  it('requires valid Aliyun SMS profiles when SMS verification is enabled', () => {
+    const message = getEnvValidationMessage({
+      AUTH_TOKEN_SECRET: authTokenSecret,
+      DATABASE_DIALECT: 'sqlite',
+      SMS_VERIFICATION_SERVICE: 'aliyun',
+      SMS_ALICLOUD_PROFILES: '[]',
+    } as NodeJS.ProcessEnv);
+
+    expect(message).toContain('SMS_ALICLOUD_PROFILES');
+  });
+
+  it('loads Aliyun SMS profile configuration', () => {
+    const profiles = [
+      {
+        phoneCountryCode: '+86',
+        apiVersion: '2017-05-25',
+        operation: 'SendSms',
+        regionId: 'cn-hangzhou',
+        endpoint: 'dysmsapi.aliyuncs.com',
+        accessKeyId: 'domestic-access-key-id',
+        accessKeySecret: 'domestic-access-key-secret',
+        signName: 'Tilty',
+        templateCode: 'SMS_100000001',
+      },
+      {
+        phoneCountryCode: '+852',
+        apiVersion: '2018-05-01',
+        operation: 'SendMessageToGlobe',
+        regionId: 'ap-southeast-1',
+        endpoint: 'dysmsapi.ap-southeast-1.aliyuncs.com',
+        accessKeyId: 'overseas-access-key-id',
+        accessKeySecret: 'overseas-access-key-secret',
+        messageTemplate: 'Your verification code is ${code}.',
+        senderId: 'Tilty',
+        type: 'OTP',
+      },
+    ];
+    const env = loadEnv({
+      AUTH_TOKEN_SECRET: authTokenSecret,
+      DATABASE_DIALECT: 'sqlite',
+      SMS_VERIFICATION_SERVICE: 'aliyun',
+      SMS_VERIFICATION_CODE_EXPIRES_IN_MS: '300000',
+      SMS_VERIFICATION_CODE_COOLDOWN_MS: '30000',
+      SMS_ALICLOUD_PROFILES: JSON.stringify(profiles),
+    } as NodeJS.ProcessEnv);
+
+    expect(env.sms).toEqual({
+      aliyunProfiles: profiles,
+      codeCooldownMs: 30_000,
+      codeExpiresInMs: 300_000,
     });
   });
 
@@ -526,70 +745,103 @@ describe('environment configuration', () => {
       DATABASE_SYNC: 'off',
       EMAIL_VERIFICATION_SERVICE: 'smtp',
       NODE_ENV: 'production',
-      SMTP_FROM: 'Tilty <noreply@example.com>',
-      SMTP_HOST: 'smtp.example.com',
-      SMTP_SECURE: 'false',
-      SMTP_STARTTLS: 'false',
+      EMAIL_SMTP_PROFILES: JSON.stringify([
+        {
+          from: 'Tilty <noreply@example.com>',
+          host: 'smtp.example.com',
+          port: 25,
+          secure: false,
+          startTls: false,
+          timeoutMs: 5_000,
+        },
+      ]),
     } as NodeJS.ProcessEnv);
 
-    expect(message).toContain('SMTP_SECURE');
+    expect(message).toContain('EMAIL_SMTP_PROFILES');
   });
 
-  it('requires OIDC SSO settings when SSO is enabled', () => {
+  it('requires SSO profiles when SSO is enabled', () => {
     const message = getEnvValidationMessage({
       AUTH_TOKEN_SECRET: authTokenSecret,
       DATABASE_DIALECT: 'sqlite',
       SSO_ENABLED: 'true',
     } as NodeJS.ProcessEnv);
 
-    expect(message).toContain('SSO_ISSUER_URL');
-    expect(message).toContain('SSO_CLIENT_ID');
-    expect(message).toContain('SSO_CLIENT_SECRET');
-    expect(message).toContain('SSO_REDIRECT_URI');
+    expect(message).toContain('SSO_PROFILES');
   });
 
   it('requires HTTPS OIDC SSO URLs in production', () => {
     const message = getEnvValidationMessage({
       AUTH_COOKIE_SECURE: 'true',
       AUTH_TOKEN_SECRET: authTokenSecret,
-      CORS_ORIGINS: 'https://app.example.com',
+      APP_CORS_ORIGINS: 'https://app.example.com',
       DATABASE_DIALECT: 'sqlite',
       DATABASE_SYNC: 'off',
       NODE_ENV: 'production',
-      SSO_CLIENT_ID: 'test-client',
-      SSO_CLIENT_SECRET: 'test-secret',
       SSO_ENABLED: 'true',
-      SSO_FRONTEND_CALLBACK_URL: 'http://app.example.com/login',
-      SSO_ISSUER_URL: 'http://identity.example.com',
-      SSO_REDIRECT_URI: 'http://api.example.com/api/auth/sso/callback',
+      SSO_PROFILES: JSON.stringify([
+        {
+          id: 'corporate',
+          name: 'Corporate SSO',
+          protocol: 'oidc',
+          loginEnabled: true,
+          bindingEnabled: true,
+          clientId: 'test-client',
+          clientSecret: 'test-secret',
+          frontendCallbackUrl: 'http://app.example.com/login',
+          issuerUrl: 'http://identity.example.com',
+          redirectUri: 'http://api.example.com/api/auth/sso/callback',
+          requestTimeoutMs: 10_000,
+          scopes: ['openid', 'profile', 'email'],
+        },
+      ]),
     } as NodeJS.ProcessEnv);
 
-    expect(message).toContain('SSO_FRONTEND_CALLBACK_URL');
-    expect(message).toContain('SSO_ISSUER_URL');
-    expect(message).toContain('SSO_REDIRECT_URI');
+    expect(message).toContain('SSO_PROFILES.0.frontendCallbackUrl');
+    expect(message).toContain('SSO_PROFILES.0.issuerUrl');
+    expect(message).toContain('SSO_PROFILES.0.redirectUri');
   });
 
-  it('loads OIDC SSO configuration and normalizes issuer trailing slashes', () => {
+  it('loads SSO profile configuration and normalizes issuer trailing slashes', () => {
     const env = loadEnv({
       AUTH_TOKEN_SECRET: authTokenSecret,
       DATABASE_DIALECT: 'sqlite',
-      SSO_CLIENT_ID: 'test-client',
-      SSO_CLIENT_SECRET: 'test-secret',
       SSO_ENABLED: 'true',
-      SSO_FRONTEND_CALLBACK_URL: 'http://localhost:8011/login',
-      SSO_ISSUER_URL: 'https://identity.example.com/',
-      SSO_REDIRECT_URI: 'http://localhost:3000/api/auth/sso/callback',
-      SSO_SCOPES: 'openid profile email email',
+      SSO_PROFILES: JSON.stringify([
+        {
+          id: 'corporate',
+          name: 'Corporate SSO',
+          protocol: 'oidc',
+          loginEnabled: true,
+          bindingEnabled: true,
+          clientId: 'test-client',
+          clientSecret: 'test-secret',
+          frontendCallbackUrl: 'http://localhost:8011/login',
+          issuerUrl: 'https://identity.example.com/',
+          redirectUri: 'http://localhost:3000/api/auth/sso/callback',
+          requestTimeoutMs: 10_000,
+          scopes: ['openid', 'profile', 'email'],
+        },
+      ]),
     } as NodeJS.ProcessEnv);
 
     expect(env.sso).toEqual({
-      clientId: 'test-client',
-      clientSecret: 'test-secret',
-      frontendCallbackUrl: 'http://localhost:8011/login',
-      issuerUrl: 'https://identity.example.com',
-      redirectUri: 'http://localhost:3000/api/auth/sso/callback',
-      requestTimeoutMs: 10_000,
-      scopes: ['openid', 'profile', 'email'],
+      profiles: [
+        {
+          id: 'corporate',
+          name: 'Corporate SSO',
+          protocol: 'oidc',
+          loginEnabled: true,
+          bindingEnabled: true,
+          clientId: 'test-client',
+          clientSecret: 'test-secret',
+          frontendCallbackUrl: 'http://localhost:8011/login',
+          issuerUrl: 'https://identity.example.com',
+          redirectUri: 'http://localhost:3000/api/auth/sso/callback',
+          requestTimeoutMs: 10_000,
+          scopes: ['openid', 'profile', 'email'],
+        },
+      ],
     });
   });
 });

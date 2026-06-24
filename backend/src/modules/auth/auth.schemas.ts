@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { isSafeRelativePath } from '@tilty/shared/paths';
-import { hasMatchingPasswordConfirmation } from '@tilty/shared/validation';
+import { hasMatchingPasswordConfirmation, isValidPhoneNumber, normalizePhoneNumber } from '@tilty/shared/validation';
 
 export const usernameSchema = z
   .string()
@@ -19,6 +19,15 @@ export const emailSchema = z
   .max(255)
   .pipe(z.email())
   .transform((email) => email.toLowerCase());
+
+export const phoneNumberSchema = z.string().trim().max(32).transform(normalizePhoneNumber).refine(isValidPhoneNumber, {
+  message: 'Phone number must use E.164 format.',
+});
+
+export const optionalPhoneNumberSchema = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
+  phoneNumberSchema.nullable().optional(),
+);
 
 export const emailVerificationCodeSchema = z.preprocess(
   (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
@@ -60,15 +69,35 @@ export const loginSchema = z.object({
 
 export const updateCurrentUserSchema = z.object({
   displayName: displayNameSchema,
+  phoneNumber: optionalPhoneNumberSchema,
 });
 
 export const sendEmailVerificationSchema = z.object({
   email: emailSchema,
 });
 
+export const sendProfilePhoneVerificationSchema = z.object({
+  phoneNumber: phoneNumberSchema,
+});
+
 export const resetPasswordSchema = createPasswordFormSchema({
   email: emailSchema,
   emailVerificationCode: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/),
+});
+
+export const verifyProfileEmailSchema = z.object({
+  emailVerificationCode: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/),
+});
+
+export const verifyProfilePhoneSchema = z.object({
+  phoneNumber: phoneNumberSchema,
+  phoneVerificationCode: z
     .string()
     .trim()
     .regex(/^\d{6}$/),
@@ -98,7 +127,15 @@ export const redirectPathSchema = z.string().refine(isSafeRelativePath, {
   message: 'Redirect path is invalid.',
 });
 
+export const ssoProviderIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
+
 export const ssoStartQuerySchema = z.object({
+  providerId: ssoProviderIdSchema.optional(),
   redirect: redirectPathSchema.optional(),
 });
 
