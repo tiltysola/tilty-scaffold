@@ -26,6 +26,16 @@ describe('auth SSO client', () => {
             error: null,
             data: {
               enabled: true,
+              loginEnabled: true,
+              providers: [
+                {
+                  id: 'corporate',
+                  name: 'Corporate SSO',
+                  protocol: 'oidc',
+                  loginEnabled: true,
+                  bindingEnabled: true,
+                },
+              ],
             },
           }),
           { status: 200 },
@@ -35,11 +45,24 @@ describe('auth SSO client', () => {
 
     await expect(fetchSsoConfig()).resolves.toEqual({
       enabled: true,
+      loginEnabled: true,
+      providers: [
+        {
+          id: 'corporate',
+          name: 'Corporate SSO',
+          protocol: 'oidc',
+          loginEnabled: true,
+          bindingEnabled: true,
+        },
+      ],
     });
   });
 
   it('builds SSO start URLs with the redirect path', () => {
     expect(getSsoStartUrl('/reports')).toBe('/api/auth/sso/start?redirect=%2Freports');
+    expect(getSsoStartUrl('/reports', 'corporate')).toBe(
+      '/api/auth/sso/start?redirect=%2Freports&providerId=corporate',
+    );
   });
 
   it('reads SSO callback tokens from URL fragments', () => {

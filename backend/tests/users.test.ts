@@ -62,6 +62,217 @@ describe('users API', () => {
       totalPages: 3,
     });
   });
+
+  it('updates user details and roles as an administrator', async () => {
+    const rootSession = await registerTestUser(services.auth, 'Root User', 'root-update@example.com');
+    await registerTestUser(services.auth, 'Target User', 'target-update@example.com');
+    const targetUser = await services.user.findByEmail('target-update@example.com');
+
+    expect(targetUser).not.toBeNull();
+
+    if (!targetUser) {
+      return;
+    }
+
+    const updateRoute = getTestRoute(routes, 'put', '/:id');
+    const context = await runMiddlewares(
+      [errorMiddleware(), ...updateRoute.handlers],
+      createTestContext(
+        {
+          username: 'managed_user',
+          displayName: 'Managed User',
+          email: 'managed@example.com',
+          emailVerified: true,
+          phoneNumber: '+8613800138000',
+          phoneVerified: true,
+          password: 'newpassword123',
+          available: true,
+          roleKeys: ['USER_LIST'],
+        },
+        {},
+        {
+          id: targetUser.id,
+        },
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
+    );
+    const body = context.body as UserUpdateBody;
+    const updatedUser = await services.user.findById(targetUser.id);
+
+    expect(body.data).toMatchObject({
+      username: 'managed_user',
+      displayName: 'Managed User',
+      email: 'managed@example.com',
+      emailVerified: true,
+      phoneNumber: '+8613800138000',
+      phoneVerified: true,
+      available: true,
+      roles: ['USER_LIST'],
+      permissions: ['USER_LIST'],
+    });
+    expect(updatedUser).toMatchObject({
+      username: 'managed_user',
+      displayName: 'Managed User',
+      email: 'managed@example.com',
+      emailVerified: true,
+      phoneNumber: '+8613800138000',
+      phoneVerified: true,
+    });
+    await expect(
+      services.auth.login({
+        identifier: 'managed@example.com',
+        password: 'newpassword123',
+      }),
+    ).resolves.toMatchObject({
+      user: {
+        email: 'managed@example.com',
+      },
+    });
+  });
+
+  it('leaves omitted user details unchanged during partial updates', async () => {
+    const rootSession = await registerTestUser(services.auth, 'Root User', 'root-partial@example.com');
+    await registerTestUser(services.auth, 'Target User', 'target-partial@example.com');
+    const targetUser = await services.user.findByEmail('target-partial@example.com');
+
+    expect(targetUser).not.toBeNull();
+
+    if (!targetUser) {
+      return;
+    }
+
+    const updateRoute = getTestRoute(routes, 'put', '/:id');
+    const context = await runMiddlewares(
+      [errorMiddleware(), ...updateRoute.handlers],
+      createTestContext(
+        {
+          displayName: 'Partial User',
+          password: '',
+        },
+        {},
+        {
+          id: targetUser.id,
+        },
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
+    );
+    const body = context.body as UserUpdateBody;
+    const updatedUser = await services.user.findByEmail(targetUser.email);
+
+    expect(body.data).toMatchObject({
+      username: targetUser.username,
+      displayName: 'Partial User',
+      email: targetUser.email,
+      emailVerified: targetUser.emailVerified,
+      phoneVerified: targetUser.phoneVerified,
+    });
+    expect(updatedUser).toMatchObject({
+      username: targetUser.username,
+      displayName: 'Partial User',
+      email: targetUser.email,
+      emailVerified: targetUser.emailVerified,
+      phoneVerified: targetUser.phoneVerified,
+    });
+    await expect(
+      services.auth.login({
+        identifier: targetUser.email,
+        password: 'password123',
+      }),
+    ).resolves.toMatchObject({
+      user: {
+        email: targetUser.email,
+      },
+    });
+  });
+
+  it('does not disable the last available root user', async () => {
+    const rootSession = await registerTestUser(services.auth, 'Root User', 'root-disable@example.com');
+    const rootUser = await services.user.findByEmail('root-disable@example.com');
+
+    expect(rootUser).not.toBeNull();
+
+    if (!rootUser) {
+      return;
+    }
+
+    const updateRoute = getTestRoute(routes, 'put', '/:id');
+    const context = await runMiddlewares(
+      [errorMiddleware(), ...updateRoute.handlers],
+      createTestContext(
+        {
+          available: false,
+        },
+        {},
+        {
+          id: rootUser.id,
+        },
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
+    );
+    const unchangedUser = await services.user.findById(rootUser.id);
+
+    expect(context.status).toBe(409);
+    expect(context.body).toMatchObject({
+      error: 'LAST_ROOT_ROLE_REQUIRED',
+    });
+    expect(unchangedUser?.available).toBe(true);
+  });
+
+  it('does not update user details when role assignment fails', async () => {
+    const rootSession = await registerTestUser(services.auth, 'Root User', 'root-rollback@example.com');
+    await registerTestUser(services.auth, 'Target User', 'target-rollback@example.com');
+    const targetUser = await services.user.findByEmail('target-rollback@example.com');
+
+    expect(targetUser).not.toBeNull();
+
+    if (!targetUser) {
+      return;
+    }
+
+    const updateRoute = getTestRoute(routes, 'put', '/:id');
+    const context = await runMiddlewares(
+      [errorMiddleware(), ...updateRoute.handlers],
+      createTestContext(
+        {
+          username: 'rollback_user',
+          displayName: 'Rollback User',
+          email: 'rollback@example.com',
+          phoneNumber: null,
+          available: true,
+          roleKeys: ['MISSING_ROLE'],
+        },
+        {},
+        {
+          id: targetUser.id,
+        },
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
+    );
+    const unchangedUser = await services.user.findById(targetUser.id);
+
+    expect(context.status).toBe(404);
+    expect(unchangedUser).toMatchObject({
+      username: targetUser.username,
+      displayName: targetUser.displayName,
+      email: targetUser.email,
+    });
+  });
 });
 
 interface UserListBody {
@@ -73,5 +284,19 @@ interface UserListBody {
       totalPages: number;
     };
     users: unknown[];
+  };
+}
+
+interface UserUpdateBody {
+  data: {
+    username: string;
+    displayName: string;
+    email: string;
+    emailVerified: boolean;
+    phoneNumber?: string;
+    phoneVerified: boolean;
+    available: boolean;
+    roles: string[];
+    permissions: string[];
   };
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchUsers } from '../src/lib/users';
+import { fetchUsers, updateUser } from '../src/lib/users';
 
 describe('users API client', () => {
   afterEach(() => {
@@ -41,5 +41,61 @@ describe('users API client', () => {
       users: [],
     });
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/?page=2&pageSize=20');
+  });
+
+  it('updates a managed user with changed fields and roles', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 200,
+          error: null,
+          data: {
+            id: 'user-id',
+            username: 'managed_user',
+            displayName: 'Managed User',
+            email: 'managed@example.com',
+            emailVerified: true,
+            phoneNumber: '+8613800138000',
+            phoneVerified: true,
+            available: true,
+            roles: ['USER_LIST'],
+            permissions: ['USER_LIST'],
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      updateUser('user-id', {
+        displayName: 'Managed User',
+        emailVerified: true,
+        phoneVerified: true,
+        password: 'newpassword123',
+        roleKeys: ['USER_LIST'],
+      }),
+    ).resolves.toMatchObject({
+      id: 'user-id',
+      username: 'managed_user',
+      roles: ['USER_LIST'],
+    });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+
+    expect(url).toBe('/api/users/user-id');
+    expect(init?.method).toBe('PUT');
+    expect(init?.body).toBe(
+      JSON.stringify({
+        displayName: 'Managed User',
+        emailVerified: true,
+        phoneVerified: true,
+        password: 'newpassword123',
+        roleKeys: ['USER_LIST'],
+      }),
+    );
   });
 });

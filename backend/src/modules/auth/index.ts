@@ -47,6 +47,26 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
       },
       {
         method: 'post',
+        path: '/me/email-verification',
+        handlers: rateLimitedHandlers(controller.sendProfileEmailVerification),
+      },
+      {
+        method: 'post',
+        path: '/me/email-verification/confirm',
+        handlers: rateLimitedHandlers(controller.verifyProfileEmail),
+      },
+      {
+        method: 'post',
+        path: '/me/phone-verification',
+        handlers: rateLimitedHandlers(controller.sendProfilePhoneVerification),
+      },
+      {
+        method: 'post',
+        path: '/me/phone-verification/confirm',
+        handlers: rateLimitedHandlers(controller.verifyProfilePhone),
+      },
+      {
+        method: 'post',
         path: '/password-reset',
         handlers: rateLimitedHandlers(controller.resetPassword),
       },
@@ -89,6 +109,16 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
         method: 'get',
         path: '/sso/start',
         handlers: [controller.ssoStart],
+      },
+      {
+        method: 'get',
+        path: '/sso/bind/start',
+        handlers: [controller.ssoBindStart],
+      },
+      {
+        method: 'get',
+        path: '/sso/identities',
+        handlers: [controller.ssoIdentities],
       },
       {
         method: 'get',

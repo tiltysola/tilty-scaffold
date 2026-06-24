@@ -33,13 +33,12 @@ import { isSafeRelativePath } from '@tilty/shared/paths';
 
 import FormMessage from '@/components/FormMessage';
 
-const loginSchema = loginCredentialsSchema;
 const ssoCreateSchema = createPasswordFormSchema({
   username: usernameSchema,
   displayName: displayNameSchema,
 });
 
-type LoginFormState = z.input<typeof loginSchema>;
+type LoginFormState = z.input<typeof loginCredentialsSchema>;
 type SsoCreateFormState = z.input<typeof ssoCreateSchema>;
 
 const Index = () => {
@@ -47,11 +46,16 @@ const Index = () => {
     username: string;
     displayName: string;
     email: string;
+    providerName: string;
     token: string;
     redirectPath: string;
   } | null>(null);
   const [ssoTab, setSsoTab] = useState<'create' | 'bind'>('create');
-  const [ssoConfig, setSsoConfig] = useState<SsoPublicConfig>({ enabled: false });
+  const [ssoConfig, setSsoConfig] = useState<SsoPublicConfig>({
+    enabled: false,
+    loginEnabled: false,
+    providers: [],
+  });
   const handledSsoTokenRef = useRef<string | null>(null);
   const handledSsoBindTokenRef = useRef<string | null>(null);
   const location = useLocation();
@@ -72,7 +76,8 @@ const Index = () => {
     confirmPassword: '',
   });
   const redirectPath = getRedirectPath(location.state);
-  const ssoStartUrl = ssoConfig.enabled ? getSsoStartUrl(redirectPath) : null;
+  const ssoLoginProviders =
+    ssoConfig.enabled && ssoConfig.loginEnabled ? ssoConfig.providers.filter((provider) => provider.loginEnabled) : [];
 
   useEffect(() => {
     let active = true;
@@ -88,7 +93,7 @@ const Index = () => {
           return;
         }
 
-        setSsoConfig({ enabled: false });
+        setSsoConfig({ enabled: false, loginEnabled: false, providers: [] });
         if (requestError instanceof ApiError && requestError.code === 'SETUP_RESTART_REQUIRED') {
           setError(requestError.message);
         }
@@ -103,6 +108,12 @@ const Index = () => {
     const params = getSsoCallbackParams(location.hash);
     const token = params.get('sso_token');
     const bindToken = params.get('sso_bind_token');
+    const profileBindResult = params.get('sso_profile_bind');
+
+    if (profileBindResult === 'success') {
+      navigate(getSafeRedirectPath(params.get('redirect')), { replace: true });
+      return;
+    }
 
     if (token && handledSsoTokenRef.current !== token) {
       handledSsoTokenRef.current = token;
@@ -135,6 +146,7 @@ const Index = () => {
       username,
       displayName,
       email: params.get('sso_email') ?? '',
+      providerName: params.get('sso_provider_name') ?? 'SSO',
       token: bindToken,
       redirectPath: nextRedirectPath,
     });
@@ -162,7 +174,7 @@ const Index = () => {
     event.preventDefault();
     setError(null);
 
-    const parsed = loginSchema.safeParse(form);
+    const parsed = loginCredentialsSchema.safeParse(form);
 
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'Login credentials are invalid.');
@@ -215,7 +227,7 @@ const Index = () => {
 
     setError(null);
 
-    const parsed = loginSchema.safeParse(form);
+    const parsed = loginCredentialsSchema.safeParse(form);
 
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'Account credentials are invalid.');
@@ -243,7 +255,7 @@ const Index = () => {
           <CardTitle>{ssoBind ? 'Complete SSO authentication' : 'Log in'}</CardTitle>
           <CardDescription>
             {ssoBind
-              ? 'Select the account association method for this SSO identity.'
+              ? `Select the account association method for ${ssoBind.providerName}.`
               : 'Log in with account credentials to access the dashboard.'}
           </CardDescription>
         </CardHeader>
@@ -267,6 +279,7 @@ const Index = () => {
                       id="sso-username"
                       name="username"
                       onChange={handleSsoCreateChange('username')}
+                      placeholder="sso_user"
                       value={ssoCreateForm.username}
                     />
                   </div>
@@ -278,6 +291,7 @@ const Index = () => {
                       id="sso-display-name"
                       name="displayName"
                       onChange={handleSsoCreateChange('displayName')}
+                      placeholder="SSO User"
                       value={ssoCreateForm.displayName}
                     />
                   </div>
@@ -287,6 +301,7 @@ const Index = () => {
                       autoComplete="email"
                       id="sso-email"
                       name="email"
+                      placeholder="name@example.com"
                       readOnly
                       type="email"
                       value={ssoBind.email}
@@ -300,6 +315,7 @@ const Index = () => {
                       id="sso-password"
                       name="password"
                       onChange={handleSsoCreateChange('password')}
+                      placeholder="At least 8 characters"
                       type="password"
                       value={ssoCreateForm.password}
                     />
@@ -312,6 +328,7 @@ const Index = () => {
                       id="sso-confirm-password"
                       name="confirmPassword"
                       onChange={handleSsoCreateChange('confirmPassword')}
+                      placeholder="Repeat password"
                       type="password"
                       value={ssoCreateForm.confirmPassword}
                     />
@@ -332,6 +349,7 @@ const Index = () => {
                       id="identifier"
                       name="identifier"
                       onChange={handleChange('identifier')}
+                      placeholder="name@example.com or username"
                       value={form.identifier}
                     />
                   </div>
@@ -343,6 +361,7 @@ const Index = () => {
                       id="password"
                       name="password"
                       onChange={handleChange('password')}
+                      placeholder="Enter your password"
                       type="password"
                       value={form.password}
                     />
@@ -356,17 +375,22 @@ const Index = () => {
             </Tabs>
           ) : (
             <>
-              {ssoStartUrl ? (
+              {ssoLoginProviders.length > 0 ? (
                 <div className="mb-4 grid gap-4">
-                  <Button
-                    disabled={submitting}
-                    onClick={() => window.location.assign(ssoStartUrl)}
-                    type="button"
-                    variant="outline"
-                  >
-                    <KeyRoundIcon />
-                    Log in with SSO
-                  </Button>
+                  <div className="grid gap-2">
+                    {ssoLoginProviders.map((provider) => (
+                      <Button
+                        disabled={submitting}
+                        key={provider.id}
+                        onClick={() => window.location.assign(getSsoStartUrl(redirectPath, provider.id))}
+                        type="button"
+                        variant="outline"
+                      >
+                        <SsoProviderIcon iconUrl={provider.iconUrl} name={provider.name} />
+                        Log in with {provider.name}
+                      </Button>
+                    ))}
+                  </div>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     <div className="h-px flex-1 bg-border" />
                     <span>Alternative</span>
@@ -383,6 +407,7 @@ const Index = () => {
                     id="identifier"
                     name="identifier"
                     onChange={handleChange('identifier')}
+                    placeholder="name@example.com or username"
                     value={form.identifier}
                   />
                 </div>
@@ -394,6 +419,7 @@ const Index = () => {
                     id="password"
                     name="password"
                     onChange={handleChange('password')}
+                    placeholder="Enter your password"
                     type="password"
                     value={form.password}
                   />
@@ -423,6 +449,14 @@ const Index = () => {
     </main>
   );
 };
+
+function SsoProviderIcon({ iconUrl, name }: { iconUrl?: string; name: string }) {
+  return iconUrl ? (
+    <img alt="" className="size-4 rounded-sm object-contain" referrerPolicy="no-referrer" src={iconUrl} />
+  ) : (
+    <KeyRoundIcon aria-label={name} />
+  );
+}
 
 function getRedirectPath(state: unknown) {
   if (!state || typeof state !== 'object') {

@@ -79,7 +79,9 @@ describe('auth token crypto', () => {
   it('creates and verifies SSO bind tokens', async () => {
     const token = await createSsoBindToken(
       {
-        ssoSubject: 'provider-user@identity.example.com',
+        providerId: 'corporate',
+        providerName: 'Corporate',
+        providerSubject: 'provider-user',
         username: 'sso_user',
         displayName: 'Token User',
         email: 'sso@example.com',
@@ -93,7 +95,9 @@ describe('auth token crypto', () => {
     expect(Date.parse(token.expiresAt)).not.toBeNaN();
     expect(verified).toMatchObject({
       jti: token.tokenId,
-      ssoSubject: 'provider-user@identity.example.com',
+      providerId: 'corporate',
+      providerName: 'Corporate',
+      providerSubject: 'provider-user',
       username: 'sso_user',
       displayName: 'Token User',
       email: 'sso@example.com',

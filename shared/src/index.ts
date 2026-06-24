@@ -1,5 +1,5 @@
 export { isSafeRelativePath } from './paths.js';
-export { hasMatchingPasswordConfirmation } from './validation.js';
+export { hasMatchingPasswordConfirmation, isValidPhoneNumber, normalizePhoneNumber } from './validation.js';
 export {
   hasPermission,
   isSystemPermissionKey,

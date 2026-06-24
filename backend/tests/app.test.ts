@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app';
+import { closeServer, listen } from '../src/core/server';
 
 describe('createApp', () => {
   it('returns CORS headers on setup-required API responses in setup mode', async () => {
@@ -25,7 +26,7 @@ describe('createApp', () => {
     process.chdir(tempDir);
 
     try {
-      const port = await listen(server);
+      const port = await listenOnRandomPort(server);
       listening = true;
 
       const response = await fetch(`http://127.0.0.1:${port}/api/auth/sso/config`, {
@@ -55,14 +56,8 @@ describe('createApp', () => {
   });
 });
 
-async function listen(server: Server) {
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      server.off('error', reject);
-      resolve();
-    });
-  });
+async function listenOnRandomPort(server: Server) {
+  await listen(server, 0, '127.0.0.1');
 
   const address = server.address();
 
@@ -71,17 +66,4 @@ async function listen(server: Server) {
   }
 
   return address.port;
-}
-
-async function closeServer(server: Server) {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve();
-    });
-  });
 }

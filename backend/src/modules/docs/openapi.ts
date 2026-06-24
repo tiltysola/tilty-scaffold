@@ -1,77 +1,69 @@
 const setupEnvironmentKeys = [
-  'AUTH_ACCESS_TOKEN_COOKIE_NAME',
-  'AUTH_ACCESS_TOKEN_TTL_SECONDS',
-  'AUTH_COOKIE_SAME_SITE',
-  'AUTH_COOKIE_SECURE',
-  'AUTH_RATE_LIMIT_MAX',
-  'AUTH_RATE_LIMIT_WINDOW_MS',
-  'AUTH_REFRESH_TOKEN_COOKIE_NAME',
-  'AUTH_REFRESH_TOKEN_TTL_SECONDS',
-  'AUTH_TOKEN_SECRET',
-  'CACHE_REDIS_REQUEST_TIMEOUT_MS',
-  'CACHE_REDIS_URL',
-  'CACHE_STORE',
-  'CORS_ORIGINS',
-  'DATABASE_CONNECT_TIMEOUT_MS',
+  'NODE_ENV',
+  'SERVER_HOST',
+  'SERVER_PORT',
+  'APP_DOMAIN',
+  'APP_CORS_ORIGINS',
+  'SERVER_TRUST_PROXY',
+  'SERVER_MULTI_INSTANCE_ENABLED',
   'DATABASE_DIALECT',
-  'DATABASE_POOL_ACQUIRE_MS',
-  'DATABASE_POOL_IDLE_MS',
+  'DATABASE_STORAGE',
+  'DATABASE_URL',
+  'DATABASE_SSL',
+  'DATABASE_CONNECT_TIMEOUT_MS',
   'DATABASE_POOL_MAX',
   'DATABASE_POOL_MIN',
-  'DATABASE_SSL',
-  'DATABASE_STORAGE',
+  'DATABASE_POOL_ACQUIRE_MS',
+  'DATABASE_POOL_IDLE_MS',
   'DATABASE_SYNC',
-  'DATABASE_URL',
-  'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
-  'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS',
-  'EMAIL_VERIFICATION_SERVICE',
+  'CACHE_STORE',
+  'CACHE_REDIS_URL',
+  'CACHE_REDIS_REQUEST_TIMEOUT_MS',
+  'FILE_STORAGE_DRIVER',
+  'FILE_UPLOAD_MAX_BYTES',
+  'FILE_PUBLIC_BASE_URL',
   'FILE_LOCAL_ROOT',
   'FILE_OSS_ACCESS_KEY_ID',
   'FILE_OSS_ACCESS_KEY_SECRET',
   'FILE_OSS_BUCKET',
   'FILE_OSS_ENDPOINT',
-  'FILE_OSS_PUBLIC_BASE_URL',
   'FILE_OSS_REGION',
-  'FILE_PUBLIC_BASE_URL',
-  'FILE_STORAGE_DRIVER',
-  'FILE_UPLOAD_MAX_BYTES',
-  'GLOBAL_RATE_LIMIT_MAX',
-  'GLOBAL_RATE_LIMIT_WINDOW_MS',
-  'LOG_LOCAL_PATH',
-  'LOG_PENDING_WRITE_MAX',
-  'LOG_REQUEST_ENABLED',
-  'LOG_SLS_ACCESS_KEY_ID',
-  'LOG_SLS_ACCESS_KEY_SECRET',
-  'LOG_SLS_ENDPOINT',
-  'LOG_SLS_LOGSTORE',
-  'LOG_SLS_PROJECT',
-  'LOG_SLS_SOURCE',
-  'LOG_SLS_TOPIC',
-  'LOG_TARGETS',
-  'LOG_WRITE_TIMEOUT_MS',
-  'MULTI_INSTANCE_ENABLED',
-  'NODE_ENV',
+  'FILE_OSS_PUBLIC_BASE_URL',
   'SCHEDULER_ENABLED',
   'SCHEDULER_LOCK_TTL_MS',
-  'SERVER_HOST',
-  'SERVER_PORT',
-  'SMTP_FROM',
-  'SMTP_HOST',
-  'SMTP_PASSWORD',
-  'SMTP_PORT',
-  'SMTP_REQUEST_TIMEOUT_MS',
-  'SMTP_SECURE',
-  'SMTP_STARTTLS',
-  'SMTP_USERNAME',
-  'SSO_CLIENT_ID',
-  'SSO_CLIENT_SECRET',
+  'AUTH_TOKEN_SECRET',
+  'AUTH_ACCESS_TOKEN_TTL_SECONDS',
+  'AUTH_REFRESH_TOKEN_TTL_SECONDS',
+  'AUTH_ACCESS_TOKEN_COOKIE_NAME',
+  'AUTH_REFRESH_TOKEN_COOKIE_NAME',
+  'AUTH_COOKIE_SAME_SITE',
+  'AUTH_COOKIE_SECURE',
+  'AUTH_RATE_LIMIT_WINDOW_MS',
+  'AUTH_RATE_LIMIT_MAX',
+  'GLOBAL_RATE_LIMIT_WINDOW_MS',
+  'GLOBAL_RATE_LIMIT_MAX',
+  'LOG_REQUEST_ENABLED',
+  'LOG_TARGETS',
+  'LOG_PENDING_WRITE_MAX',
+  'LOG_WRITE_TIMEOUT_MS',
+  'LOG_LOCAL_PATH',
+  'LOG_SLS_ENDPOINT',
+  'LOG_SLS_PROJECT',
+  'LOG_SLS_LOGSTORE',
+  'LOG_SLS_ACCESS_KEY_ID',
+  'LOG_SLS_ACCESS_KEY_SECRET',
+  'LOG_SLS_TOPIC',
+  'LOG_SLS_SOURCE',
+  'EMAIL_VERIFICATION_SERVICE',
+  'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS',
+  'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
+  'EMAIL_SMTP_PROFILES',
+  'SMS_VERIFICATION_SERVICE',
+  'SMS_VERIFICATION_CODE_EXPIRES_IN_MS',
+  'SMS_VERIFICATION_CODE_COOLDOWN_MS',
+  'SMS_ALICLOUD_PROFILES',
   'SSO_ENABLED',
-  'SSO_FRONTEND_CALLBACK_URL',
-  'SSO_ISSUER_URL',
-  'SSO_REDIRECT_URI',
-  'SSO_REQUEST_TIMEOUT_MS',
-  'SSO_SCOPES',
-  'TRUST_PROXY',
+  'SSO_PROFILES',
 ] as const;
 
 export const openApiDocument = {
@@ -453,6 +445,47 @@ export const openApiDocument = {
         },
       },
     },
+    '/api/setup/test/sms': {
+      post: {
+        tags: ['Setup'],
+        summary: 'Test setup SMS configuration',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SetupEnvironmentRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'SMS test succeeded',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SetupSmsConnectionTestResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'SMS test failed',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiFailure',
+                },
+              },
+            },
+          },
+          '403': {
+            $ref: '#/components/responses/SetupForbidden',
+          },
+        },
+      },
+    },
     '/api/setup/test/sso': {
       post: {
         tags: ['Setup'],
@@ -684,6 +717,218 @@ export const openApiDocument = {
           },
           '404': {
             $ref: '#/components/responses/EmailVerificationDisabled',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/me/email-verification': {
+      post: {
+        tags: ['Auth'],
+        summary: "Send the authenticated user's email verification code",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Email verification send metadata',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/EmailVerificationSendResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '404': {
+            $ref: '#/components/responses/EmailVerificationDisabled',
+          },
+          '409': {
+            $ref: '#/components/responses/EmailAlreadyVerified',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/me/email-verification/confirm': {
+      post: {
+        tags: ['Auth'],
+        summary: "Confirm the authenticated user's email verification code",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/VerifyProfileEmailRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated authenticated user',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/AuthUser',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '404': {
+            $ref: '#/components/responses/EmailVerificationDisabled',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/me/phone-verification': {
+      post: {
+        tags: ['Auth'],
+        summary: "Send the authenticated user's phone verification code",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SendProfilePhoneVerificationRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'SMS verification send metadata',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/EmailVerificationSendResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '404': {
+            $ref: '#/components/responses/SmsVerificationDisabled',
+          },
+          '409': {
+            $ref: '#/components/responses/PhoneAlreadyVerified',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/me/phone-verification/confirm': {
+      post: {
+        tags: ['Auth'],
+        summary: "Confirm the authenticated user's phone verification code",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/VerifyProfilePhoneRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated authenticated user',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/AuthUser',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '404': {
+            $ref: '#/components/responses/SmsVerificationDisabled',
+          },
+          '409': {
+            $ref: '#/components/responses/PhoneIdentifierConflict',
           },
           '429': {
             $ref: '#/components/responses/RateLimited',
@@ -1053,6 +1298,15 @@ export const openApiDocument = {
               example: '/dashboard',
             },
           },
+          {
+            name: 'providerId',
+            in: 'query',
+            required: false,
+            schema: {
+              type: 'string',
+              pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$',
+            },
+          },
         ],
         responses: {
           '302': {
@@ -1063,6 +1317,77 @@ export const openApiDocument = {
           },
           '404': {
             $ref: '#/components/responses/SsoDisabled',
+          },
+        },
+      },
+    },
+    '/api/auth/sso/bind/start': {
+      get: {
+        tags: ['Auth'],
+        summary: 'Redirect an authenticated user to bind an SSO provider',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'redirect',
+            in: 'query',
+            required: false,
+            schema: {
+              type: 'string',
+              example: '/profile',
+            },
+          },
+          {
+            name: 'providerId',
+            in: 'query',
+            required: false,
+            schema: {
+              type: 'string',
+              pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$',
+            },
+          },
+        ],
+        responses: {
+          '302': {
+            description: 'Redirect to SSO provider authorization endpoint',
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '404': {
+            $ref: '#/components/responses/SsoDisabled',
+          },
+        },
+      },
+    },
+    '/api/auth/sso/identities': {
+      get: {
+        tags: ['Auth'],
+        summary: 'List current user SSO identities',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Current user SSO identities',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SsoIdentityListResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
           },
         },
       },
@@ -1300,6 +1625,91 @@ export const openApiDocument = {
           },
           '403': {
             $ref: '#/components/responses/Forbidden',
+          },
+        },
+      },
+    },
+    '/api/users/{id}': {
+      put: {
+        tags: ['Users'],
+        summary: 'Update a managed user',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/UpdateUserRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated user',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/UserListItem',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrPermissionForbidden',
+          },
+          '404': {
+            description: 'User or role was not found',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiFailure',
+                },
+              },
+            },
+          },
+          '409': {
+            description: 'User identifiers conflict, or the final ROOT assignment cannot be removed',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiFailure',
+                },
+              },
+            },
           },
         },
       },
@@ -1560,6 +1970,16 @@ export const openApiDocument = {
           },
         },
       },
+      EmailAlreadyVerified: {
+        description: 'The authenticated user email address is already verified',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
       EmailVerificationDisabled: {
         description: 'Email verification is disabled',
         content: {
@@ -1570,8 +1990,38 @@ export const openApiDocument = {
           },
         },
       },
+      PhoneAlreadyVerified: {
+        description: 'The authenticated user phone number is already verified',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
+      PhoneIdentifierConflict: {
+        description: 'Phone number already exists',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
       InvalidCredentials: {
         description: 'The account identifier or password is invalid',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
+      SmsVerificationDisabled: {
+        description: 'SMS verification is disabled',
         content: {
           'application/json': {
             schema: {
@@ -1724,7 +2174,7 @@ export const openApiDocument = {
       SetupEnvironment: {
         type: 'object',
         description:
-          'Backend environment variables accepted during setup. All values are submitted as strings; selected providers determine which values must be non-empty. SETUP_LOCKED is managed by the backend.',
+          'Backend configuration values accepted during setup. All values are submitted as strings; profile array fields are transported as JSON strings and rendered as TOML table arrays in config.toml. Selected providers determine which values must be non-empty. SETUP_LOCKED is managed by the backend.',
         required: setupEnvironmentKeys,
         propertyNames: {
           enum: setupEnvironmentKeys,
@@ -1742,7 +2192,7 @@ export const openApiDocument = {
           },
           environmentFileLoaded: {
             type: 'boolean',
-            description: 'Whether an existing backend .env file was loaded.',
+            description: 'Whether an existing backend config.toml file was loaded.',
           },
         },
       },
@@ -1796,6 +2246,11 @@ export const openApiDocument = {
         properties: {
           environment: {
             $ref: '#/components/schemas/SetupEnvironment',
+          },
+          stepId: {
+            type: 'string',
+            enum: ['administrator', 'runtime', 'scheduler', 'security'],
+            description: 'When provided, validates only the setup step represented by this identifier.',
           },
         },
       },
@@ -1928,6 +2383,39 @@ export const openApiDocument = {
           },
         ],
       },
+      SetupSmsConnectionTestResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['connected', 'service'],
+                properties: {
+                  connected: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                  service: {
+                    type: 'string',
+                    enum: ['aliyun', 'off'],
+                  },
+                  profileCountryCodes: {
+                    type: 'array',
+                    items: {
+                      type: 'string',
+                      enum: ['+86', '+852', '+853'],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
       SetupSsoConnectionTestResponse: {
         allOf: [
           {
@@ -1946,6 +2434,12 @@ export const openApiDocument = {
                   },
                   enabled: {
                     type: 'boolean',
+                  },
+                  providerIds: {
+                    type: 'array',
+                    items: {
+                      type: 'string',
+                    },
                   },
                 },
               },
@@ -2024,11 +2518,18 @@ export const openApiDocument = {
             minLength: 2,
             maxLength: 64,
           },
+          phoneNumber: {
+            type: ['string', 'null'],
+            maxLength: 32,
+            pattern: '^\\+[1-9]\\d{7,14}$',
+            description:
+              'Use null to clear an existing phone number. This endpoint rejects non-null phone numbers; binding or changing a phone number requires SMS verification.',
+          },
         },
       },
       AuthUser: {
         type: 'object',
-        required: ['username', 'displayName', 'email', 'roles', 'permissions'],
+        required: ['username', 'displayName', 'email', 'emailVerified', 'phoneVerified', 'roles', 'permissions'],
         properties: {
           username: {
             type: 'string',
@@ -2043,6 +2544,16 @@ export const openApiDocument = {
           email: {
             type: 'string',
             format: 'email',
+          },
+          emailVerified: {
+            type: 'boolean',
+          },
+          phoneNumber: {
+            type: 'string',
+            pattern: '^\\+[1-9]\\d{7,14}$',
+          },
+          phoneVerified: {
+            type: 'boolean',
           },
           avatarUrl: {
             type: 'string',
@@ -2102,6 +2613,8 @@ export const openApiDocument = {
           'username',
           'displayName',
           'email',
+          'emailVerified',
+          'phoneVerified',
           'available',
           'roles',
           'permissions',
@@ -2122,6 +2635,16 @@ export const openApiDocument = {
           email: {
             type: 'string',
             format: 'email',
+          },
+          emailVerified: {
+            type: 'boolean',
+          },
+          phoneNumber: {
+            type: 'string',
+            pattern: '^\\+[1-9]\\d{7,14}$',
+          },
+          phoneVerified: {
+            type: 'boolean',
           },
           avatarUrl: {
             type: 'string',
@@ -2223,11 +2746,74 @@ export const openApiDocument = {
           },
         },
       },
+      UpdateUserRequest: {
+        type: 'object',
+        properties: {
+          username: {
+            type: 'string',
+            minLength: 3,
+            maxLength: 32,
+          },
+          displayName: {
+            type: 'string',
+            minLength: 2,
+            maxLength: 64,
+          },
+          email: {
+            type: 'string',
+            format: 'email',
+            maxLength: 255,
+          },
+          emailVerified: {
+            type: 'boolean',
+          },
+          phoneNumber: {
+            type: ['string', 'null'],
+            maxLength: 32,
+            pattern: '^\\+[1-9]\\d{7,14}$',
+          },
+          phoneVerified: {
+            type: 'boolean',
+          },
+          password: {
+            type: 'string',
+            minLength: 8,
+            maxLength: 128,
+          },
+          available: {
+            type: 'boolean',
+          },
+          roleKeys: {
+            type: 'array',
+            maxItems: 50,
+            items: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 64,
+            },
+          },
+        },
+      },
       AuthConfig: {
         type: 'object',
-        required: ['passwordRecoveryEnabled', 'registrationEmailVerificationRequired'],
+        required: [
+          'passwordRecoveryEnabled',
+          'phoneCountryCodes',
+          'profileEmailVerificationEnabled',
+          'registrationEmailVerificationRequired',
+        ],
         properties: {
           passwordRecoveryEnabled: {
+            type: 'boolean',
+          },
+          phoneCountryCodes: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['+86', '+852', '+853'],
+            },
+          },
+          profileEmailVerificationEnabled: {
             type: 'boolean',
           },
           registrationEmailVerificationRequired: {
@@ -2254,6 +2840,42 @@ export const openApiDocument = {
             type: 'string',
             format: 'email',
             maxLength: 255,
+          },
+        },
+      },
+      SendProfilePhoneVerificationRequest: {
+        type: 'object',
+        required: ['phoneNumber'],
+        properties: {
+          phoneNumber: {
+            type: 'string',
+            maxLength: 32,
+            pattern: '^\\+[1-9]\\d{7,14}$',
+          },
+        },
+      },
+      VerifyProfileEmailRequest: {
+        type: 'object',
+        required: ['emailVerificationCode'],
+        properties: {
+          emailVerificationCode: {
+            type: 'string',
+            pattern: '^\\d{6}$',
+          },
+        },
+      },
+      VerifyProfilePhoneRequest: {
+        type: 'object',
+        required: ['phoneNumber', 'phoneVerificationCode'],
+        properties: {
+          phoneNumber: {
+            type: 'string',
+            maxLength: 32,
+            pattern: '^\\+[1-9]\\d{7,14}$',
+          },
+          phoneVerificationCode: {
+            type: 'string',
+            pattern: '^\\d{6}$',
           },
         },
       },
@@ -2285,12 +2907,93 @@ export const openApiDocument = {
       },
       SsoConfig: {
         type: 'object',
-        required: ['enabled'],
+        required: ['enabled', 'loginEnabled', 'providers'],
         properties: {
           enabled: {
             type: 'boolean',
           },
+          loginEnabled: {
+            type: 'boolean',
+          },
+          providers: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/SsoProvider',
+            },
+          },
         },
+      },
+      SsoProvider: {
+        type: 'object',
+        required: ['id', 'name', 'protocol', 'loginEnabled', 'bindingEnabled'],
+        properties: {
+          id: {
+            type: 'string',
+          },
+          name: {
+            type: 'string',
+          },
+          iconUrl: {
+            type: 'string',
+          },
+          protocol: {
+            type: 'string',
+            enum: ['oauth2', 'oidc'],
+          },
+          loginEnabled: {
+            type: 'boolean',
+          },
+          bindingEnabled: {
+            type: 'boolean',
+          },
+        },
+      },
+      SsoIdentityListResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['identities'],
+                properties: {
+                  identities: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['providerId', 'providerName', 'providerSubject', 'email', 'createdAt'],
+                      properties: {
+                        providerId: {
+                          type: 'string',
+                        },
+                        providerName: {
+                          type: 'string',
+                        },
+                        providerSubject: {
+                          type: 'string',
+                        },
+                        email: {
+                          type: 'string',
+                          format: 'email',
+                        },
+                        createdAt: {
+                          type: 'string',
+                          format: 'date-time',
+                        },
+                        iconUrl: {
+                          type: 'string',
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
       },
       SsoSessionRequest: {
         type: 'object',

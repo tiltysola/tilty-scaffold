@@ -20,20 +20,18 @@ export interface SetupCompleteInput {
   environment: SetupEnvironment;
 }
 
+export type SetupEnvironmentStepId = 'administrator' | 'runtime' | 'scheduler' | 'security';
+
 export async function fetchSetupDefaults() {
   return apiRequest<SetupDefaults>('/api/setup/defaults');
 }
 
-export async function validateSetup(input: SetupCompleteInput) {
-  return apiRequest<{ valid: true }>('/api/setup/validate', {
-    body: input,
-    method: 'POST',
-  });
-}
-
-export async function validateSetupEnvironment(environment: SetupEnvironment) {
+export async function validateSetupEnvironment(environment: SetupEnvironment, stepId?: SetupEnvironmentStepId) {
   return apiRequest<{ valid: true }>('/api/setup/validate/environment', {
-    body: { environment },
+    body: {
+      environment,
+      ...(stepId ? { stepId } : {}),
+    },
     method: 'POST',
   });
 }
@@ -73,8 +71,19 @@ export async function testEmailConnection(environment: SetupEnvironment) {
   });
 }
 
+export async function testSmsConnection(environment: SetupEnvironment) {
+  return apiRequest<{
+    connected: true;
+    profileCountryCodes?: Array<'+86' | '+852' | '+853'>;
+    service: 'aliyun' | 'off';
+  }>('/api/setup/test/sms', {
+    body: { environment },
+    method: 'POST',
+  });
+}
+
 export async function testSsoConnection(environment: SetupEnvironment) {
-  return apiRequest<{ connected: true; enabled: boolean }>('/api/setup/test/sso', {
+  return apiRequest<{ connected: true; enabled: boolean; providerIds?: string[] }>('/api/setup/test/sso', {
     body: { environment },
     method: 'POST',
   });

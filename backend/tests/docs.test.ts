@@ -17,12 +17,17 @@ describe('docs API', () => {
       description: 'Current origin',
     });
     expect(body.paths['/api/setup/defaults']).toBeDefined();
+    expect(body.paths['/api/setup/test/sms']).toBeDefined();
     expect(body.paths['/api/setup/status']).toBeUndefined();
     expect(body.paths['/api/auth/login']).toBeDefined();
     expect(body.paths['/api/auth/refresh']).toBeDefined();
     expect(body.paths['/api/auth/register/email-verification']).toBeDefined();
     expect(body.paths['/api/auth/password-reset']).toBeDefined();
     expect(body.paths['/api/auth/password-reset/email-verification']).toBeDefined();
+    expect(body.paths['/api/auth/me/email-verification']).toBeDefined();
+    expect(body.paths['/api/auth/me/email-verification/confirm']).toBeDefined();
+    expect(body.paths['/api/auth/me/phone-verification']).toBeDefined();
+    expect(body.paths['/api/auth/me/phone-verification/confirm']).toBeDefined();
     expect(body.paths['/api/auth/avatar']).toBeDefined();
     expect(body.paths['/api/auth/sso/config']).toBeDefined();
     expect(body.paths['/api/auth/sso/start']).toBeDefined();
@@ -32,6 +37,7 @@ describe('docs API', () => {
     expect(body.paths['/api/auth/sso/bind']).toBeDefined();
     expect(body.paths['/api/auth/logout']).toBeDefined();
     expect(body.paths['/api/users/']).toBeDefined();
+    expect(body.paths['/api/users/{id}']).toBeDefined();
     expect(body.paths['/api/users/{id}/roles']).toBeDefined();
     expect(body.paths['/api/health']).toBeDefined();
     expect(body.paths['/api/health/ready']).toBeDefined();
@@ -77,6 +83,36 @@ describe('docs API', () => {
       '400': 'ValidationError',
       '403': 'CsrfForbidden',
       '404': 'EmailVerificationDisabled',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/me/email-verification', 'post', {
+      '401': 'AuthRequired',
+      '403': 'CsrfForbidden',
+      '404': 'EmailVerificationDisabled',
+      '409': 'EmailAlreadyVerified',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/me/email-verification/confirm', 'post', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
+      '403': 'CsrfForbidden',
+      '404': 'EmailVerificationDisabled',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/me/phone-verification', 'post', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
+      '403': 'CsrfForbidden',
+      '404': 'SmsVerificationDisabled',
+      '409': 'PhoneAlreadyVerified',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/me/phone-verification/confirm', 'post', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
+      '403': 'CsrfForbidden',
+      '404': 'SmsVerificationDisabled',
+      '409': 'PhoneIdentifierConflict',
       '429': 'RateLimited',
     });
     expectResponseRefs(body, '/api/auth/me', 'get', {
@@ -130,6 +166,11 @@ describe('docs API', () => {
       '429': 'RateLimited',
     });
     expectResponseRefs(body, '/api/users/{id}/roles', 'put', {
+      '403': 'CsrfOrPermissionForbidden',
+    });
+    expectResponseRefs(body, '/api/users/{id}', 'put', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
       '403': 'CsrfOrPermissionForbidden',
     });
 
@@ -217,6 +258,7 @@ const setupUnsafePaths = [
   '/api/setup/test/file-storage',
   '/api/setup/test/logging',
   '/api/setup/test/email',
+  '/api/setup/test/sms',
   '/api/setup/test/sso',
   '/api/setup/complete',
 ] as const;
@@ -227,6 +269,10 @@ const csrfProtectedOperations = [
   ['/api/auth/password-reset/email-verification', 'post'],
   ['/api/auth/password-reset', 'post'],
   ['/api/auth/login', 'post'],
+  ['/api/auth/me/email-verification', 'post'],
+  ['/api/auth/me/email-verification/confirm', 'post'],
+  ['/api/auth/me/phone-verification', 'post'],
+  ['/api/auth/me/phone-verification/confirm', 'post'],
   ['/api/auth/me', 'patch'],
   ['/api/auth/refresh', 'post'],
   ['/api/auth/logout', 'post'],

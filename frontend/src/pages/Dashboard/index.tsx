@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/sha
 const Index = () => {
   const session = getStoredSession();
   const user = session?.user;
-  const displayName = user?.displayName ?? 'Signed-in user';
+  const displayName = user?.displayName ?? 'Unknown User';
   const username = getUserHandle(user?.username);
 
   return (

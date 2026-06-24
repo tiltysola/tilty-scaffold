@@ -14,13 +14,14 @@ import { createSession, createTestWindow } from './support/auth';
 
 describe('auth session storage', () => {
   afterEach(() => {
+    clearStoredSession();
     vi.unstubAllGlobals();
   });
 
   it('formats username handles for account displays', () => {
     expect(getUserHandle('test_user')).toBe('@test_user');
     expect(getUserHandle('  test_user  ')).toBe('@test_user');
-    expect(getUserHandle()).toBe('@user');
+    expect(getUserHandle()).toBe('@unknown-user');
   });
 
   it('formats user initials for avatars', () => {
@@ -38,6 +39,35 @@ describe('auth session storage', () => {
     storeSession(session);
 
     expect(getStoredSession()).toEqual(session);
+    expect(JSON.parse(window.localStorage.getItem(authSessionStorageKey) ?? '{}')).toEqual({
+      accessTokenExpiresAt: session.accessTokenExpiresAt,
+      refreshTokenExpiresAt: session.refreshTokenExpiresAt,
+    });
+  });
+
+  it('restores persisted session metadata without storing user details', () => {
+    const window = createTestWindow();
+    vi.stubGlobal('window', window);
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
+    const persistedSession = {
+      accessTokenExpiresAt: session.accessTokenExpiresAt,
+      refreshTokenExpiresAt: session.refreshTokenExpiresAt,
+    };
+
+    window.localStorage.setItem(authSessionStorageKey, JSON.stringify(persistedSession));
+
+    expect(getStoredSession()).toEqual({
+      ...persistedSession,
+      user: {
+        username: '',
+        displayName: '',
+        email: '',
+        emailVerified: false,
+        phoneVerified: false,
+        roles: [],
+        permissions: [],
+      },
+    });
   });
 
   it('clears invalid sessions', () => {

@@ -11,7 +11,7 @@ export function resolveApplicationPath(path: string, label: string) {
   return resolvedPath;
 }
 
-function isPathInside(root: string, target: string) {
+export function isPathInside(root: string, target: string) {
   const relativePath = relative(root, target);
 
   return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));

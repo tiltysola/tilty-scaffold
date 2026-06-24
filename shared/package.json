@@ -1,6 +1,6 @@
 {
   "name": "@tilty/shared",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "type": "commonjs",
   "exports": {
@@ -48,5 +48,8 @@
   },
   "devDependencies": {
     "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "libphonenumber-js": "^1.13.7"
   }
 }

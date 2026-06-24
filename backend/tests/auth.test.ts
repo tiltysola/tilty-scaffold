@@ -11,6 +11,7 @@ import { createAuthModule } from '../src/modules/auth';
 import { defaultAuthCookieConfig } from '../src/modules/auth/auth.controller';
 import { type EmailSender, EmailVerificationService } from '../src/modules/auth/auth.email';
 import { AuthService, defaultAuthTokenConfig } from '../src/modules/auth/auth.service';
+import { type SmsSender, SmsVerificationService } from '../src/modules/auth/auth.sms';
 import { UserService } from '../src/modules/users/user.service';
 import { createTestContext, getTestRouteHandler, runMiddleware, runMiddlewares } from './support/http';
 
@@ -62,6 +63,8 @@ describe('auth API', () => {
       username: credentials.username,
       displayName: credentials.displayName,
       email: credentials.email,
+      emailVerified: false,
+      phoneVerified: false,
     });
     expect(registerBody.data.user).not.toHaveProperty('id');
     expect(registerBody.data).not.toHaveProperty('accessToken');
@@ -99,6 +102,8 @@ describe('auth API', () => {
       username: credentials.username,
       displayName: credentials.displayName,
       email: credentials.email,
+      emailVerified: false,
+      phoneVerified: false,
     });
     expect(meBody.data).not.toHaveProperty('id');
   });
@@ -181,7 +186,7 @@ describe('auth API', () => {
   it('rejects refresh tokens when cache consumption loses a race', async () => {
     const cacheStore = new RejectingCompareAndSetCacheStore();
     const authService = new AuthService(
-      new UserService(models.user),
+      new UserService(models.user, models.ssoIdentity),
       services.accessControl,
       authTokenSecret,
       new EmailVerificationService(),
@@ -294,6 +299,37 @@ describe('auth API', () => {
     });
     await expect(services.auth.getCurrentUser(session.accessToken)).resolves.toMatchObject({
       displayName: 'Updated Profile User',
+    });
+  });
+
+  it('rejects direct phone number binding without SMS verification', async () => {
+    const session = await services.auth.register({
+      username: 'phone_user',
+      displayName: 'Phone User',
+      email: 'phone@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    await expect(
+      runMiddleware(
+        getTestRouteHandler(routes, 'patch', '/me'),
+        createTestContext(
+          {
+            displayName: 'Phone User',
+            phoneNumber: '+86 138-0013-8000',
+          },
+          {},
+          undefined,
+          {
+            cookies: {
+              tilty_scaffold_access_token: session.accessToken,
+            },
+          },
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: 'PHONE_VERIFICATION_REQUIRED',
+      status: 400,
     });
   });
 
@@ -418,9 +454,71 @@ describe('auth API', () => {
       error: null,
       data: {
         passwordRecoveryEnabled: false,
+        phoneCountryCodes: [],
+        profileEmailVerificationEnabled: false,
         registrationEmailVerificationRequired: false,
       },
     });
+  });
+
+  it('returns SMS country codes in auth public configuration when SMS is enabled', async () => {
+    const smsSender: SmsSender = {
+      send: async () => undefined,
+    };
+    const authService = new AuthService(
+      new UserService(models.user, models.ssoIdentity),
+      services.accessControl,
+      authTokenSecret,
+      new EmailVerificationService(),
+      undefined,
+      defaultAuthTokenConfig,
+      new MemoryCacheStore(),
+      new SmsVerificationService({
+        codeCooldownMs: 60_000,
+        codeExpiresInMs: 10 * 60_000,
+        phoneCountryCodes: ['+86'],
+        sender: smsSender,
+      }),
+    );
+    routes = createAuthModule(authService, {
+      cookies: defaultAuthCookieConfig,
+      ssoService: services.sso,
+    }).routes;
+
+    const context = await runMiddleware(getTestRouteHandler(routes, 'get', '/config'), createTestContext());
+
+    expect(context.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        phoneCountryCodes: ['+86'],
+      },
+    });
+  });
+
+  it('wires Aliyun SMS configuration into the auth service', () => {
+    const configuredServices = createServices(models, {
+      authTokenSecret,
+      sms: {
+        aliyunProfiles: [
+          {
+            phoneCountryCode: '+852',
+            apiVersion: '2018-05-01',
+            operation: 'SendMessageToGlobe',
+            regionId: 'ap-southeast-1',
+            endpoint: 'dysmsapi.ap-southeast-1.aliyuncs.com',
+            accessKeyId: 'sms-access-key-id',
+            accessKeySecret: 'sms-access-key-secret',
+            messageTemplate: 'Your verification code is ${code}.',
+            type: 'OTP',
+          },
+        ],
+        codeCooldownMs: 60_000,
+        codeExpiresInMs: 10 * 60_000,
+      },
+    });
+
+    expect(configuredServices.auth.getPublicConfig().phoneCountryCodes).toEqual(['+852']);
   });
 
   it('requires a registration email verification code when email is enabled', async () => {
@@ -430,7 +528,7 @@ describe('auth API', () => {
         sentCode = /code is (\d{6})/.exec(input.text)?.[1] ?? '';
       },
     };
-    const userService = new UserService(models.user);
+    const userService = new UserService(models.user, models.ssoIdentity);
     const authService = new AuthService(
       userService,
       services.accessControl,
@@ -456,6 +554,8 @@ describe('auth API', () => {
       error: null,
       data: {
         passwordRecoveryEnabled: true,
+        phoneCountryCodes: [],
+        profileEmailVerificationEnabled: true,
         registrationEmailVerificationRequired: true,
       },
     });
@@ -500,6 +600,165 @@ describe('auth API', () => {
 
     expect(registerContext.status).toBe(201);
     expect(registerBody.data.user.email).toBe('verified@example.com');
+    expect(registerBody.data.user.emailVerified).toBe(true);
+  });
+
+  it('verifies the current profile email with an emailed verification code', async () => {
+    let sentCode = '';
+    const sender: EmailSender = {
+      send: async (input) => {
+        sentCode = /code is (\d{6})/.exec(input.text)?.[1] ?? '';
+      },
+    };
+    const session = await services.auth.register({
+      username: 'profile_email_user',
+      displayName: 'Profile Email User',
+      email: 'profile-email@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const authService = new AuthService(
+      new UserService(models.user, models.ssoIdentity),
+      services.accessControl,
+      authTokenSecret,
+      new EmailVerificationService({
+        codeCooldownMs: 60_000,
+        codeExpiresInMs: 10 * 60_000,
+        sender,
+      }),
+      undefined,
+      defaultAuthTokenConfig,
+      new MemoryCacheStore(),
+    );
+    routes = createAuthModule(authService, {
+      cookies: defaultAuthCookieConfig,
+      ssoService: services.sso,
+    }).routes;
+
+    const sendContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/me/email-verification'),
+      createTestContext(undefined, {}, undefined, {
+        cookies: {
+          tilty_scaffold_access_token: session.accessToken,
+        },
+      }),
+    );
+
+    expect(sendContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        cooldownSeconds: 60,
+        expiresInSeconds: 600,
+      },
+    });
+    expect(sentCode).toMatch(/^\d{6}$/);
+
+    const verifyContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/me/email-verification/confirm'),
+      createTestContext(
+        {
+          emailVerificationCode: sentCode,
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+    const verifyBody = verifyContext.body as AuthUserBody;
+    const user = await models.user.findOne({ where: { email: 'profile-email@example.com' } });
+
+    expect(verifyBody.data.emailVerified).toBe(true);
+    expect(user?.emailVerified).toBe(true);
+  });
+
+  it('verifies the current profile phone with an SMS verification code', async () => {
+    let sentCode = '';
+    const sender: SmsSender = {
+      send: async (input) => {
+        sentCode = input.code;
+      },
+    };
+    const session = await services.auth.register({
+      username: 'profile_phone_user',
+      displayName: 'Profile Phone User',
+      email: 'profile-phone@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const authService = new AuthService(
+      new UserService(models.user, models.ssoIdentity),
+      services.accessControl,
+      authTokenSecret,
+      new EmailVerificationService(),
+      undefined,
+      defaultAuthTokenConfig,
+      new MemoryCacheStore(),
+      new SmsVerificationService({
+        codeCooldownMs: 60_000,
+        codeExpiresInMs: 10 * 60_000,
+        phoneCountryCodes: ['+86'],
+        sender,
+      }),
+    );
+    routes = createAuthModule(authService, {
+      cookies: defaultAuthCookieConfig,
+      ssoService: services.sso,
+    }).routes;
+
+    const sendContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/me/phone-verification'),
+      createTestContext(
+        {
+          phoneNumber: '+8613800138000',
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(sendContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        cooldownSeconds: 60,
+        expiresInSeconds: 600,
+      },
+    });
+    expect(sentCode).toMatch(/^\d{6}$/);
+
+    const verifyContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/me/phone-verification/confirm'),
+      createTestContext(
+        {
+          phoneNumber: '+8613800138000',
+          phoneVerificationCode: sentCode,
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+    const verifyBody = verifyContext.body as AuthUserBody;
+    const user = await models.user.findOne({ where: { email: 'profile-phone@example.com' } });
+
+    expect(verifyBody.data.phoneNumber).toBe('+8613800138000');
+    expect(verifyBody.data.phoneVerified).toBe(true);
+    expect(user?.phoneNumber).toBe('+8613800138000');
+    expect(user?.phoneVerified).toBe(true);
   });
 
   it('resets passwords with emailed verification codes when email is enabled', async () => {
@@ -509,7 +768,7 @@ describe('auth API', () => {
         sentCode = /code is (\d{6})/.exec(input.text)?.[1] ?? '';
       },
     };
-    const userService = new UserService(models.user);
+    const userService = new UserService(models.user, models.ssoIdentity);
     const authService = new AuthService(
       userService,
       services.accessControl,
@@ -602,6 +861,8 @@ describe('auth API', () => {
       error: null,
       data: {
         enabled: false,
+        loginEnabled: false,
+        providers: [],
       },
     });
   });
@@ -633,6 +894,9 @@ interface AuthSessionBody {
       username: string;
       displayName: string;
       email: string;
+      emailVerified: boolean;
+      phoneNumber?: string;
+      phoneVerified: boolean;
     };
   };
 }
@@ -649,6 +913,9 @@ interface AuthUserBody {
     username: string;
     displayName: string;
     email: string;
+    emailVerified: boolean;
+    phoneNumber?: string;
+    phoneVerified: boolean;
     avatarUrl?: string;
   };
 }

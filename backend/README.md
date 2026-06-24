@@ -31,26 +31,35 @@ complete setup.
 In production, the compiled backend serves API routes and the compiled frontend
 files from `../frontend/dist`.
 
-## Environment
+## Configuration
 
-For manual configuration, copy `.env.example` to `.env` and edit supported
-variables there.
+For manual configuration, copy `config.toml.example` to `config.toml` and edit
+supported configuration keys there.
 
 ```bash
-cp .env.example .env
+cp config.toml.example config.toml
 ```
 
-Startup enters setup-only mode when `.env` is absent, omits `SETUP_LOCKED`, or
-sets `SETUP_LOCKED=false`. In setup-only mode, `/api/setup/*` remains available,
-browser navigation redirects to `/setup`, and other API requests return
-`SETUP_REQUIRED`. Existing `.env` values are merged into setup defaults. After
-setup writes `SETUP_LOCKED=true`, non-setup API requests return
+Application configuration is loaded from `config.toml`. Process environment
+variables are used only by setup-only mode before the backend is locked.
+
+Project-defined configuration keys use uppercase snake case and begin with a
+domain prefix, such as `APP_`, `SERVER_`, `AUTH_`, `DATABASE_`, `EMAIL_`,
+`SMS_`, or `SSO_`. `NODE_ENV` is retained as the standard Node.js runtime
+selector, and `SETUP_LOCKED` is reserved for setup state.
+
+Startup enters setup-only mode when `config.toml` is absent, omits
+`SETUP_LOCKED`, or sets `SETUP_LOCKED=false`. In setup-only mode,
+`/api/setup/*` remains available, browser navigation redirects to `/setup`, and
+other API requests return `SETUP_REQUIRED`. Existing configuration values are
+merged into setup defaults. After setup writes `SETUP_LOCKED=true`,
+non-setup API requests return
 `SETUP_RESTART_REQUIRED` until restart.
 
-Complete `/setup` in the frontend to write `.env`, apply migrations, and seed
-built-in access control. Setup creates the root administrator only when the
+Complete `/setup` in the frontend to write `config.toml`, apply migrations, and
+seed built-in access control. Setup creates the root administrator only when the
 selected database has no available users; otherwise existing users are retained.
-Restart the backend to load the generated environment.
+Restart the backend to load the generated configuration.
 Relative runtime paths such as `DATABASE_STORAGE`, `LOG_LOCAL_PATH`, and
 `FILE_LOCAL_ROOT` must resolve inside the backend application directory.
 
@@ -63,16 +72,21 @@ then synchronizes those records after database connection. Production requires
 for multi-instance deployments. Keep total pooled database connections across
 all backend instances below the database connection limit.
 
-`TRUST_PROXY=false` is the default. Enable `TRUST_PROXY=true` only when the
-backend is deployed behind a trusted reverse proxy that controls forwarded
-client headers.
+`APP_DOMAIN` defines the primary public application origin, including protocol,
+such as `https://app.example.com`. Setup uses this value as the default
+`APP_CORS_ORIGINS` allowlist and as the base for generated callback URLs such
+as `/login` and `/api/auth/sso/callback`.
 
-`MULTI_INSTANCE_ENABLED=true` enables multi-instance validation. It requires
-Redis cache, MySQL or PostgreSQL, and OSS file storage. When scheduled jobs are
-enabled in multi-instance mode, Redis locks select one executor for each job
-trigger. Configure the lock TTL with `SCHEDULER_LOCK_TTL_MS`. Scheduled jobs
-must remain idempotent because distributed locks do not guarantee strict
-exactly-once execution.
+`SERVER_TRUST_PROXY=false` is the default. Enable `SERVER_TRUST_PROXY=true`
+only when the backend is deployed behind a trusted reverse proxy that controls
+forwarded client headers.
+
+`SERVER_MULTI_INSTANCE_ENABLED=true` enables multi-instance validation. It
+requires Redis cache, MySQL or PostgreSQL, and OSS file storage. When scheduled
+jobs are enabled in multi-instance mode, Redis locks select one executor for
+each job trigger. Configure the lock TTL with `SCHEDULER_LOCK_TTL_MS`.
+Scheduled jobs must remain idempotent because distributed locks do not
+guarantee strict exactly-once execution.
 
 `LOG_TARGETS` controls logging destinations. Supported targets are `console`,
 `local`, and `sls`; combine them with commas when multiple destinations are
@@ -110,7 +124,7 @@ controlled by `AUTH_ACCESS_TOKEN_TTL_SECONDS` and
 `AUTH_COOKIE_SAME_SITE`, and `AUTH_COOKIE_SECURE`. Production requires secure
 cookies. Refresh token state uses the configured cache store and is rotated by
 `/api/auth/refresh`. Unsafe browser requests must include an `Origin` or
-`Referer` header matching the backend origin or a configured `CORS_ORIGINS`
+`Referer` header matching the backend origin or a configured `APP_CORS_ORIGINS`
 entry.
 
 Authentication-sensitive routes use the configured cache store for the limiter
@@ -128,33 +142,59 @@ the permission and system-role grants. The initial built-in permissions are
 The first registered account receives the `ROOT` role automatically.
 
 Registration email verification is disabled by default. Set
-`EMAIL_VERIFICATION_SERVICE=smtp`, `SMTP_HOST`, `SMTP_FROM`, and any required
-SMTP authentication settings to require emailed verification codes during
-account registration and enable password recovery. Verification code records use
-the configured cache store.
+`EMAIL_VERIFICATION_SERVICE=smtp` and configure `EMAIL_SMTP_PROFILES` as TOML
+table arrays containing one or more SMTP profiles to require emailed
+verification codes during account registration and enable password recovery.
+Each send uses a randomly selected SMTP profile. Each profile requires `host`,
+`port`,
+`secure`, `startTls`, `from`, and `timeoutMs`; `username` and `password` are
+optional but must be configured together. Verification code records use the
+configured cache store.
 
-OIDC SSO is disabled by default. Set `SSO_ENABLED=true`, configure
-`SSO_ISSUER_URL`, `SSO_CLIENT_ID`, `SSO_CLIENT_SECRET`, and `SSO_REDIRECT_URI`,
-and set `SSO_FRONTEND_CALLBACK_URL` to the frontend login URL (default
-`http://localhost:8011/login`) to enable authorization-code SSO authentication.
-`SSO_ISSUER_URL` accepts a trailing slash and is normalized before discovery
-validation. Production SSO URLs must use HTTPS. OIDC discovery endpoints must
-use the configured issuer origin. The provider callback should use
-`/api/auth/sso/callback`; after validation, the backend redirects to
-`SSO_FRONTEND_CALLBACK_URL` with a short-lived, one-time handoff token for known
-SSO identities or a short-lived, one-time bind token for first-time SSO
-identities in the URL fragment. Bound SSO identities are stored as
-`sub@issuer_host`, for example
-`provider-user@identity.example.com`.
+SMS verification configuration is disabled by default. Set
+`SMS_VERIFICATION_SERVICE=aliyun` and configure `SMS_ALICLOUD_PROFILES` as a
+TOML table array to enable Aliyun SMS profile validation. Profiles are keyed by
+`phoneCountryCode`; supported values are `+86`, `+852`, and `+853`. The `+86`
+profile uses Dysmsapi `2017-05-25` `SendSms` with `signName` and
+`templateCode`. The `+852` and `+853` profiles use Dysmsapi `2018-05-01`
+`SendMessageToGlobe` with the Singapore endpoint
+`dysmsapi.ap-southeast-1.aliyuncs.com`, `regionId=ap-southeast-1`, and
+`messageTemplate`. Verification code timing is controlled by
+`SMS_VERIFICATION_CODE_EXPIRES_IN_MS` and `SMS_VERIFICATION_CODE_COOLDOWN_MS`.
+The setup connection test probes Aliyun credentials without sending a real SMS.
+Verified phone bindings must store phone numbers in E.164 format.
+
+SSO is disabled by default. Set `SSO_ENABLED=true` and configure `SSO_PROFILES`
+as TOML table arrays to enable OAuth 2.0 or OpenID Connect providers. Providers
+with `loginEnabled=true` are shown on the login page; providers with
+`bindingEnabled=true` can be bound from the user profile. Each profile has a
+unique `id`, display `name`, optional `iconUrl`, client credentials, callback
+URLs, scopes, and protocol-specific endpoints. OIDC profiles use `issuerUrl`
+and discovery; OAuth 2.0 profiles use
+`authorizationUrl`, `tokenUrl`, `userInfoUrl`, and profile field mappings such
+as `subjectField`, `emailField`, and `emailVerifiedField`.
+
+Production SSO URLs must use HTTPS. Setup defaults each profile
+`frontendCallbackUrl` to `{APP_DOMAIN}/login` and `redirectUri` to
+`{APP_DOMAIN}/api/auth/sso/callback`; edit the redirect URI when the backend API
+uses a separate public origin. OIDC discovery endpoints must use the configured
+issuer origin. The provider callback should use `/api/auth/sso/callback`; after
+validation, the backend redirects to the profile `frontendCallbackUrl` with a
+short-lived, one-time handoff token for known SSO identities, a one-time bind
+token for first-time SSO identities, or a profile binding result for
+authenticated profile binding. Bound SSO identities are stored by `providerId`
+and provider subject,
+allowing one account to bind multiple providers.
 
 First-time SSO users can either create a new account with a local password or
 bind the SSO identity to an existing account. New-account email addresses are
-taken from the SSO ID token, which must include `email_verified=true`. Symmetric
-HS identity-token signatures are accepted only when the OIDC discovery document
-explicitly advertises that algorithm. The optional `redirect` query on
-`/api/auth/sso/start` must be a same-origin
-application path beginning with a single `/`; absolute URLs, protocol-relative
-URLs, and backslashes are rejected.
+taken from the provider profile and must be verified. Symmetric HS identity-token
+signatures are accepted only when the OIDC discovery document explicitly
+advertises that algorithm. The optional `providerId` query selects a configured
+provider. The optional `redirect` query on `/api/auth/sso/start` and
+`/api/auth/sso/bind/start` must be a same-origin application path beginning with
+a single `/`; absolute URLs, protocol-relative URLs, and backslashes are
+rejected.
 
 ## API
 
@@ -163,41 +203,49 @@ cookies and return only session metadata in the JSON response. Authenticated
 browser requests use the configured access-token cookie; session refresh and
 logout use the configured refresh-token cookie.
 
-| Method  | Path                                          | Description                                    |
-| ------- | --------------------------------------------- | ---------------------------------------------- |
-| `GET`   | `/api/setup/defaults`                         | Return generated setup defaults                |
-| `POST`  | `/api/setup/validate`                         | Validate setup input                           |
-| `POST`  | `/api/setup/validate/environment`             | Validate setup environment fields              |
-| `POST`  | `/api/setup/test/database`                    | Test database connectivity and user presence   |
-| `POST`  | `/api/setup/test/cache`                       | Test cache connectivity                        |
-| `POST`  | `/api/setup/test/file-storage`                | Test file storage configuration                |
-| `POST`  | `/api/setup/test/logging`                     | Test logging configuration                     |
-| `POST`  | `/api/setup/test/email`                       | Test email configuration                       |
-| `POST`  | `/api/setup/test/sso`                         | Test SSO provider discovery                    |
-| `POST`  | `/api/setup/complete`                         | Complete setup                                 |
-| `GET`   | `/api/auth/config`                            | Return public authentication configuration     |
-| `POST`  | `/api/auth/register`                          | Create an account                              |
-| `POST`  | `/api/auth/register/email-verification`       | Send a registration email verification code    |
-| `POST`  | `/api/auth/password-reset/email-verification` | Send a password reset email verification code  |
-| `POST`  | `/api/auth/password-reset`                    | Reset an account password                      |
-| `POST`  | `/api/auth/login`                             | Authenticate an account                        |
-| `GET`   | `/api/auth/me`                                | Return the authenticated user                  |
-| `PATCH` | `/api/auth/me`                                | Update the authenticated user's profile        |
-| `POST`  | `/api/auth/refresh`                           | Refresh the authenticated session              |
-| `POST`  | `/api/auth/logout`                            | Clear the authenticated session                |
-| `POST`  | `/api/auth/avatar`                            | Upload the authenticated user's avatar         |
-| `GET`   | `/api/auth/sso/config`                        | Return public SSO authentication configuration |
-| `GET`   | `/api/auth/sso/start`                         | Redirect to the configured SSO provider        |
-| `GET`   | `/api/auth/sso/callback`                      | Handle the SSO provider callback               |
-| `POST`  | `/api/auth/sso/session`                       | Exchange an SSO handoff token for a session    |
-| `POST`  | `/api/auth/sso/account`                       | Create an account from an unbound SSO identity |
-| `POST`  | `/api/auth/sso/bind`                          | Bind an SSO identity to an existing account    |
-| `GET`   | `/api/users/`                                 | List paginated users and available roles       |
-| `PUT`   | `/api/users/:id/roles`                        | Replace a user's role assignments              |
-| `GET`   | `/api/health`                                 | Return service health                          |
-| `GET`   | `/api/health/ready`                           | Return service readiness                       |
-| `GET`   | `/api/openapi.json`                           | Return the OpenAPI document                    |
-| `GET`   | `/api/docs`                                   | Serve Swagger UI                               |
+| Method  | Path                                          | Description                                     |
+| ------- | --------------------------------------------- | ----------------------------------------------- |
+| `GET`   | `/api/setup/defaults`                         | Return generated setup defaults                 |
+| `POST`  | `/api/setup/validate`                         | Validate setup input                            |
+| `POST`  | `/api/setup/validate/environment`             | Validate setup environment fields               |
+| `POST`  | `/api/setup/test/database`                    | Test database connectivity and user presence    |
+| `POST`  | `/api/setup/test/cache`                       | Test cache connectivity                         |
+| `POST`  | `/api/setup/test/file-storage`                | Test file storage configuration                 |
+| `POST`  | `/api/setup/test/logging`                     | Test logging configuration                      |
+| `POST`  | `/api/setup/test/email`                       | Test email configuration                        |
+| `POST`  | `/api/setup/test/sms`                         | Test SMS configuration                          |
+| `POST`  | `/api/setup/test/sso`                         | Test SSO provider discovery                     |
+| `POST`  | `/api/setup/complete`                         | Complete setup                                  |
+| `GET`   | `/api/auth/config`                            | Return public authentication configuration      |
+| `POST`  | `/api/auth/register`                          | Create an account                               |
+| `POST`  | `/api/auth/register/email-verification`       | Send a registration email verification code     |
+| `POST`  | `/api/auth/password-reset/email-verification` | Send a password reset email verification code   |
+| `POST`  | `/api/auth/password-reset`                    | Reset an account password                       |
+| `POST`  | `/api/auth/login`                             | Authenticate an account                         |
+| `GET`   | `/api/auth/me`                                | Return the authenticated user                   |
+| `PATCH` | `/api/auth/me`                                | Update the authenticated user's profile         |
+| `POST`  | `/api/auth/me/email-verification`             | Send a profile email verification code          |
+| `POST`  | `/api/auth/me/email-verification/confirm`     | Confirm a profile email verification code       |
+| `POST`  | `/api/auth/me/phone-verification`             | Send a profile phone verification code          |
+| `POST`  | `/api/auth/me/phone-verification/confirm`     | Confirm a profile phone verification code       |
+| `POST`  | `/api/auth/refresh`                           | Refresh the authenticated session               |
+| `POST`  | `/api/auth/logout`                            | Clear the authenticated session                 |
+| `POST`  | `/api/auth/avatar`                            | Upload the authenticated user's avatar          |
+| `GET`   | `/api/auth/sso/config`                        | Return public SSO authentication configuration  |
+| `GET`   | `/api/auth/sso/start`                         | Redirect to the configured SSO provider         |
+| `GET`   | `/api/auth/sso/bind/start`                    | Redirect to an SSO provider for profile binding |
+| `GET`   | `/api/auth/sso/identities`                    | Return SSO identities bound to the current user |
+| `GET`   | `/api/auth/sso/callback`                      | Handle the SSO provider callback                |
+| `POST`  | `/api/auth/sso/session`                       | Exchange an SSO handoff token for a session     |
+| `POST`  | `/api/auth/sso/account`                       | Create an account from an unbound SSO identity  |
+| `POST`  | `/api/auth/sso/bind`                          | Bind an SSO identity to an existing account     |
+| `GET`   | `/api/users/`                                 | List paginated users and available roles        |
+| `PUT`   | `/api/users/:id`                              | Update a managed user                           |
+| `PUT`   | `/api/users/:id/roles`                        | Replace a user's role assignments               |
+| `GET`   | `/api/health`                                 | Return service health                           |
+| `GET`   | `/api/health/ready`                           | Return service readiness                        |
+| `GET`   | `/api/openapi.json`                           | Return the OpenAPI document                     |
+| `GET`   | `/api/docs`                                   | Serve Swagger UI                                |
 
 Error responses use this shape:
 

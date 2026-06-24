@@ -8,8 +8,8 @@ import {
   testEmailConnection,
   testFileStorageConnection,
   testLoggingConnection,
+  testSmsConnection,
   testSsoConnection,
-  validateSetup,
   validateSetupEnvironment,
 } from '../src/lib/setup';
 import { createApiSuccessResponse } from './support/api';
@@ -40,15 +40,14 @@ describe('setup API client', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('posts setup validation and completion payloads', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (input) => {
-      const url = String(input);
-      const data = url.endsWith('/api/setup/validate')
-        ? { valid: true }
-        : { administratorCreated: true, completed: true, restartRequired: true };
-
-      return createApiSuccessResponse(data);
-    });
+  it('posts setup completion payloads', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      createApiSuccessResponse({
+        administratorCreated: true,
+        completed: true,
+        restartRequired: true,
+      }),
+    );
     const payload = {
       administrator: {
         username: 'root_user',
@@ -64,18 +63,15 @@ describe('setup API client', () => {
 
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(validateSetup(payload)).resolves.toEqual({ valid: true });
     await expect(completeSetup(payload)).resolves.toEqual({
       administratorCreated: true,
       completed: true,
       restartRequired: true,
     });
 
-    const [, validateInit] = fetchMock.mock.calls[0]!;
-    const [, completeInit] = fetchMock.mock.calls[1]!;
+    const [url, completeInit] = fetchMock.mock.calls[0]!;
 
-    expect(validateInit?.method).toBe('POST');
-    expect(validateInit?.body).toBe(JSON.stringify(payload));
+    expect(String(url)).toBe('/api/setup/complete');
     expect(completeInit?.method).toBe('POST');
     expect(completeInit?.body).toBe(JSON.stringify(payload));
   });
@@ -99,8 +95,17 @@ describe('setup API client', () => {
     await expect(testFileStorageConnection(environment)).resolves.toEqual({ connected: true, driver: 'oss' });
     await expect(testLoggingConnection(environment)).resolves.toEqual({ connected: true, target: 'sls' });
     await expect(testEmailConnection(environment)).resolves.toEqual({ connected: true, service: 'smtp' });
-    await expect(testSsoConnection(environment)).resolves.toEqual({ connected: true, enabled: true });
-    await expect(validateSetupEnvironment(environment)).resolves.toEqual({ valid: true });
+    await expect(testSmsConnection(environment)).resolves.toEqual({
+      connected: true,
+      service: 'aliyun',
+      profileCountryCodes: ['+86', '+852'],
+    });
+    await expect(testSsoConnection(environment)).resolves.toEqual({
+      connected: true,
+      enabled: true,
+      providerIds: ['corporate'],
+    });
+    await expect(validateSetupEnvironment(environment, 'runtime')).resolves.toEqual({ valid: true });
 
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
       '/api/setup/test/database',
@@ -108,6 +113,7 @@ describe('setup API client', () => {
       '/api/setup/test/file-storage',
       '/api/setup/test/logging',
       '/api/setup/test/email',
+      '/api/setup/test/sms',
       '/api/setup/test/sso',
       '/api/setup/validate/environment',
     ]);
@@ -131,8 +137,12 @@ function getConnectivityTestResponse(url: string) {
     return { connected: true, service: 'smtp' };
   }
 
+  if (url.endsWith('/api/setup/test/sms')) {
+    return { connected: true, service: 'aliyun', profileCountryCodes: ['+86', '+852'] };
+  }
+
   if (url.endsWith('/api/setup/test/sso')) {
-    return { connected: true, enabled: true };
+    return { connected: true, enabled: true, providerIds: ['corporate'] };
   }
 
   if (url.endsWith('/api/setup/validate/environment')) {

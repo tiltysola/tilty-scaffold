@@ -17,6 +17,7 @@ import {
   verifyRefreshToken,
 } from './auth.crypto';
 import { type EmailVerificationService } from './auth.email';
+import { SmsVerificationService } from './auth.sms';
 import { assertPasswordConfirmation } from './auth.validation';
 
 interface RegisterInput {
@@ -33,6 +34,19 @@ interface ResetPasswordInput {
   emailVerificationCode: string;
   password: string;
   confirmPassword: string;
+}
+
+interface VerifyProfileEmailInput {
+  emailVerificationCode: string;
+}
+
+interface SendProfilePhoneVerificationInput {
+  phoneNumber: string;
+}
+
+interface VerifyProfilePhoneInput {
+  phoneNumber: string;
+  phoneVerificationCode: string;
 }
 
 interface LoginInput {
@@ -52,6 +66,7 @@ interface AvatarUploadInput {
 
 interface UpdateCurrentUserInput {
   displayName: string;
+  phoneNumber?: string | null | undefined;
 }
 
 export interface AuthTokenConfig {
@@ -80,11 +95,14 @@ export class AuthService {
     private readonly fileStorage: FileStorage | undefined,
     private readonly tokenConfig: AuthTokenConfig,
     private readonly refreshTokenStore: CacheStore,
+    private readonly smsVerification: SmsVerificationService = new SmsVerificationService(),
   ) {}
 
   getPublicConfig() {
     return {
       passwordRecoveryEnabled: this.emailVerification.isEnabled(),
+      phoneCountryCodes: this.smsVerification.getPhoneCountryCodes(),
+      profileEmailVerificationEnabled: this.emailVerification.isEnabled(),
       registrationEmailVerificationRequired: this.emailVerification.isEnabled(),
     };
   }
@@ -109,6 +127,26 @@ export class AuthService {
     return this.emailVerification.sendPasswordResetCode(input.email);
   }
 
+  async sendProfilePhoneVerification(token: string, input: SendProfilePhoneVerificationInput) {
+    const { user } = await this.authenticate(token);
+
+    if (user.phoneNumber === input.phoneNumber && user.phoneVerified) {
+      throw new AppError('PHONE_ALREADY_VERIFIED', 'Phone number is already verified.', 409);
+    }
+
+    return this.smsVerification.sendProfilePhoneVerificationCode(input.phoneNumber);
+  }
+
+  async sendProfileEmailVerification(token: string) {
+    const { user } = await this.authenticate(token);
+
+    if (user.emailVerified) {
+      throw new AppError('EMAIL_ALREADY_VERIFIED', 'Email address is already verified.', 409);
+    }
+
+    return this.emailVerification.sendProfileEmailVerificationCode(user.email);
+  }
+
   async register(input: RegisterInput) {
     assertPasswordConfirmation(input);
 
@@ -119,6 +157,7 @@ export class AuthService {
       username: input.username,
       displayName: input.displayName,
       email: input.email,
+      emailVerified: this.emailVerification.isEnabled(),
       ...credentials,
     });
 
@@ -205,6 +244,30 @@ export class AuthService {
     return { reset: true } as const;
   }
 
+  async verifyProfileEmail(token: string, input: VerifyProfileEmailInput) {
+    const { user } = await this.authenticate(token);
+
+    if (user.emailVerified) {
+      return toAuthUser(user, await this.accessControl.getUserAccess(user.id));
+    }
+
+    await this.emailVerification.verifyProfileEmailVerificationCode(user.email, input.emailVerificationCode);
+
+    const updatedUser = await this.userService.verifyEmail(user);
+
+    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+  }
+
+  async verifyProfilePhone(token: string, input: VerifyProfilePhoneInput) {
+    const { user } = await this.authenticate(token);
+
+    await this.smsVerification.verifyProfilePhoneVerificationCode(input.phoneNumber, input.phoneVerificationCode);
+
+    const updatedUser = await this.userService.verifyPhoneNumber(user, input.phoneNumber);
+
+    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+  }
+
   async authenticate(token: string) {
     const payload = await verifyAccessToken(token, this.tokenSecret);
     const user = await this.userService.findById(payload.sub);
@@ -228,6 +291,11 @@ export class AuthService {
 
   async updateCurrentUser(token: string, input: UpdateCurrentUserInput) {
     const { user } = await this.authenticate(token);
+
+    if (input.phoneNumber) {
+      throw new AppError('PHONE_VERIFICATION_REQUIRED', 'Phone number changes require SMS verification.', 400);
+    }
+
     const updatedUser = await this.userService.updateProfile(user, input);
 
     return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
@@ -344,6 +412,9 @@ export function toAuthUser(user: UserModel, access: UserAccess) {
     username: user.username,
     displayName: user.displayName,
     email: user.email,
+    emailVerified: user.emailVerified,
+    ...(user.phoneNumber ? { phoneNumber: user.phoneNumber } : {}),
+    phoneVerified: user.phoneVerified,
     ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
     roles: access.roles,
     permissions: access.permissions,

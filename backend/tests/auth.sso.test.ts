@@ -38,7 +38,7 @@ describe('OIDC SSO service', () => {
   it('reports disabled public config and rejects login start when unconfigured', async () => {
     const services = createServices(models, { authTokenSecret });
 
-    expect(services.sso.getPublicConfig()).toEqual({ enabled: false });
+    expect(services.sso.getPublicConfig()).toEqual({ enabled: false, loginEnabled: false, providers: [] });
     await expect(services.sso.createLoginUrl()).rejects.toMatchObject({
       code: 'SSO_DISABLED',
       status: 404,
@@ -51,7 +51,19 @@ describe('OIDC SSO service', () => {
       sso: ssoConfig,
     });
 
-    expect(services.sso.getPublicConfig()).toEqual({ enabled: true });
+    expect(services.sso.getPublicConfig()).toEqual({
+      enabled: true,
+      loginEnabled: true,
+      providers: [
+        {
+          id: 'identity.example.com',
+          name: 'SSO',
+          protocol: 'oidc',
+          loginEnabled: true,
+          bindingEnabled: true,
+        },
+      ],
+    });
   });
 
   it('rejects discovery documents with non-http endpoint URLs', async () => {
@@ -256,7 +268,8 @@ describe('OIDC SSO service', () => {
     const bind = await verifySsoBindToken(bindToken!, authTokenSecret);
 
     expect(bind).toMatchObject({
-      ssoSubject: 'provider-user@identity.example.com',
+      providerId: 'identity.example.com',
+      providerSubject: 'provider-user',
       username: 'sso',
       displayName: 'Provider User',
       email: 'sso@example.com',
@@ -327,9 +340,13 @@ describe('OIDC SSO service', () => {
       },
     });
 
-    const user = await models.user.findOne({
-      where: { ssoSubject: 'provider-user@identity.example.com' },
+    const identity = await models.ssoIdentity.findOne({
+      where: {
+        providerId: 'identity.example.com',
+        providerSubject: 'provider-user',
+      },
     });
+    const user = identity ? await models.user.findByPk(identity.userId) : null;
 
     expect(user).toBeTruthy();
     await user!.update({
@@ -391,6 +408,52 @@ describe('OIDC SSO service', () => {
     await expect(services.sso.exchangeHandoffToken(handoffToken!)).rejects.toMatchObject({
       code: 'AUTH_INVALID_TOKEN',
       status: 401,
+    });
+  });
+
+  it('rejects disabled users matched through a secondary SSO identity', async () => {
+    const services = createServices(models, {
+      authTokenSecret,
+      sso: ssoConfig,
+    });
+    await services.auth.register({
+      username: 'disabled_sso',
+      displayName: 'Disabled SSO',
+      email: 'disabled-sso@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const user = await models.user.findOne({
+      where: {
+        email: 'disabled-sso@example.com',
+      },
+    });
+
+    expect(user).not.toBeNull();
+
+    if (!user) {
+      return;
+    }
+
+    await user.update({
+      available: false,
+    });
+    await models.ssoIdentity.create({
+      userId: user.id,
+      providerId: 'identity.example.com',
+      providerSubject: 'secondary-provider-subject',
+      email: user.email,
+    });
+
+    await expect(
+      handleHsSsoCallback(services, {
+        email: user.email,
+        name: user.displayName,
+        subject: 'secondary-provider-subject',
+      }),
+    ).rejects.toMatchObject({
+      code: 'USER_UNAVAILABLE',
+      status: 403,
     });
   });
 
@@ -722,7 +785,12 @@ describe('OIDC SSO service', () => {
       where: { email: 'occupied@example.com' },
     });
 
-    await occupiedUser!.update({ ssoSubject: 'other-provider-user@identity.example.com' });
+    await models.ssoIdentity.create({
+      userId: occupiedUser!.id,
+      providerId: 'identity.example.com',
+      providerSubject: 'other-provider-user',
+      email: occupiedUser!.email,
+    });
 
     const bindToken = await createHsSsoBindToken(services, {
       email: 'provider-existing@example.com',
@@ -778,8 +846,16 @@ describe('OIDC SSO service', () => {
     const user = await models.user.findOne({
       where: { email: 'existing@example.com' },
     });
+    const identity = user
+      ? await models.ssoIdentity.findOne({
+          where: {
+            userId: user.id,
+            providerId: 'identity.example.com',
+          },
+        })
+      : null;
 
-    expect(user?.ssoSubject).toBe('existing-provider-user@identity.example.com');
+    expect(identity?.providerSubject).toBe('existing-provider-user');
   });
 
   it('keeps the SSO bind token usable when account creation hits an existing username', async () => {
@@ -896,6 +972,22 @@ async function createHsSsoBindToken(
     subject: string;
   },
 ) {
+  const callbackUrl = new URL(await handleHsSsoCallback(services, input));
+  const bindToken = getCallbackParams(callbackUrl).get('sso_bind_token');
+
+  expect(bindToken).toEqual(expect.any(String));
+
+  return bindToken!;
+}
+
+async function handleHsSsoCallback(
+  services: ReturnType<typeof createServices>,
+  input: {
+    email: string;
+    name: string;
+    subject: string;
+  },
+) {
   const { SignJWT } = await import('jose');
   let idToken = '';
 
@@ -940,17 +1032,10 @@ async function createHsSsoBindToken(
     .setExpirationTime('5m')
     .sign(Buffer.from(ssoConfig.clientSecret, 'utf8'));
 
-  const callbackUrl = new URL(
-    await services.sso.handleCallback({
-      code: 'authorization-code',
-      state: stateToken!,
-    }),
-  );
-  const bindToken = getCallbackParams(callbackUrl).get('sso_bind_token');
-
-  expect(bindToken).toEqual(expect.any(String));
-
-  return bindToken!;
+  return services.sso.handleCallback({
+    code: 'authorization-code',
+    state: stateToken!,
+  });
 }
 
 function jsonResponse(body: unknown) {

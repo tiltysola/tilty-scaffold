@@ -15,6 +15,9 @@ export interface UserListItem {
   username: string;
   displayName: string;
   email: string;
+  emailVerified: boolean;
+  phoneNumber?: string;
+  phoneVerified: boolean;
   avatarUrl?: string;
   available: boolean;
   roles: string[];
@@ -41,6 +44,18 @@ interface FetchUsersOptions {
   pageSize?: number;
 }
 
+export interface UpdateUserInput {
+  username?: string;
+  displayName?: string;
+  email?: string;
+  emailVerified?: boolean;
+  phoneNumber?: string | null;
+  phoneVerified?: boolean;
+  password?: string;
+  available?: boolean;
+  roleKeys?: string[];
+}
+
 export async function fetchUsers(options: FetchUsersOptions = {}) {
   const params = new URLSearchParams();
 
@@ -55,6 +70,13 @@ export async function fetchUsers(options: FetchUsersOptions = {}) {
   const query = params.toString();
 
   return authenticatedApiRequest<UserListResponse>(`/api/users/${query ? `?${query}` : ''}`);
+}
+
+export async function updateUser(userId: string, input: UpdateUserInput) {
+  return authenticatedApiRequest<UserListItem>(`/api/users/${userId}`, {
+    body: input,
+    method: 'PUT',
+  });
 }
 
 export async function updateUserRoles(userId: string, roleKeys: string[]) {

@@ -3,8 +3,8 @@
 Full-stack application scaffold with a Vite React frontend and a Koa TypeScript
 backend. The scaffold includes local authentication, optional OIDC SSO
 authentication with first-time account binding, and optional SMTP-backed
-registration email verification, password recovery, and RBAC-based access
-control.
+registration email verification, password recovery, Aliyun SMS profile
+validation, and RBAC-based access control.
 
 ## Workspaces
 
@@ -24,7 +24,7 @@ npm run dev
 ```
 
 Frontend runs on `http://localhost:8011`. Complete `/setup` to write
-`backend/.env` and apply migrations. Backend defaults to
+`backend/config.toml` and apply migrations. Backend defaults to
 `http://localhost:3000`; Swagger UI is available at `/api/docs`.
 
 For production, run `npm run build` and `npm run start:backend`. The backend
@@ -58,8 +58,9 @@ Workspace-specific commands are documented in `frontend/README.md`,
 Authentication and account flows are coordinated by the backend and frontend.
 The backend stores access and refresh tokens in HttpOnly cookies and returns
 session metadata. The frontend discovers public authentication, SSO, and email
-verification settings from backend endpoints and keeps only user and expiration
-metadata for UI state.
+verification settings from backend endpoints. Persistent browser storage keeps
+only token-expiration metadata; authenticated user state is refreshed from
+`/api/auth/me`.
 
 Access control is shared across all workspaces. Built-in permission keys live in
 `shared/`; the backend synchronizes and enforces RBAC; the frontend uses the

@@ -1,12 +1,13 @@
-import { UniqueConstraintError } from 'sequelize';
+import { type Transaction, UniqueConstraintError } from 'sequelize';
 
 import { AppError } from '../../core/errors';
-import { type UserModel } from './user.model';
+import { type SsoIdentityModel, type UserModel } from './user.model';
 
 interface CreateUserWithCredentialsInput {
   username: string;
   displayName: string;
   email: string;
+  emailVerified?: boolean;
   passwordHash: string;
   passwordSalt: string;
 }
@@ -15,9 +16,11 @@ interface CreateSsoUserInput {
   username: string;
   displayName: string;
   email: string;
+  emailVerified?: boolean;
   passwordHash: string;
   passwordSalt: string;
-  ssoSubject: string;
+  providerId: string;
+  providerSubject: string;
 }
 
 interface UpdateUserPasswordInput {
@@ -27,6 +30,25 @@ interface UpdateUserPasswordInput {
 
 interface UpdateUserProfileInput {
   displayName: string;
+  phoneNumber?: string | null | undefined;
+}
+
+interface UpdateManagedUserInput {
+  username?: string | undefined;
+  displayName?: string | undefined;
+  email?: string | undefined;
+  emailVerified?: boolean | undefined;
+  phoneNumber?: string | null | undefined;
+  phoneVerified?: boolean | undefined;
+  passwordHash?: string | undefined;
+  passwordSalt?: string | undefined;
+  available?: boolean | undefined;
+}
+
+interface BindSsoIdentityInput {
+  email: string;
+  providerId: string;
+  providerSubject: string;
 }
 
 interface ListUsersInput {
@@ -34,8 +56,15 @@ interface ListUsersInput {
   pageSize: number;
 }
 
+interface DatabaseWriteOptions {
+  transaction?: Transaction;
+}
+
 export class UserService {
-  constructor(private readonly userModel: typeof UserModel) {}
+  constructor(
+    private readonly userModel: typeof UserModel,
+    private readonly ssoIdentityModel: typeof SsoIdentityModel,
+  ) {}
 
   async findById(id: string) {
     return this.userModel.findOne({
@@ -46,15 +75,32 @@ export class UserService {
     });
   }
 
-  async findByEmail(email: string) {
+  async findManagedById(id: string) {
     return this.userModel.findOne({
+      where: {
+        id,
+      },
+    });
+  }
+
+  async findByEmail(email: string, options: DatabaseWriteOptions = {}) {
+    return this.userModel.findOne({
+      ...withTransaction(options),
       where: { email },
     });
   }
 
-  async findByUsername(username: string) {
+  async findByUsername(username: string, options: DatabaseWriteOptions = {}) {
     return this.userModel.findOne({
+      ...withTransaction(options),
       where: { username },
+    });
+  }
+
+  async findByPhoneNumber(phoneNumber: string, options: DatabaseWriteOptions = {}) {
+    return this.userModel.findOne({
+      ...withTransaction(options),
+      where: { phoneNumber },
     });
   }
 
@@ -66,9 +112,24 @@ export class UserService {
       : this.findByUsername(normalizedIdentifier);
   }
 
-  async findBySsoSubject(ssoSubject: string) {
-    return this.userModel.findOne({
-      where: { ssoSubject },
+  async findBySsoIdentity(providerId: string, providerSubject: string) {
+    const identity = await this.ssoIdentityModel.findOne({
+      where: {
+        providerId,
+        providerSubject,
+      },
+    });
+
+    return identity ? this.findManagedById(identity.userId) : null;
+  }
+
+  async listSsoIdentities(userId: string) {
+    return this.ssoIdentityModel.findAll({
+      where: { userId },
+      order: [
+        ['providerId', 'ASC'],
+        ['createdAt', 'ASC'],
+      ],
     });
   }
 
@@ -113,7 +174,7 @@ export class UserService {
   }
 
   async createWithSso(input: CreateSsoUserInput) {
-    const existingBySubject = await this.findBySsoSubject(input.ssoSubject);
+    const existingBySubject = await this.findBySsoIdentity(input.providerId, input.providerSubject);
 
     if (existingBySubject) {
       throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
@@ -132,10 +193,26 @@ export class UserService {
     }
 
     try {
-      return await this.userModel.create(input);
+      const { providerId, providerSubject, ...userInput } = input;
+
+      return await this.userModel.sequelize!.transaction(async (transaction) => {
+        const user = await this.userModel.create(userInput, { transaction });
+
+        await this.ssoIdentityModel.create(
+          {
+            userId: user.id,
+            providerId,
+            providerSubject,
+            email: input.email,
+          },
+          { transaction },
+        );
+
+        return user;
+      });
     } catch (error) {
       if (error instanceof UniqueConstraintError) {
-        if (await this.findBySsoSubject(input.ssoSubject)) {
+        if (await this.findBySsoIdentity(input.providerId, input.providerSubject)) {
           throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
         }
 
@@ -154,25 +231,47 @@ export class UserService {
     }
   }
 
-  async bindSsoSubject(user: UserModel, ssoSubject: string) {
-    const existing = await this.findBySsoSubject(ssoSubject);
+  async bindSsoIdentity(user: UserModel, input: BindSsoIdentityInput) {
+    const existing = await this.ssoIdentityModel.findOne({
+      where: {
+        providerId: input.providerId,
+        providerSubject: input.providerSubject,
+      },
+    });
 
-    if (existing && existing.id !== user.id) {
+    if (existing && existing.userId !== user.id) {
       throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
     }
 
-    if (user.ssoSubject && user.ssoSubject !== ssoSubject) {
+    const existingForUserProvider = await this.ssoIdentityModel.findOne({
+      where: {
+        userId: user.id,
+        providerId: input.providerId,
+      },
+    });
+
+    if (existingForUserProvider) {
+      if (existingForUserProvider.providerSubject === input.providerSubject) {
+        return user;
+      }
+
       throw new AppError('USER_SSO_SUBJECT_EXISTS', 'The user is already associated with another SSO identity.', 409);
     }
 
-    if (user.ssoSubject === ssoSubject) {
-      return user;
-    }
-
     try {
-      user.ssoSubject = ssoSubject;
+      return await this.userModel.sequelize!.transaction(async (transaction) => {
+        await this.ssoIdentityModel.create(
+          {
+            userId: user.id,
+            providerId: input.providerId,
+            providerSubject: input.providerSubject,
+            email: input.email,
+          },
+          { transaction },
+        );
 
-      return await user.save();
+        return user;
+      });
     } catch (error) {
       if (error instanceof UniqueConstraintError) {
         throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
@@ -189,10 +288,203 @@ export class UserService {
     return user.save();
   }
 
+  async verifyEmail(user: UserModel) {
+    if (user.emailVerified) {
+      return user;
+    }
+
+    user.emailVerified = true;
+
+    return user.save();
+  }
+
+  async verifyPhoneNumber(user: UserModel, phoneNumber: string) {
+    if (user.phoneNumber === phoneNumber && user.phoneVerified) {
+      return user;
+    }
+
+    if (phoneNumber !== user.phoneNumber) {
+      const existing = await this.findByPhoneNumber(phoneNumber);
+
+      if (existing && existing.id !== user.id) {
+        throw new AppError('USER_PHONE_NUMBER_EXISTS', 'The phone number is already bound to another account.', 409);
+      }
+    }
+
+    user.phoneNumber = phoneNumber;
+    user.phoneVerified = true;
+
+    try {
+      return await user.save();
+    } catch (error) {
+      if (error instanceof UniqueConstraintError) {
+        if (await this.findByPhoneNumber(phoneNumber)) {
+          throw new AppError('USER_PHONE_NUMBER_EXISTS', 'The phone number is already bound to another account.', 409);
+        }
+
+        throw new AppError('USER_IDENTIFIER_CONFLICT', 'The account identifiers are already registered.', 409);
+      }
+
+      throw error;
+    }
+  }
+
   async updateProfile(user: UserModel, input: UpdateUserProfileInput) {
     user.displayName = input.displayName;
 
-    return user.save();
+    if (input.phoneNumber !== undefined && input.phoneNumber !== user.phoneNumber) {
+      if (input.phoneNumber) {
+        const existing = await this.findByPhoneNumber(input.phoneNumber);
+
+        if (existing && existing.id !== user.id) {
+          throw new AppError('USER_PHONE_NUMBER_EXISTS', 'The phone number is already bound to another account.', 409);
+        }
+      }
+
+      user.phoneNumber = input.phoneNumber;
+      user.phoneVerified = false;
+    }
+
+    try {
+      return await user.save();
+    } catch (error) {
+      if (error instanceof UniqueConstraintError) {
+        if (input.phoneNumber && (await this.findByPhoneNumber(input.phoneNumber))) {
+          throw new AppError('USER_PHONE_NUMBER_EXISTS', 'The phone number is already bound to another account.', 409);
+        }
+
+        throw new AppError('USER_IDENTIFIER_CONFLICT', 'The account identifiers are already registered.', 409);
+      }
+
+      throw error;
+    }
+  }
+
+  async updateManagedUser(user: UserModel, input: UpdateManagedUserInput, options: DatabaseWriteOptions = {}) {
+    const usernameProvided = Object.prototype.hasOwnProperty.call(input, 'username');
+    const emailProvided = Object.prototype.hasOwnProperty.call(input, 'email');
+    const emailVerifiedProvided = Object.prototype.hasOwnProperty.call(input, 'emailVerified');
+    const phoneNumberProvided = Object.prototype.hasOwnProperty.call(input, 'phoneNumber');
+    const phoneVerifiedProvided = Object.prototype.hasOwnProperty.call(input, 'phoneVerified');
+    const nextUsername = input.username ?? user.username;
+    const nextEmail = input.email ?? user.email;
+    const nextPhoneNumber = phoneNumberProvided ? (input.phoneNumber ?? null) : user.phoneNumber;
+
+    if (usernameProvided && nextUsername !== user.username) {
+      const existing = await this.findByUsername(nextUsername, options);
+
+      if (existing && existing.id !== user.id) {
+        throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+      }
+    }
+
+    if (emailProvided && nextEmail !== user.email) {
+      const existing = await this.findByEmail(nextEmail, options);
+
+      if (existing && existing.id !== user.id) {
+        throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+      }
+    }
+
+    if (phoneNumberProvided && nextPhoneNumber && nextPhoneNumber !== user.phoneNumber) {
+      const existing = await this.findByPhoneNumber(nextPhoneNumber, options);
+
+      if (existing && existing.id !== user.id) {
+        throw new AppError('USER_PHONE_NUMBER_EXISTS', 'The phone number is already bound to another account.', 409);
+      }
+    }
+
+    if (input.phoneVerified === true && !nextPhoneNumber) {
+      throw new AppError('USER_PHONE_NUMBER_REQUIRED', 'Phone number is required before marking it verified.', 400);
+    }
+
+    const emailChanged = emailProvided && nextEmail !== user.email;
+    const phoneChanged = phoneNumberProvided && nextPhoneNumber !== user.phoneNumber;
+
+    if (usernameProvided) {
+      user.username = nextUsername;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'displayName')) {
+      user.displayName = input.displayName ?? user.displayName;
+    }
+
+    if (emailProvided) {
+      user.email = nextEmail;
+    }
+
+    if (emailVerifiedProvided) {
+      user.emailVerified = input.emailVerified ?? user.emailVerified;
+    } else if (emailChanged) {
+      user.emailVerified = false;
+    }
+
+    if (phoneNumberProvided) {
+      user.phoneNumber = nextPhoneNumber;
+    }
+
+    if (phoneVerifiedProvided) {
+      user.phoneVerified = input.phoneVerified ?? user.phoneVerified;
+    } else if (phoneChanged) {
+      user.phoneVerified = false;
+    }
+
+    if (input.passwordHash && input.passwordSalt) {
+      user.passwordHash = input.passwordHash;
+      user.passwordSalt = input.passwordSalt;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'available')) {
+      user.available = input.available ?? user.available;
+    }
+
+    if (!user.changed()) {
+      return user;
+    }
+
+    try {
+      return await user.save(withTransaction(options));
+    } catch (error) {
+      if (error instanceof UniqueConstraintError) {
+        const existingUsername = await this.findByUsername(nextUsername, options);
+
+        if (existingUsername && existingUsername.id !== user.id) {
+          throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+        }
+
+        const existingEmail = await this.findByEmail(nextEmail, options);
+
+        if (existingEmail && existingEmail.id !== user.id) {
+          throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+        }
+
+        if (nextPhoneNumber) {
+          const existingPhoneNumber = await this.findByPhoneNumber(nextPhoneNumber, options);
+
+          if (existingPhoneNumber && existingPhoneNumber.id !== user.id) {
+            throw new AppError(
+              'USER_PHONE_NUMBER_EXISTS',
+              'The phone number is already bound to another account.',
+              409,
+            );
+          }
+        }
+
+        throw new AppError('USER_IDENTIFIER_CONFLICT', 'The account identifiers are already registered.', 409);
+      }
+
+      throw error;
+    }
+  }
+
+  async transaction<T>(callback: (transaction: Transaction) => Promise<T>) {
+    const sequelize = this.userModel.sequelize;
+
+    if (!sequelize) {
+      throw new Error('User model is not initialized.');
+    }
+
+    return sequelize.transaction(callback);
   }
 
   async updateAvatar(user: UserModel, avatarUrl: string, avatarStorageKey: string) {
@@ -223,4 +515,8 @@ export class UserService {
 
     throw new AppError('USER_IDENTIFIER_CONFLICT', 'The account identifiers are already registered.', 409);
   }
+}
+
+function withTransaction(options: DatabaseWriteOptions) {
+  return options.transaction ? { transaction: options.transaction } : {};
 }
