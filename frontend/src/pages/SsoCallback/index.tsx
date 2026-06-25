@@ -38,23 +38,23 @@ interface SsoBindState {
   displayName: string;
   email: string;
   providerName: string;
-  token: string;
   redirectPath: string;
+  token: string;
 }
 
 type ParsedSsoCallback =
   | {
+      type: 'session';
       redirectPath: string;
       token: string;
-      type: 'session';
     }
   | {
-      ssoBind: SsoBindState;
       type: 'bind';
+      ssoBind: SsoBindState;
     }
   | {
-      redirectPath: string;
       type: 'profileBind';
+      redirectPath: string;
     }
   | {
       type: 'invalid';
@@ -361,30 +361,30 @@ function parseSsoCallback(hash: string): ParsedSsoCallback {
 
   if (params.get('sso_profile_bind') === 'success') {
     return {
-      redirectPath: getSafeRedirectPath(params.get('redirect')),
       type: 'profileBind',
+      redirectPath: getSafeRedirectPath(params.get('redirect')),
     };
   }
 
   if (token) {
     return {
+      type: 'session',
       redirectPath: getSafeRedirectPath(params.get('redirect')),
       token,
-      type: 'session',
     };
   }
 
   if (bindToken) {
     return {
+      type: 'bind',
       ssoBind: {
         username: params.get('sso_username') ?? '',
         displayName: params.get('sso_display_name') ?? '',
         email: params.get('sso_email') ?? '',
         providerName: params.get('sso_provider_name') ?? 'SSO',
-        token: bindToken,
         redirectPath: getSafeRedirectPath(params.get('redirect')),
+        token: bindToken,
       },
-      type: 'bind',
     };
   }
 

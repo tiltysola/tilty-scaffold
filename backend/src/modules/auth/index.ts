@@ -52,18 +52,13 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
       },
       {
         method: 'post',
-        path: '/me/email-verification/confirm',
-        handlers: rateLimitedHandlers(controller.verifyProfileEmail),
-      },
-      {
-        method: 'post',
         path: '/me/phone-verification',
         handlers: rateLimitedHandlers(controller.sendProfilePhoneVerification),
       },
       {
         method: 'post',
-        path: '/me/phone-verification/confirm',
-        handlers: rateLimitedHandlers(controller.verifyProfilePhone),
+        path: '/login',
+        handlers: rateLimitedHandlers(controller.login),
       },
       {
         method: 'post',
@@ -72,8 +67,13 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
       },
       {
         method: 'post',
-        path: '/login',
-        handlers: rateLimitedHandlers(controller.login),
+        path: '/me/email-verification/confirm',
+        handlers: rateLimitedHandlers(controller.verifyProfileEmail),
+      },
+      {
+        method: 'post',
+        path: '/me/phone-verification/confirm',
+        handlers: rateLimitedHandlers(controller.verifyProfilePhone),
       },
       {
         method: 'get',
@@ -87,6 +87,11 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
       },
       {
         method: 'post',
+        path: '/avatar',
+        handlers: rateLimitedHandlers(controller.avatar),
+      },
+      {
+        method: 'post',
         path: '/refresh',
         handlers: [controller.refresh],
       },
@@ -94,11 +99,6 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
         method: 'post',
         path: '/logout',
         handlers: [controller.logout],
-      },
-      {
-        method: 'post',
-        path: '/avatar',
-        handlers: rateLimitedHandlers(controller.avatar),
       },
       {
         method: 'get',
@@ -114,11 +114,6 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
         method: 'get',
         path: '/sso/bind/start',
         handlers: [controller.ssoBindStart],
-      },
-      {
-        method: 'get',
-        path: '/sso/identities',
-        handlers: [controller.ssoIdentities],
       },
       {
         method: 'get',
@@ -139,6 +134,11 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
         method: 'post',
         path: '/sso/bind',
         handlers: rateLimitedHandlers(controller.ssoBindAccount),
+      },
+      {
+        method: 'get',
+        path: '/sso/identities',
+        handlers: [controller.ssoIdentities],
       },
     ],
   };
