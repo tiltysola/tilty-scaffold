@@ -8,6 +8,7 @@
     "shared"
   ],
   "scripts": {
+    "postinstall": "npm --prefix shared run build",
     "dev": "npm run dev:backend & npm run dev:frontend & wait",
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:backend": "npm --prefix backend run dev",

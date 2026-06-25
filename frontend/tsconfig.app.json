@@ -17,7 +17,9 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@tilty/shared": ["../shared/src/index.ts"],
+      "@tilty/shared/*": ["../shared/src/*.ts"]
     },
     "strict": true,
     "noUnusedLocals": true,

@@ -23,6 +23,9 @@ npm install
 npm run dev
 ```
 
+`npm install` installs workspace dependencies and builds the `shared/` package
+output.
+
 Frontend runs on `http://localhost:8011`. Complete `/setup` to write
 `backend/config.toml` and apply migrations. Backend defaults to
 `http://localhost:3000`; Swagger UI is available at `/api/docs`.

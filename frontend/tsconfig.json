@@ -2,7 +2,9 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@tilty/shared": ["../shared/src/index.ts"],
+      "@tilty/shared/*": ["../shared/src/*.ts"]
     }
   },
   "files": [],
