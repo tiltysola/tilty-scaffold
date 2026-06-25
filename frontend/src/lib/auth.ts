@@ -170,6 +170,24 @@ export async function register(input: RegisterInput) {
   return session;
 }
 
+export async function login(input: LoginInput) {
+  const session = await apiRequest<AuthSession>('/api/auth/login', {
+    body: input,
+    method: 'POST',
+  });
+
+  storeSession(session);
+
+  return session;
+}
+
+export async function logout() {
+  await apiRequest<{ signedOut: true }>('/api/auth/logout', {
+    method: 'POST',
+  });
+  clearStoredSession();
+}
+
 export function sendRegistrationEmailVerification(input: SendEmailVerificationInput) {
   return apiRequest<EmailVerificationSendResult>('/api/auth/register/email-verification', {
     body: input,
@@ -184,33 +202,67 @@ export function sendPasswordResetEmailVerification(input: SendEmailVerificationI
   });
 }
 
-export function sendProfileEmailVerification() {
-  return authenticatedApiRequest<EmailVerificationSendResult>('/api/auth/me/email-verification', {
-    method: 'POST',
-  });
-}
-
-export function sendProfilePhoneVerification(input: SendProfilePhoneVerificationInput) {
-  return authenticatedApiRequest<EmailVerificationSendResult>('/api/auth/me/phone-verification', {
-    body: input,
-    method: 'POST',
-  });
-}
-
-export async function login(input: LoginInput) {
-  const session = await apiRequest<AuthSession>('/api/auth/login', {
-    body: input,
-    method: 'POST',
-  });
-
-  storeSession(session);
-
-  return session;
-}
-
 export function resetPassword(input: ResetPasswordInput) {
   return apiRequest<{ reset: true }>('/api/auth/password-reset', {
     body: input,
+    method: 'POST',
+  });
+}
+
+export async function authenticatedApiRequest<T>(path: string, options?: ApiRequestOptions) {
+  await ensureAuthenticatedSession();
+
+  try {
+    return await apiRequest<T>(path, options);
+  } catch (error) {
+    if (!isRefreshableAuthenticationError(error)) {
+      if (isAuthenticationError(error)) {
+        clearStoredSession();
+      }
+
+      throw error;
+    }
+  }
+
+  await refreshAuthSession();
+
+  return apiRequest<T>(path, options);
+}
+
+export function fetchCurrentUser() {
+  return authenticatedApiRequest<AuthUser>('/api/auth/me', {
+    method: 'GET',
+  });
+}
+
+export async function updateCurrentUser(input: UpdateCurrentUserInput) {
+  const user = await authenticatedApiRequest<AuthUser>('/api/auth/me', {
+    body: input,
+    method: 'PATCH',
+  });
+
+  replaceStoredUser(user);
+
+  return user;
+}
+
+export async function uploadAvatar(file: File) {
+  const form = new FormData();
+
+  form.append('avatar', file);
+
+  const user = await authenticatedApiRequest<AuthUser>('/api/auth/avatar', {
+    body: form,
+    method: 'POST',
+  });
+
+  replaceStoredUser(user);
+
+  return user;
+}
+
+export function sendProfileEmailVerification() {
+  return authenticatedApiRequest<EmailVerificationSendResult>('/api/auth/me/email-verification', {
     method: 'POST',
   });
 }
@@ -226,6 +278,13 @@ export async function verifyProfileEmail(input: VerifyProfileEmailInput) {
   return user;
 }
 
+export function sendProfilePhoneVerification(input: SendProfilePhoneVerificationInput) {
+  return authenticatedApiRequest<EmailVerificationSendResult>('/api/auth/me/phone-verification', {
+    body: input,
+    method: 'POST',
+  });
+}
+
 export async function verifyProfilePhone(input: VerifyProfilePhoneInput) {
   const user = await authenticatedApiRequest<AuthUser>('/api/auth/me/phone-verification/confirm', {
     body: input,
@@ -235,53 +294,6 @@ export async function verifyProfilePhone(input: VerifyProfilePhoneInput) {
   replaceStoredUser(user);
 
   return user;
-}
-
-function refreshAuthSession() {
-  if (refreshPromise) {
-    return refreshPromise;
-  }
-
-  const current = getSnapshot();
-
-  setSnapshot({
-    isRefreshing: true,
-    session: current.session,
-    status: current.session ? 'authenticated' : 'restoring',
-  });
-
-  refreshPromise = apiRequest<AuthSession>('/api/auth/refresh', {
-    method: 'POST',
-  })
-    .then((session) => {
-      storeSession(session);
-
-      return session;
-    })
-    .catch((error: unknown) => {
-      if (isAuthenticationError(error)) {
-        clearStoredSession();
-      } else {
-        setSnapshot({
-          ...getSnapshot(),
-          isRefreshing: false,
-        });
-      }
-
-      throw error;
-    })
-    .finally(() => {
-      refreshPromise = null;
-
-      if (getSnapshot().isRefreshing) {
-        setSnapshot({
-          ...getSnapshot(),
-          isRefreshing: false,
-        });
-      }
-    });
-
-  return refreshPromise;
 }
 
 export function fetchSsoConfig() {
@@ -354,63 +366,14 @@ export function fetchSsoIdentities() {
   });
 }
 
-export function fetchCurrentUser() {
-  return authenticatedApiRequest<AuthUser>('/api/auth/me', {
-    method: 'GET',
-  });
-}
+export function getAccessTokenRefreshDelayMs(session: Pick<AuthSession, 'accessTokenExpiresAt'>) {
+  const accessTokenExpiresAt = parseTimestamp(session.accessTokenExpiresAt);
 
-export async function updateCurrentUser(input: UpdateCurrentUserInput) {
-  const user = await authenticatedApiRequest<AuthUser>('/api/auth/me', {
-    body: input,
-    method: 'PATCH',
-  });
-
-  replaceStoredUser(user);
-
-  return user;
-}
-
-export async function authenticatedApiRequest<T>(path: string, options?: ApiRequestOptions) {
-  await ensureAuthenticatedSession();
-
-  try {
-    return await apiRequest<T>(path, options);
-  } catch (error) {
-    if (!isRefreshableAuthenticationError(error)) {
-      if (isAuthenticationError(error)) {
-        clearStoredSession();
-      }
-
-      throw error;
-    }
+  if (accessTokenExpiresAt === null) {
+    return 0;
   }
 
-  await refreshAuthSession();
-
-  return apiRequest<T>(path, options);
-}
-
-export async function uploadAvatar(file: File) {
-  const form = new FormData();
-
-  form.append('avatar', file);
-
-  const user = await authenticatedApiRequest<AuthUser>('/api/auth/avatar', {
-    body: form,
-    method: 'POST',
-  });
-
-  replaceStoredUser(user);
-
-  return user;
-}
-
-export async function logout() {
-  await apiRequest<{ signedOut: true }>('/api/auth/logout', {
-    method: 'POST',
-  });
-  clearStoredSession();
+  return Math.max(accessTokenExpiresAt - accessTokenRefreshSkewMs - Date.now(), 0);
 }
 
 export function getUserHandle(username?: string) {
@@ -477,6 +440,53 @@ async function restoreAuthSession() {
   });
 
   return restorePromise;
+}
+
+function refreshAuthSession() {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  const current = getSnapshot();
+
+  setSnapshot({
+    isRefreshing: true,
+    session: current.session,
+    status: current.session ? 'authenticated' : 'restoring',
+  });
+
+  refreshPromise = apiRequest<AuthSession>('/api/auth/refresh', {
+    method: 'POST',
+  })
+    .then((session) => {
+      storeSession(session);
+
+      return session;
+    })
+    .catch((error: unknown) => {
+      if (isAuthenticationError(error)) {
+        clearStoredSession();
+      } else {
+        setSnapshot({
+          ...getSnapshot(),
+          isRefreshing: false,
+        });
+      }
+
+      throw error;
+    })
+    .finally(() => {
+      refreshPromise = null;
+
+      if (getSnapshot().isRefreshing) {
+        setSnapshot({
+          ...getSnapshot(),
+          isRefreshing: false,
+        });
+      }
+    });
+
+  return refreshPromise;
 }
 
 async function ensureAuthenticatedSession() {
@@ -548,16 +558,6 @@ function clearStoredSession() {
     session: null,
     status: 'anonymous',
   });
-}
-
-export function getAccessTokenRefreshDelayMs(session: Pick<AuthSession, 'accessTokenExpiresAt'>) {
-  const accessTokenExpiresAt = parseTimestamp(session.accessTokenExpiresAt);
-
-  if (accessTokenExpiresAt === null) {
-    return 0;
-  }
-
-  return Math.max(accessTokenExpiresAt - accessTokenRefreshSkewMs - Date.now(), 0);
 }
 
 async function restoreAuthSessionOnce() {

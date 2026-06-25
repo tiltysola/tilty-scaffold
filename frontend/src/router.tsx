@@ -5,22 +5,23 @@ import { type RouteObject, useRoutes } from 'react-router-dom';
 import { Spinner } from '@/shadcn/components/ui/spinner';
 import { hasPermission, SystemPermission, type SystemPermissionKey } from '@tilty/shared/access-control';
 
-const DashboardPage = lazy(() => import('@/pages/Dashboard'));
-const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPassword'));
 const Layout = lazy(() => import('@/components/Layout'));
-const LoginPage = lazy(() => import('@/pages/Login'));
-const NotFoundPage = lazy(() => import('@/pages/NotFound'));
-const RegisterPage = lazy(() => import('@/pages/Register'));
 const RequireAuth = lazy(() => import('@/components/RequireAuth'));
 const RequirePermission = lazy(() => import('@/components/RequirePermission'));
-const SetupPage = lazy(() => import('@/pages/Setup'));
-const SsoCallbackPage = lazy(() => import('@/pages/SsoCallback'));
+
+const DashboardPage = lazy(() => import('@/pages/Dashboard'));
 const ProfilePage = lazy(() => import('@/pages/Profile'));
 const UsersPage = lazy(() => import('@/pages/Users'));
+const SetupPage = lazy(() => import('@/pages/Setup'));
+const LoginPage = lazy(() => import('@/pages/Login'));
+const RegisterPage = lazy(() => import('@/pages/Register'));
+const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPassword'));
+const SsoCallbackPage = lazy(() => import('@/pages/SsoCallback'));
+const NotFoundPage = lazy(() => import('@/pages/NotFound'));
 
 export type NavigationGroupId = 'admin' | 'applications' | 'profile';
 export type NavigationIcon = 'apiDocs' | 'dashboard' | 'profile' | 'users';
-type RouteId = 'dashboard' | 'forgotPassword' | 'login' | 'profile' | 'register' | 'setup' | 'ssoCallback' | 'users';
+type RouteId = 'dashboard' | 'profile' | 'users' | 'setup' | 'login' | 'register' | 'forgotPassword' | 'ssoCallback';
 
 interface PageRoute {
   id: RouteId;
@@ -40,19 +41,19 @@ const pageRoutes: PageRoute[] = [
     layout: 'app',
   },
   {
+    id: 'profile',
+    path: '/profile',
+    title: 'Profile',
+    element: <ProfilePage />,
+    layout: 'app',
+  },
+  {
     id: 'users',
     path: '/users',
     title: 'Users',
     element: <UsersPage />,
     layout: 'app',
     permission: SystemPermission.UserList,
-  },
-  {
-    id: 'profile',
-    path: '/profile',
-    title: 'Profile',
-    element: <ProfilePage />,
-    layout: 'app',
   },
   {
     id: 'setup',
@@ -69,17 +70,17 @@ const pageRoutes: PageRoute[] = [
     layout: 'standalone',
   },
   {
-    id: 'forgotPassword',
-    path: '/forgot-password',
-    title: 'Password recovery',
-    element: <ForgotPasswordPage />,
-    layout: 'standalone',
-  },
-  {
     id: 'register',
     path: '/register',
     title: 'Account registration',
     element: <RegisterPage />,
+    layout: 'standalone',
+  },
+  {
+    id: 'forgotPassword',
+    path: '/forgot-password',
+    title: 'Password recovery',
+    element: <ForgotPasswordPage />,
     layout: 'standalone',
   },
   {
@@ -141,8 +142,8 @@ const appRouteObjects: RouteObject[] = [
     .filter((route) => route.layout === 'standalone')
     .map(
       (route): RouteObject => ({
-        element: route.element,
         path: route.path,
+        element: route.element,
       }),
     ),
   {
@@ -152,28 +153,28 @@ const appRouteObjects: RouteObject[] = [
         element: <Layout />,
         children: [
           {
-            element: getPageRoute(defaultRouteId).element,
             index: true,
+            element: getPageRoute(defaultRouteId).element,
           },
           ...pageRoutes
             .filter((route) => route.layout === 'app')
             .map((route): RouteObject => {
               if (route.permission) {
                 return {
-                  element: <RequirePermission permission={route.permission} />,
                   path: route.path,
+                  element: <RequirePermission permission={route.permission} />,
                   children: [
                     {
-                      element: route.element,
                       index: true,
+                      element: route.element,
                     },
                   ],
                 };
               }
 
               return {
-                element: route.element,
                 path: route.path,
+                element: route.element,
               };
             }),
         ],
@@ -181,8 +182,8 @@ const appRouteObjects: RouteObject[] = [
     ],
   },
   {
-    element: <NotFoundPage />,
     path: '*',
+    element: <NotFoundPage />,
   },
 ];
 
