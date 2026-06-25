@@ -2,7 +2,6 @@ import { type ChangeEvent, type FormEventHandler, type ReactNode, useEffect, use
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import {
-  BadgeCheckIcon,
   ChevronDownIcon,
   EllipsisVerticalIcon,
   ImageUpIcon,
@@ -17,13 +16,14 @@ import {
 import { toast } from 'sonner';
 
 import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { useAuthenticatedSession } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
 import {
+  type AuthUser,
   fetchAuthConfig,
   fetchSsoConfig,
   fetchSsoIdentities,
   getSsoBindStartUrl,
-  getStoredSession,
   getUserHandle,
   getUserInitials,
   type PhoneCountryCode,
@@ -79,18 +79,23 @@ import { Label } from '@/shadcn/components/ui/label';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shadcn/components/ui/tooltip';
 
 import FormMessage from '@/components/FormMessage';
+import SsoProviderIcon from '@/components/SsoProviderIcon';
 
 const Index = () => {
-  const initialUser = getStoredSession()?.user ?? null;
-  const initialPhoneCountryCode = getPhoneCountryCode(initialUser?.phoneNumber, supportedPhoneCountryCodes);
-  const [user, setUser] = useState(initialUser);
-  const [displayNameDraft, setDisplayNameDraft] = useState(initialUser?.displayName ?? '');
+  const { user } = useAuthenticatedSession();
+
+  return <ProfileContent user={user} />;
+};
+
+const ProfileContent = ({ user }: { user: AuthUser }) => {
+  const initialPhoneCountryCode = getPhoneCountryCode(user.phoneNumber, supportedPhoneCountryCodes);
+  const [displayNameDraft, setDisplayNameDraft] = useState(user.displayName);
   const [phoneCountryCodes, setPhoneCountryCodes] = useState<PhoneCountryCode[]>([]);
   const [phoneCountryCodeDraft, setPhoneCountryCodeDraft] = useState<PhoneCountryCode>(
     initialPhoneCountryCode ?? '+86',
   );
   const [phoneLocalNumberDraft, setPhoneLocalNumberDraft] = useState(
-    getPhoneLocalNumber(initialUser?.phoneNumber, initialPhoneCountryCode),
+    getPhoneLocalNumber(user.phoneNumber, initialPhoneCountryCode),
   );
   const [phoneVerificationCodeDraft, setPhoneVerificationCodeDraft] = useState('');
   const [phoneVerificationNotice, setPhoneVerificationNotice] = useState<string | null>(null);
@@ -115,25 +120,25 @@ const Index = () => {
   const emailVerificationConfirmAction = useAsyncAction();
   const phoneVerificationSendAction = useAsyncAction();
   const phoneVerificationConfirmAction = useAsyncAction();
-  const avatarUrl = resolveAssetUrl(user?.avatarUrl);
-  const fallback = getUserInitials(user?.displayName);
-  const userHandle = getUserHandle(user?.username);
+  const avatarUrl = resolveAssetUrl(user.avatarUrl);
+  const fallback = getUserInitials(user.displayName);
+  const userHandle = getUserHandle(user.username);
   const savingProfile = profileAction.pending;
   const sendingEmailVerification = emailVerificationSendAction.pending;
   const confirmingEmailVerification = emailVerificationConfirmAction.pending;
   const sendingPhoneVerification = phoneVerificationSendAction.pending;
   const confirmingPhoneVerification = phoneVerificationConfirmAction.pending;
   const phoneVerificationPending = sendingPhoneVerification || confirmingPhoneVerification;
-  const displayNameChanged = displayNameDraft.trim() !== (user?.displayName ?? '');
+  const displayNameChanged = displayNameDraft.trim() !== user.displayName;
   const phoneNumberDraft = useMemo(
     () => `${phoneCountryCodeDraft}${phoneLocalNumberDraft.trim()}`,
     [phoneCountryCodeDraft, phoneLocalNumberDraft],
   );
-  const emailNeedsVerification = Boolean(user?.email && !user.emailVerified);
+  const emailNeedsVerification = Boolean(user.email && !user.emailVerified);
   const emailVerificationAvailable = emailNeedsVerification && profileEmailVerificationEnabled;
   const phoneBindingEnabled = phoneCountryCodes.length > 0;
-  const phoneNumberChanged = phoneBindingEnabled && phoneNumberDraft !== (user?.phoneNumber ?? '');
-  const phoneVerificationRequired = phoneBindingEnabled && (phoneNumberChanged || !user?.phoneVerified);
+  const phoneNumberChanged = phoneBindingEnabled && phoneNumberDraft !== (user.phoneNumber ?? '');
+  const phoneVerificationRequired = phoneBindingEnabled && (phoneNumberChanged || !user.phoneVerified);
   const bindableSsoProviders = ssoConfig.enabled
     ? ssoConfig.providers.filter((provider) => provider.bindingEnabled)
     : [];
@@ -166,11 +171,11 @@ const Index = () => {
         setPhoneCountryCodes(config.phoneCountryCodes);
         setProfileEmailVerificationEnabled(config.profileEmailVerificationEnabled);
         const currentCountryCode = getPhoneCountryCode(
-          user?.phoneNumber,
+          user.phoneNumber,
           config.phoneCountryCodes.length ? config.phoneCountryCodes : supportedPhoneCountryCodes,
         );
         setPhoneCountryCodeDraft(currentCountryCode ?? config.phoneCountryCodes[0] ?? '+86');
-        setPhoneLocalNumberDraft(getPhoneLocalNumber(user?.phoneNumber, currentCountryCode));
+        setPhoneLocalNumberDraft(getPhoneLocalNumber(user.phoneNumber, currentCountryCode));
       })
       .catch((error: unknown) => {
         if (active) {
@@ -181,7 +186,7 @@ const Index = () => {
     return () => {
       active = false;
     };
-  }, [user?.phoneNumber]);
+  }, [user.phoneNumber]);
 
   useEffect(() => {
     let active = true;
@@ -220,7 +225,6 @@ const Index = () => {
     try {
       const updatedUser = await uploadAvatar(file);
 
-      setUser(updatedUser);
       setDisplayNameDraft(updatedUser.displayName);
       syncPhoneDraft(updatedUser.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
       toast.success('Avatar updated.');
@@ -251,7 +255,6 @@ const Index = () => {
     );
 
     if (updatedUser) {
-      setUser(updatedUser);
       setDisplayNameDraft(updatedUser.displayName);
       syncPhoneDraft(updatedUser.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
       setEditingDisplayName(false);
@@ -321,7 +324,6 @@ const Index = () => {
     );
 
     if (updatedUser) {
-      setUser(updatedUser);
       setDisplayNameDraft(updatedUser.displayName);
       syncPhoneDraft(updatedUser.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
       setVerifyingEmail(false);
@@ -408,7 +410,6 @@ const Index = () => {
     );
 
     if (updatedUser) {
-      setUser(updatedUser);
       setDisplayNameDraft(updatedUser.displayName);
       syncPhoneDraft(updatedUser.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
       setPhoneVerificationCodeDraft('');
@@ -419,13 +420,13 @@ const Index = () => {
   };
 
   const handleEditDisplayName = () => {
-    setDisplayNameDraft(user?.displayName ?? '');
+    setDisplayNameDraft(user.displayName);
     profileAction.clearError();
     setEditingDisplayName(true);
   };
 
   const handleEditPhoneNumber = () => {
-    syncPhoneDraft(user?.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
+    syncPhoneDraft(user.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
     setPhoneVerificationCodeDraft('');
     setPhoneVerificationNotice(null);
     phoneVerificationSendAction.clearError();
@@ -461,14 +462,12 @@ const Index = () => {
           />
           <ItemMedia className="size-12 rounded-lg" variant="image">
             <Avatar className="h-full w-full rounded-lg after:hidden">
-              {avatarUrl ? (
-                <AvatarImage className="rounded-lg" src={avatarUrl} alt={user?.displayName ?? 'Unknown User'} />
-              ) : null}
+              {avatarUrl ? <AvatarImage className="rounded-lg" src={avatarUrl} alt={user.displayName} /> : null}
               <AvatarFallback className="rounded-lg">{fallback}</AvatarFallback>
             </Avatar>
           </ItemMedia>
           <ItemContent className="gap-0 text-sm leading-tight">
-            <ItemTitle>{user?.displayName ?? 'Unknown User'}</ItemTitle>
+            <ItemTitle>{user.displayName}</ItemTitle>
             <ItemDescription className="text-xs">{userHandle}</ItemDescription>
           </ItemContent>
           <ItemActions>
@@ -510,28 +509,28 @@ const Index = () => {
               ? 'Email verification is unavailable because SMTP email is not configured.'
               : undefined
           }
-          description={user?.email ?? 'Not available'}
+          description={user.email}
           icon={<MailIcon className="size-4" />}
           onAction={emailNeedsVerification ? handleStartEmailVerification : undefined}
-          status={user?.emailVerified ? 'Verified' : 'Unverified'}
-          statusVariant={user?.emailVerified ? 'secondary' : 'outline'}
+          status={user.emailVerified ? 'Verified' : 'Unverified'}
+          statusVariant={user.emailVerified ? 'secondary' : 'outline'}
           title="Email"
         />
 
         <ItemSeparator className="!my-0" />
 
         <ProfileItem
-          actionLabel={user?.phoneNumber ? 'Change' : 'Bind'}
+          actionLabel={user.phoneNumber ? 'Change' : 'Bind'}
           actionDisabled={!phoneBindingEnabled}
           actionIcon={<PhoneIcon />}
           actionTooltip={
             phoneBindingEnabled ? undefined : 'Phone binding is unavailable because SMS verification is not configured.'
           }
-          description={user?.phoneNumber ?? 'Not bound'}
+          description={user.phoneNumber ?? 'Not bound'}
           icon={<PhoneIcon className="size-4" />}
           onAction={handleEditPhoneNumber}
-          status={user?.phoneNumber ? (user.phoneVerified ? 'Verified' : 'Unverified') : undefined}
-          statusVariant={user?.phoneVerified ? 'secondary' : 'outline'}
+          status={user.phoneNumber ? (user.phoneVerified ? 'Verified' : 'Unverified') : undefined}
+          statusVariant={user.phoneVerified ? 'secondary' : 'outline'}
           title="Phone"
         />
 
@@ -549,7 +548,7 @@ const Index = () => {
         <ItemSeparator className="!my-0" />
 
         <ProfileItem
-          description={formatRoleAccessSummary(user?.roles, user?.permissions)}
+          description={formatRoleAccessSummary(user.roles, user.permissions)}
           icon={<ShieldIcon className="size-4" />}
           title="Roles"
         />
@@ -591,9 +590,7 @@ const Index = () => {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Verify email</DialogTitle>
-            <DialogDescription>
-              Enter the verification code sent to {user?.email ?? 'your email address'}.
-            </DialogDescription>
+            <DialogDescription>Enter the verification code sent to {user.email}.</DialogDescription>
           </DialogHeader>
           <form className="grid gap-4" onSubmit={handleEmailVerificationSubmit}>
             <div className="grid gap-2">
@@ -647,7 +644,7 @@ const Index = () => {
       <Dialog open={editingPhoneNumber} onOpenChange={handlePhoneNumberOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{user?.phoneNumber ? 'Change phone' : 'Bind phone'}</DialogTitle>
+            <DialogTitle>{user.phoneNumber ? 'Change phone' : 'Bind phone'}</DialogTitle>
             <DialogDescription>Verify the phone number associated with this account.</DialogDescription>
           </DialogHeader>
           <form className="grid gap-4" onSubmit={handlePhoneNumberSubmit}>
@@ -875,16 +872,6 @@ function SsoProvidersItem({
         </div>
       </ItemContent>
     </Item>
-  );
-}
-
-function SsoProviderIcon({ iconUrl, name }: { iconUrl?: string; name: string }) {
-  return iconUrl ? (
-    <img alt="" className="size-7 rounded-md border object-contain p-1" referrerPolicy="no-referrer" src={iconUrl} />
-  ) : (
-    <div className="flex size-7 items-center justify-center rounded-md border text-muted-foreground">
-      <BadgeCheckIcon aria-label={name} className="size-4" />
-    </div>
   );
 }
 

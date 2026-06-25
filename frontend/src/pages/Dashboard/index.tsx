@@ -1,11 +1,11 @@
-import { getStoredSession, getUserHandle } from '@/lib/auth';
+import { useAuthenticatedSession } from '@/hooks/useAuth';
+import { getUserHandle } from '@/lib/auth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shadcn/components/ui/card';
 
 const Index = () => {
-  const session = getStoredSession();
-  const user = session?.user;
-  const displayName = user?.displayName ?? 'Unknown User';
-  const username = getUserHandle(user?.username);
+  const { user } = useAuthenticatedSession();
+  const displayName = user.displayName;
+  const username = getUserHandle(user.username);
 
   return (
     <div className="grid gap-4 p-4 lg:p-6">

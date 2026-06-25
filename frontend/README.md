@@ -64,8 +64,8 @@ The registration page reads `/api/auth/config` and shows email verification
 only when the backend requires it. The login page reads `/api/auth/sso/config`
 and shows configured SSO provider buttons for providers with login enabled. SSO
 start requests use `/api/auth/sso/start` with an optional `providerId`. SSO
-callback tokens are delivered in the login URL fragment and consumed by the
-login page.
+callback tokens are delivered in the `/sso/callback` URL fragment and consumed
+by the SSO callback page.
 
 The password recovery page reads `/api/auth/config`; when SMTP-backed email is
 not enabled, it instructs the user to contact the site administrator.
@@ -89,6 +89,7 @@ user profile fields, password, account status, and role assignments through
 | `/profile`         | Profile              |
 | `/setup`           | Setup                |
 | `/login`           | Log in               |
+| `/sso/callback`    | SSO callback         |
 | `/forgot-password` | Password recovery    |
 | `/register`        | Account registration |
 | `*`                | Not found            |

@@ -13,8 +13,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { useAuthenticatedSession } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
-import { fetchAuthConfig, getStoredSession, type PhoneCountryCode } from '@/lib/auth';
+import { fetchAuthConfig, type PhoneCountryCode } from '@/lib/auth';
 import {
   displayNameSchema,
   emailSchema,
@@ -86,8 +87,6 @@ interface EditUserForm {
 }
 
 const Index = () => {
-  const session = getStoredSession();
-  const canManageUsers = hasPermission(session?.user.permissions, SystemPermission.UserAdmin);
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [roles, setRoles] = useState<RoleSummary[]>([]);
   const [page, setPage] = useState(1);
@@ -112,6 +111,8 @@ const Index = () => {
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
+  const session = useAuthenticatedSession();
+  const canManageUsers = hasPermission(session.user.permissions, SystemPermission.UserAdmin);
 
   const applyUserList = useCallback((result: Awaited<ReturnType<typeof fetchUsers>>) => {
     setUsers(result.users);

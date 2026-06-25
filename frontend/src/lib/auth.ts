@@ -2,8 +2,9 @@ import { isSafeRelativePath } from '@tilty/shared/paths';
 
 import { ApiError, apiRequest, type ApiRequestOptions } from './api';
 
-export const authSessionStorageKey = 'tilty-scaffold.auth.session';
-export const authSessionChangedEvent = 'tilty-scaffold.auth.session.changed';
+const authSessionStorageKey = 'tilty-scaffold.auth.session';
+
+const accessTokenRefreshSkewMs = 30_000;
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 export interface AuthUser {
@@ -27,6 +28,16 @@ export interface AuthSession {
 interface PersistedAuthSession {
   accessTokenExpiresAt: string;
   refreshTokenExpiresAt: string;
+}
+
+const persistedAuthSessionKeys = new Set(['accessTokenExpiresAt', 'refreshTokenExpiresAt']);
+
+export type AuthStatus = 'anonymous' | 'authenticated' | 'restoring';
+
+export interface AuthSnapshot {
+  isRefreshing: boolean;
+  session: AuthSession | null;
+  status: AuthStatus;
 }
 
 export type PhoneCountryCode = '+86' | '+852' | '+853';
@@ -124,16 +135,34 @@ export interface EmailVerificationSendResult {
   expiresInSeconds: number;
 }
 
-let inMemorySession: AuthSession | null = null;
+type AuthListener = () => void;
 
-export async function fetchAuthConfig() {
+let snapshot: AuthSnapshot = {
+  isRefreshing: false,
+  session: null,
+  status: typeof window === 'undefined' ? 'anonymous' : 'restoring',
+};
+let restorePromise: Promise<AuthSession | null> | null = null;
+let refreshPromise: Promise<AuthSession> | null = null;
+
+const listeners = new Set<AuthListener>();
+
+export const authStore = {
+  clear: clearStoredSession,
+  getSnapshot,
+  refresh: refreshAuthSession,
+  restore: restoreAuthSession,
+  subscribe,
+};
+
+export function fetchAuthConfig() {
   return apiRequest<AuthPublicConfig>('/api/auth/config');
 }
 
 export async function register(input: RegisterInput) {
   const session = await apiRequest<AuthSession>('/api/auth/register', {
-    method: 'POST',
     body: input,
+    method: 'POST',
   });
 
   storeSession(session);
@@ -141,27 +170,27 @@ export async function register(input: RegisterInput) {
   return session;
 }
 
-export async function sendRegistrationEmailVerification(input: SendEmailVerificationInput) {
+export function sendRegistrationEmailVerification(input: SendEmailVerificationInput) {
   return apiRequest<EmailVerificationSendResult>('/api/auth/register/email-verification', {
-    method: 'POST',
     body: input,
+    method: 'POST',
   });
 }
 
-export async function sendPasswordResetEmailVerification(input: SendEmailVerificationInput) {
+export function sendPasswordResetEmailVerification(input: SendEmailVerificationInput) {
   return apiRequest<EmailVerificationSendResult>('/api/auth/password-reset/email-verification', {
-    method: 'POST',
     body: input,
+    method: 'POST',
   });
 }
 
-export async function sendProfileEmailVerification() {
+export function sendProfileEmailVerification() {
   return authenticatedApiRequest<EmailVerificationSendResult>('/api/auth/me/email-verification', {
     method: 'POST',
   });
 }
 
-export async function sendProfilePhoneVerification(input: SendProfilePhoneVerificationInput) {
+export function sendProfilePhoneVerification(input: SendProfilePhoneVerificationInput) {
   return authenticatedApiRequest<EmailVerificationSendResult>('/api/auth/me/phone-verification', {
     body: input,
     method: 'POST',
@@ -170,8 +199,8 @@ export async function sendProfilePhoneVerification(input: SendProfilePhoneVerifi
 
 export async function login(input: LoginInput) {
   const session = await apiRequest<AuthSession>('/api/auth/login', {
-    method: 'POST',
     body: input,
+    method: 'POST',
   });
 
   storeSession(session);
@@ -179,68 +208,83 @@ export async function login(input: LoginInput) {
   return session;
 }
 
-export async function resetPassword(input: ResetPasswordInput) {
+export function resetPassword(input: ResetPasswordInput) {
   return apiRequest<{ reset: true }>('/api/auth/password-reset', {
-    method: 'POST',
     body: input,
+    method: 'POST',
   });
 }
 
 export async function verifyProfileEmail(input: VerifyProfileEmailInput) {
-  const session = getStoredSession();
-
-  if (!session) {
-    throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication is required.');
-  }
-
-  const { result: user, session: refreshedSession } = await runAuthenticatedRequest(() =>
-    apiRequest<AuthUser>('/api/auth/me/email-verification/confirm', {
-      body: input,
-      method: 'POST',
-    }),
-  );
-
-  storeSession({
-    ...(refreshedSession ?? session),
-    user,
+  const user = await authenticatedApiRequest<AuthUser>('/api/auth/me/email-verification/confirm', {
+    body: input,
+    method: 'POST',
   });
+
+  replaceStoredUser(user);
 
   return user;
 }
 
 export async function verifyProfilePhone(input: VerifyProfilePhoneInput) {
-  const session = getStoredSession();
-
-  if (!session) {
-    throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication is required.');
-  }
-
-  const { result: user, session: refreshedSession } = await runAuthenticatedRequest(() =>
-    apiRequest<AuthUser>('/api/auth/me/phone-verification/confirm', {
-      body: input,
-      method: 'POST',
-    }),
-  );
-
-  storeSession({
-    ...(refreshedSession ?? session),
-    user,
+  const user = await authenticatedApiRequest<AuthUser>('/api/auth/me/phone-verification/confirm', {
+    body: input,
+    method: 'POST',
   });
+
+  replaceStoredUser(user);
 
   return user;
 }
 
-export async function refreshSession() {
-  const session = await apiRequest<AuthSession>('/api/auth/refresh', {
-    method: 'POST',
+function refreshAuthSession() {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  const current = getSnapshot();
+
+  setSnapshot({
+    isRefreshing: true,
+    session: current.session,
+    status: current.session ? 'authenticated' : 'restoring',
   });
 
-  storeSession(session);
+  refreshPromise = apiRequest<AuthSession>('/api/auth/refresh', {
+    method: 'POST',
+  })
+    .then((session) => {
+      storeSession(session);
 
-  return session;
+      return session;
+    })
+    .catch((error: unknown) => {
+      if (isAuthenticationError(error)) {
+        clearStoredSession();
+      } else {
+        setSnapshot({
+          ...getSnapshot(),
+          isRefreshing: false,
+        });
+      }
+
+      throw error;
+    })
+    .finally(() => {
+      refreshPromise = null;
+
+      if (getSnapshot().isRefreshing) {
+        setSnapshot({
+          ...getSnapshot(),
+          isRefreshing: false,
+        });
+      }
+    });
+
+  return refreshPromise;
 }
 
-export async function fetchSsoConfig() {
+export function fetchSsoConfig() {
   return apiRequest<SsoPublicConfig>('/api/auth/sso/config');
 }
 
@@ -273,8 +317,8 @@ export function getSsoCallbackParams(hash: string) {
 
 export async function completeSsoLogin(token: string) {
   const session = await apiRequest<AuthSession>('/api/auth/sso/session', {
-    method: 'POST',
     body: { token },
+    method: 'POST',
   });
 
   storeSession(session);
@@ -284,8 +328,8 @@ export async function completeSsoLogin(token: string) {
 
 export async function createSsoAccount(input: CreateSsoAccountInput) {
   const session = await apiRequest<AuthSession>('/api/auth/sso/account', {
-    method: 'POST',
     body: input,
+    method: 'POST',
   });
 
   storeSession(session);
@@ -295,8 +339,8 @@ export async function createSsoAccount(input: CreateSsoAccountInput) {
 
 export async function bindSsoAccount(input: BindSsoAccountInput) {
   const session = await apiRequest<AuthSession>('/api/auth/sso/bind', {
-    method: 'POST',
     body: input,
+    method: 'POST',
   });
 
   storeSession(session);
@@ -304,68 +348,60 @@ export async function bindSsoAccount(input: BindSsoAccountInput) {
   return session;
 }
 
-export async function fetchSsoIdentities() {
+export function fetchSsoIdentities() {
   return authenticatedApiRequest<{ identities: SsoIdentityPublic[] }>('/api/auth/sso/identities', {
     method: 'GET',
   });
 }
 
-export async function fetchCurrentUser() {
+export function fetchCurrentUser() {
   return authenticatedApiRequest<AuthUser>('/api/auth/me', {
     method: 'GET',
   });
 }
 
 export async function updateCurrentUser(input: UpdateCurrentUserInput) {
-  const session = getStoredSession();
-
-  if (!session) {
-    throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication is required.');
-  }
-
-  const { result: user, session: refreshedSession } = await runAuthenticatedRequest(() =>
-    apiRequest<AuthUser>('/api/auth/me', {
-      body: input,
-      method: 'PATCH',
-    }),
-  );
-
-  storeSession({
-    ...(refreshedSession ?? session),
-    user,
+  const user = await authenticatedApiRequest<AuthUser>('/api/auth/me', {
+    body: input,
+    method: 'PATCH',
   });
+
+  replaceStoredUser(user);
 
   return user;
 }
 
 export async function authenticatedApiRequest<T>(path: string, options?: ApiRequestOptions) {
-  const { result } = await runAuthenticatedRequest(() => apiRequest<T>(path, options));
+  await ensureAuthenticatedSession();
 
-  return result;
+  try {
+    return await apiRequest<T>(path, options);
+  } catch (error) {
+    if (!isRefreshableAuthenticationError(error)) {
+      if (isAuthenticationError(error)) {
+        clearStoredSession();
+      }
+
+      throw error;
+    }
+  }
+
+  await refreshAuthSession();
+
+  return apiRequest<T>(path, options);
 }
 
 export async function uploadAvatar(file: File) {
-  const session = getStoredSession();
-
-  if (!session) {
-    throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication is required.');
-  }
-
   const form = new FormData();
 
   form.append('avatar', file);
 
-  const { result: user, session: refreshedSession } = await runAuthenticatedRequest(() =>
-    apiRequest<AuthUser>('/api/auth/avatar', {
-      body: form,
-      method: 'POST',
-    }),
-  );
-
-  storeSession({
-    ...(refreshedSession ?? session),
-    user,
+  const user = await authenticatedApiRequest<AuthUser>('/api/auth/avatar', {
+    body: form,
+    method: 'POST',
   });
+
+  replaceStoredUser(user);
 
   return user;
 }
@@ -380,7 +416,7 @@ export async function logout() {
 export function getUserHandle(username?: string) {
   const trimmedUsername = username?.trim();
 
-  return trimmedUsername ? `@${trimmedUsername}` : '@unknown-user';
+  return trimmedUsername ? `@${trimmedUsername}` : '';
 }
 
 export function getUserInitials(name?: string) {
@@ -411,6 +447,175 @@ export function resolveAssetUrl(url?: string) {
   return undefined;
 }
 
+function getSnapshot() {
+  return snapshot;
+}
+
+function subscribe(listener: AuthListener) {
+  listeners.add(listener);
+
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+async function restoreAuthSession() {
+  if (restorePromise) {
+    return restorePromise;
+  }
+
+  const currentSession = getStoredSession();
+
+  setSnapshot({
+    isRefreshing: getSnapshot().isRefreshing,
+    session: currentSession,
+    status: 'restoring',
+  });
+
+  restorePromise = restoreAuthSessionOnce().finally(() => {
+    restorePromise = null;
+  });
+
+  return restorePromise;
+}
+
+async function ensureAuthenticatedSession() {
+  const currentSession = getStoredSession();
+
+  if (currentSession) {
+    if (shouldRefreshAccessToken(currentSession)) {
+      return refreshAuthSession();
+    }
+
+    return currentSession;
+  }
+
+  const restoredSession = await restoreAuthSession();
+
+  if (restoredSession) {
+    return restoredSession;
+  }
+
+  throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication is required.');
+}
+
+function getStoredSession() {
+  const current = getSnapshot();
+  const persistedSession = readPersistedSession();
+
+  if (!persistedSession) {
+    if (current.session) {
+      setSnapshot({
+        isRefreshing: false,
+        session: null,
+        status: 'anonymous',
+      });
+    }
+
+    return null;
+  }
+
+  if (
+    current.status === 'authenticated' &&
+    current.session &&
+    isAuthSession(current.session) &&
+    hasMatchingSessionMetadata(current.session, persistedSession)
+  ) {
+    return current.session;
+  }
+
+  return null;
+}
+
+function storeSession(session: AuthSession) {
+  if (!isAuthSession(session)) {
+    clearStoredSession();
+    return;
+  }
+
+  writePersistedSession(session);
+  setSnapshot({
+    isRefreshing: false,
+    session,
+    status: 'authenticated',
+  });
+}
+
+function clearStoredSession() {
+  clearPersistedSession();
+  setSnapshot({
+    isRefreshing: false,
+    session: null,
+    status: 'anonymous',
+  });
+}
+
+export function getAccessTokenRefreshDelayMs(session: Pick<AuthSession, 'accessTokenExpiresAt'>) {
+  const accessTokenExpiresAt = parseTimestamp(session.accessTokenExpiresAt);
+
+  if (accessTokenExpiresAt === null) {
+    return 0;
+  }
+
+  return Math.max(accessTokenExpiresAt - accessTokenRefreshSkewMs - Date.now(), 0);
+}
+
+async function restoreAuthSessionOnce() {
+  const metadata = readPersistedSession();
+
+  if (metadata && !shouldRefreshAccessToken(metadata)) {
+    try {
+      const user = await apiRequest<AuthUser>('/api/auth/me', {
+        method: 'GET',
+      });
+      const session = {
+        ...metadata,
+        user,
+      };
+
+      storeSession(session);
+
+      return session;
+    } catch (error) {
+      if (!isAuthenticationError(error)) {
+        clearStoredSession();
+        return null;
+      }
+    }
+  }
+
+  try {
+    return await refreshAuthSession();
+  } catch {
+    clearStoredSession();
+    return null;
+  }
+}
+
+function replaceStoredUser(user: AuthUser) {
+  const session = getStoredSession();
+
+  if (!session) {
+    throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication is required.');
+  }
+
+  storeSession({
+    ...session,
+    user,
+  });
+}
+
+function setSnapshot(nextSnapshot: AuthSnapshot) {
+  snapshot = nextSnapshot;
+  emitSnapshotChanged();
+}
+
+function emitSnapshotChanged() {
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
 function isAllowedAbsoluteAssetUrl(value: string) {
   try {
     const url = new URL(value);
@@ -425,78 +630,11 @@ function isAllowedAbsoluteAssetUrl(value: string) {
   }
 }
 
-export async function validateStoredSession() {
-  const session = getStoredSession();
-
-  if (!session) {
-    return null;
-  }
-
-  try {
-    const user = await fetchCurrentUser();
-    const currentSession = getStoredSession() ?? session;
-    const validatedSession = {
-      ...currentSession,
-      user,
-    };
-
-    storeSession(validatedSession);
-
-    return validatedSession;
-  } catch {
-    clearStoredSession();
-    return null;
-  }
-}
-
-export function storeSession(session: AuthSession) {
-  inMemorySession = session;
-
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  writePersistedSession(session);
-  emitStoredSessionChanged();
-}
-
-export function getStoredSession() {
-  if (typeof window === 'undefined') {
-    return inMemorySession && isAuthSession(inMemorySession) ? inMemorySession : null;
-  }
-
-  const persistedSession = readPersistedSession();
-
-  if (!persistedSession) {
-    inMemorySession = null;
-    return null;
-  }
-
-  if (
-    inMemorySession &&
-    isAuthSession(inMemorySession) &&
-    hasMatchingSessionMetadata(inMemorySession, persistedSession)
-  ) {
-    return inMemorySession;
-  }
-
-  inMemorySession = null;
-
-  return createUnvalidatedSession(persistedSession);
-}
-
-export function clearStoredSession() {
-  inMemorySession = null;
-
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.removeItem(authSessionStorageKey);
-  emitStoredSessionChanged();
-}
-
 function readPersistedSession() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
   const value = window.localStorage.getItem(authSessionStorageKey);
 
   if (!value) {
@@ -504,23 +642,34 @@ function readPersistedSession() {
   }
 
   try {
-    const source = JSON.parse(value) as unknown;
-    const metadata = parsePersistedSession(source);
+    const metadata = parsePersistedSession(JSON.parse(value) as unknown);
 
     if (!metadata) {
-      clearStoredSession();
+      clearPersistedSession();
       return null;
     }
 
     return metadata;
   } catch {
-    clearStoredSession();
+    clearPersistedSession();
     return null;
   }
 }
 
 function writePersistedSession(session: PersistedAuthSession) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
   window.localStorage.setItem(authSessionStorageKey, JSON.stringify(toPersistedSession(session)));
+}
+
+function clearPersistedSession() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.removeItem(authSessionStorageKey);
 }
 
 function parsePersistedSession(value: unknown): PersistedAuthSession | null {
@@ -529,6 +678,15 @@ function parsePersistedSession(value: unknown): PersistedAuthSession | null {
   }
 
   const session = value as Record<string, unknown>;
+  const sessionKeys = Object.keys(session);
+
+  if (
+    sessionKeys.length !== persistedAuthSessionKeys.size ||
+    sessionKeys.some((key) => !persistedAuthSessionKeys.has(key))
+  ) {
+    return null;
+  }
+
   const accessTokenExpiresAt = parseTimestamp(session.accessTokenExpiresAt);
   const refreshTokenExpiresAt = parseTimestamp(session.refreshTokenExpiresAt);
 
@@ -549,21 +707,6 @@ function toPersistedSession(session: PersistedAuthSession): PersistedAuthSession
   };
 }
 
-function createUnvalidatedSession(session: PersistedAuthSession): AuthSession {
-  return {
-    ...session,
-    user: {
-      username: '',
-      displayName: '',
-      email: '',
-      emailVerified: false,
-      phoneVerified: false,
-      roles: [],
-      permissions: [],
-    },
-  };
-}
-
 function hasMatchingSessionMetadata(session: PersistedAuthSession, persistedSession: PersistedAuthSession) {
   return (
     session.accessTokenExpiresAt === persistedSession.accessTokenExpiresAt &&
@@ -571,12 +714,8 @@ function hasMatchingSessionMetadata(session: PersistedAuthSession, persistedSess
   );
 }
 
-function emitStoredSessionChanged() {
-  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function' || typeof Event === 'undefined') {
-    return;
-  }
-
-  window.dispatchEvent(new Event(authSessionChangedEvent));
+function shouldRefreshAccessToken(session: Pick<AuthSession, 'accessTokenExpiresAt'>) {
+  return getAccessTokenRefreshDelayMs(session) === 0;
 }
 
 function isAuthSession(value: unknown): value is AuthSession {
@@ -585,7 +724,6 @@ function isAuthSession(value: unknown): value is AuthSession {
   }
 
   const session = value as Record<string, unknown>;
-
   const accessTokenExpiresAt = parseTimestamp(session.accessTokenExpiresAt);
   const refreshTokenExpiresAt = parseTimestamp(session.refreshTokenExpiresAt);
 
@@ -605,9 +743,9 @@ function isAuthUser(value: unknown): value is AuthUser {
   const user = value as Record<string, unknown>;
 
   return (
-    typeof user.username === 'string' &&
-    typeof user.displayName === 'string' &&
-    typeof user.email === 'string' &&
+    isNonEmptyString(user.username) &&
+    isNonEmptyString(user.displayName) &&
+    isNonEmptyString(user.email) &&
     typeof user.emailVerified === 'boolean' &&
     (user.phoneNumber === undefined || typeof user.phoneNumber === 'string') &&
     typeof user.phoneVerified === 'boolean' &&
@@ -615,38 +753,6 @@ function isAuthUser(value: unknown): value is AuthUser {
     isStringArray(user.permissions) &&
     (user.avatarUrl === undefined || typeof user.avatarUrl === 'string')
   );
-}
-
-async function runAuthenticatedRequest<T>(request: () => Promise<T>) {
-  try {
-    return {
-      result: await request(),
-      session: undefined,
-    };
-  } catch (error) {
-    if (!isRefreshableAuthenticationError(error)) {
-      if (isAuthenticationError(error)) {
-        clearStoredSession();
-      }
-
-      throw error;
-    }
-  }
-
-  try {
-    const session = await refreshSession();
-
-    return {
-      result: await request(),
-      session,
-    };
-  } catch (refreshError) {
-    if (isAuthenticationError(refreshError)) {
-      clearStoredSession();
-    }
-
-    throw refreshError;
-  }
 }
 
 function isAuthenticationError(error: unknown) {
@@ -669,6 +775,10 @@ function parseTimestamp(value: unknown) {
   const timestamp = Date.parse(value);
 
   return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function isStringArray(value: unknown): value is string[] {

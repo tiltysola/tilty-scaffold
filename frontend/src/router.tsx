@@ -14,12 +14,13 @@ const RegisterPage = lazy(() => import('@/pages/Register'));
 const RequireAuth = lazy(() => import('@/components/RequireAuth'));
 const RequirePermission = lazy(() => import('@/components/RequirePermission'));
 const SetupPage = lazy(() => import('@/pages/Setup'));
+const SsoCallbackPage = lazy(() => import('@/pages/SsoCallback'));
 const ProfilePage = lazy(() => import('@/pages/Profile'));
 const UsersPage = lazy(() => import('@/pages/Users'));
 
 export type NavigationGroupId = 'admin' | 'applications' | 'profile';
 export type NavigationIcon = 'apiDocs' | 'dashboard' | 'profile' | 'users';
-type RouteId = 'dashboard' | 'forgotPassword' | 'login' | 'profile' | 'register' | 'setup' | 'users';
+type RouteId = 'dashboard' | 'forgotPassword' | 'login' | 'profile' | 'register' | 'setup' | 'ssoCallback' | 'users';
 
 interface PageRoute {
   id: RouteId;
@@ -79,6 +80,13 @@ const pageRoutes: PageRoute[] = [
     path: '/register',
     title: 'Account registration',
     element: <RegisterPage />,
+    layout: 'standalone',
+  },
+  {
+    id: 'ssoCallback',
+    path: '/sso/callback',
+    title: 'SSO callback',
+    element: <SsoCallbackPage />,
     layout: 'standalone',
   },
 ];

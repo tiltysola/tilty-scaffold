@@ -18,10 +18,8 @@ interface PasswordHash {
 }
 
 interface AccessTokenPayload {
+  sid: string;
   sub: string;
-  username: string;
-  displayName: string;
-  email: string;
   iat: number;
   exp: number;
   type: 'access';
@@ -29,6 +27,7 @@ interface AccessTokenPayload {
 
 interface RefreshTokenPayload {
   jti: string;
+  sid: string;
   sub: string;
   iat: number;
   exp: number;
@@ -98,9 +97,7 @@ export async function createAccessToken(
   const issuedAt = Math.floor(Date.now() / 1000);
   const expiresAt = issuedAt + ttlSeconds;
   const accessToken = await new SignJWT({
-    username: payload.username,
-    displayName: payload.displayName,
-    email: payload.email,
+    sid: payload.sid,
     type: 'access',
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
@@ -125,6 +122,7 @@ export async function createRefreshToken(
   const refreshToken = await signToken(
     {
       jti: payload.jti,
+      sid: payload.sid,
       sub: payload.sub,
       type: 'refresh',
     },
@@ -338,10 +336,8 @@ function isAccessTokenPayload(value: unknown): value is AccessTokenPayload {
   const payload = value as Record<string, unknown>;
 
   return (
+    typeof payload.sid === 'string' &&
     typeof payload.sub === 'string' &&
-    typeof payload.username === 'string' &&
-    typeof payload.displayName === 'string' &&
-    typeof payload.email === 'string' &&
     typeof payload.iat === 'number' &&
     typeof payload.exp === 'number' &&
     payload.type === 'access'
@@ -357,6 +353,7 @@ function isRefreshTokenPayload(value: unknown): value is RefreshTokenPayload {
 
   return (
     typeof payload.jti === 'string' &&
+    typeof payload.sid === 'string' &&
     typeof payload.sub === 'string' &&
     typeof payload.iat === 'number' &&
     typeof payload.exp === 'number' &&

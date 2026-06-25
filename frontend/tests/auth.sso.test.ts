@@ -7,12 +7,12 @@ import {
   fetchSsoConfig,
   getSsoCallbackParams,
   getSsoStartUrl,
-  getStoredSession,
 } from '../src/lib/auth';
-import { createSession, createTestWindow } from './support/auth';
+import { clearAuthSession, createSession, createTestWindow, getCurrentAuthSession } from './support/auth';
 
 describe('auth SSO client', () => {
   afterEach(() => {
+    clearAuthSession();
     vi.unstubAllGlobals();
   });
 
@@ -92,7 +92,7 @@ describe('auth SSO client', () => {
     );
 
     await expect(completeSsoLogin('handoff-token')).resolves.toEqual(session);
-    expect(getStoredSession()).toEqual(session);
+    expect(getCurrentAuthSession()).toEqual(session);
   });
 
   it('creates SSO accounts and stores the returned session', async () => {
@@ -133,7 +133,7 @@ describe('auth SSO client', () => {
         token: 'bind-token',
       }),
     ).resolves.toEqual(session);
-    expect(getStoredSession()).toEqual(session);
+    expect(getCurrentAuthSession()).toEqual(session);
   });
 
   it('binds SSO accounts and stores the returned session', async () => {
@@ -170,6 +170,6 @@ describe('auth SSO client', () => {
         token: 'bind-token',
       }),
     ).resolves.toEqual(session);
-    expect(getStoredSession()).toEqual(session);
+    expect(getCurrentAuthSession()).toEqual(session);
   });
 });

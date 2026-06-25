@@ -75,8 +75,9 @@ export interface AuthTokenConfig {
 }
 
 interface RefreshTokenRecord {
+  familyId: string;
   userId: string;
-  used?: boolean;
+  used: boolean;
 }
 
 export const defaultAuthTokenConfig: AuthTokenConfig = {
@@ -85,6 +86,7 @@ export const defaultAuthTokenConfig: AuthTokenConfig = {
 };
 
 const refreshTokenCacheKeyPrefix = 'auth:refresh-token:';
+const sessionFamilyRevocationCacheKeyPrefix = 'auth:session-family-revoked:';
 
 export class AuthService {
   constructor(
@@ -184,10 +186,15 @@ export class AuthService {
 
   async refreshSession(refreshToken: string) {
     const payload = await this.verifyRefreshToken(refreshToken);
+
+    await this.assertSessionFamilyActive(payload.sid);
+
     const recordKey = getRefreshTokenCacheKey(payload.jti);
     const record = await this.refreshTokenStore.get<RefreshTokenRecord>(recordKey);
+    const remainingTokenTtlMs = getRemainingTokenTtlMs(payload.exp);
 
-    if (!record || record.userId !== payload.sub || record.used) {
+    if (!record || record.familyId !== payload.sid || record.userId !== payload.sub || record.used !== false) {
+      await this.revokeSessionFamily(payload.sid, remainingTokenTtlMs);
       throwInvalidRefreshToken();
     }
 
@@ -198,10 +205,11 @@ export class AuthService {
         ...record,
         used: true,
       },
-      Math.max(payload.exp * 1000 - Date.now(), 1),
+      remainingTokenTtlMs,
     );
 
     if (!consumed) {
+      await this.revokeSessionFamily(payload.sid, remainingTokenTtlMs);
       throwInvalidRefreshToken();
     }
 
@@ -210,10 +218,18 @@ export class AuthService {
     const user = await this.userService.findById(payload.sub);
 
     if (!user || !user.available) {
+      await this.revokeSessionFamily(payload.sid, remainingTokenTtlMs);
       throwInvalidRefreshToken();
     }
 
-    return createAuthSession(user, this.tokenSecret, this.tokenConfig, this.refreshTokenStore, this.accessControl);
+    return createAuthSession(
+      user,
+      this.tokenSecret,
+      this.tokenConfig,
+      this.refreshTokenStore,
+      this.accessControl,
+      payload.sid,
+    );
   }
 
   async revokeRefreshToken(refreshToken: string) {
@@ -221,6 +237,7 @@ export class AuthService {
       const payload = await verifyRefreshToken(refreshToken, this.tokenSecret);
 
       await this.refreshTokenStore.delete(getRefreshTokenCacheKey(payload.jti));
+      await this.revokeSessionFamily(payload.sid, getRemainingTokenTtlMs(payload.exp));
     } catch {
       // Logout should clear client state even when the refresh token is absent or stale.
     }
@@ -270,6 +287,9 @@ export class AuthService {
 
   async authenticate(token: string) {
     const payload = await verifyAccessToken(token, this.tokenSecret);
+
+    await this.assertSessionFamilyActive(payload.sid);
+
     const user = await this.userService.findById(payload.sub);
 
     if (!user) {
@@ -359,6 +379,18 @@ export class AuthService {
       throwInvalidRefreshToken();
     }
   }
+
+  private async assertSessionFamilyActive(familyId: string) {
+    const revoked = await this.refreshTokenStore.get<boolean>(getSessionFamilyRevocationCacheKey(familyId));
+
+    if (revoked) {
+      throwInvalidRefreshToken();
+    }
+  }
+
+  private async revokeSessionFamily(familyId: string, ttlMs: number) {
+    await this.refreshTokenStore.set(getSessionFamilyRevocationCacheKey(familyId), true, ttlMs);
+  }
 }
 
 export async function createAuthSession(
@@ -367,15 +399,14 @@ export async function createAuthSession(
   tokenConfig: AuthTokenConfig,
   refreshTokenStore: CacheStore,
   accessControl: AccessControlService,
+  refreshTokenFamilyId: string = randomUUID(),
 ) {
   const authUser = toAuthUser(user, await accessControl.getUserAccess(user.id));
   const refreshTokenId = randomUUID();
   const accessToken = await createAccessToken(
     {
+      sid: refreshTokenFamilyId,
       sub: user.id,
-      username: authUser.username,
-      displayName: authUser.displayName,
-      email: authUser.email,
     },
     tokenSecret,
     tokenConfig.accessTokenTtlSeconds,
@@ -383,6 +414,7 @@ export async function createAuthSession(
   const refreshToken = await createRefreshToken(
     {
       jti: refreshTokenId,
+      sid: refreshTokenFamilyId,
       sub: user.id,
     },
     tokenSecret,
@@ -392,6 +424,7 @@ export async function createAuthSession(
   await refreshTokenStore.set(
     getRefreshTokenCacheKey(refreshTokenId),
     {
+      familyId: refreshTokenFamilyId,
       userId: user.id,
       used: false,
     },
@@ -431,6 +464,14 @@ function throwInvalidRefreshToken(): never {
 
 function getRefreshTokenCacheKey(tokenId: string) {
   return `${refreshTokenCacheKeyPrefix}${tokenId}`;
+}
+
+function getSessionFamilyRevocationCacheKey(familyId: string) {
+  return `${sessionFamilyRevocationCacheKeyPrefix}${familyId}`;
+}
+
+function getRemainingTokenTtlMs(expiresAtSeconds: number) {
+  return Math.max(expiresAtSeconds * 1000 - Date.now(), 1);
 }
 
 function isPasswordResetEligibleUser(user: UserModel | null): user is UserModel {
