@@ -69,6 +69,8 @@ describe('auth API', () => {
     expect(registerBody.data.user).not.toHaveProperty('id');
     expect(registerBody.data).not.toHaveProperty('accessToken');
     expect(registerBody.data).not.toHaveProperty('refreshToken');
+    expect(registerContext.responseHeaders['cache-control']).toBe('no-store');
+    expect(registerContext.responseHeaders.pragma).toBe('no-cache');
     expect(registerContext.responseHeaders['set-cookie:tilty_scaffold_access_token']).toContain('httpOnly');
     expect(registerContext.responseHeaders['set-cookie:tilty_scaffold_refresh_token']).toContain('httpOnly');
 
@@ -86,6 +88,7 @@ describe('auth API', () => {
     expect(loginBody.data.user).not.toHaveProperty('id');
     expect(loginBody.data).not.toHaveProperty('accessToken');
     expect(loginBody.data).not.toHaveProperty('refreshToken');
+    expect(loginContext.responseHeaders['cache-control']).toBe('no-store');
     expect(authCookie).toEqual(expect.any(String));
 
     const meContext = await runMiddleware(
@@ -149,6 +152,9 @@ describe('auth API', () => {
     await expect(services.auth.refreshSession(session.refreshToken)).rejects.toMatchObject({
       code: 'AUTH_REFRESH_TOKEN_INVALID',
     });
+    await expect(services.auth.getCurrentUser(session.accessToken)).rejects.toMatchObject({
+      code: 'AUTH_REFRESH_TOKEN_INVALID',
+    });
   });
 
   it('refreshes authenticated sessions with a refresh token cookie', async () => {
@@ -168,6 +174,7 @@ describe('auth API', () => {
       }),
     );
     const body = context.body as AuthSessionBody;
+    const accessCookie = getAuthCookie(context, 'tilty_scaffold_access_token');
     const refreshCookie = getAuthCookie(context, 'tilty_scaffold_refresh_token');
 
     expect(body.data.user.email).toBe('refresh@example.com');
@@ -176,10 +183,40 @@ describe('auth API', () => {
     expect(body.data).not.toHaveProperty('refreshToken');
     expect(refreshCookie).toEqual(expect.any(String));
     expect(refreshCookie).not.toBe(session.refreshToken);
+    expect(context.responseHeaders['cache-control']).toBe('no-store');
     expect(context.responseHeaders['set-cookie:tilty_scaffold_access_token']).toContain('httpOnly');
     expect(context.responseHeaders['set-cookie:tilty_scaffold_refresh_token']).toContain('httpOnly');
     await expect(services.auth.refreshSession(session.refreshToken)).rejects.toMatchObject({
       code: 'AUTH_REFRESH_TOKEN_INVALID',
+    });
+    await expect(services.auth.refreshSession(refreshCookie)).rejects.toMatchObject({
+      code: 'AUTH_REFRESH_TOKEN_INVALID',
+    });
+    await expect(services.auth.getCurrentUser(accessCookie)).rejects.toMatchObject({
+      code: 'AUTH_REFRESH_TOKEN_INVALID',
+    });
+  });
+
+  it('clears authentication cookies when refresh token validation fails', async () => {
+    const context = createTestContext(undefined, {}, undefined, {
+      cookies: {
+        tilty_scaffold_refresh_token: 'invalid-refresh-token',
+      },
+    });
+
+    await expect(runMiddleware(getTestRouteHandler(routes, 'post', '/refresh'), context)).rejects.toMatchObject({
+      code: 'AUTH_REFRESH_TOKEN_INVALID',
+      status: 401,
+    });
+
+    expect(context.responseHeaders['cache-control']).toBe('no-store');
+    expect(JSON.parse(context.responseHeaders['set-cookie:tilty_scaffold_access_token']!)).toMatchObject({
+      maxAge: 0,
+      value: '',
+    });
+    expect(JSON.parse(context.responseHeaders['set-cookie:tilty_scaffold_refresh_token']!)).toMatchObject({
+      maxAge: 0,
+      value: '',
     });
   });
 

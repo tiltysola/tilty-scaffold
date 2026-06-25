@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
+import { type CSSProperties, type ReactNode, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import {
@@ -13,15 +13,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { useAuthenticatedSession } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
-import {
-  authSessionChangedEvent,
-  getStoredSession,
-  getUserHandle,
-  getUserInitials,
-  logout,
-  resolveAssetUrl,
-} from '@/lib/auth';
+import { getUserHandle, getUserInitials, logout, resolveAssetUrl } from '@/lib/auth';
 import { getMainNavigationGroups, type NavigationIcon, routePath } from '@/router';
 import { Avatar, AvatarFallback, AvatarImage } from '@/shadcn/components/ui/avatar';
 import {
@@ -141,27 +135,15 @@ const SidebarUser = ({
 };
 
 const Index = ({ children }: AppSidebarProps) => {
-  const [session, setSession] = useState(() => getStoredSession());
   const [signingOut, setSigningOut] = useState(false);
   const navigate = useNavigate();
+  const session = useAuthenticatedSession();
   const sidebarUser = {
-    avatarUrl: session?.user.avatarUrl,
-    name: session?.user.displayName ?? 'Unknown User',
-    username: session?.user.username ?? '',
+    avatarUrl: session.user.avatarUrl,
+    name: session.user.displayName,
+    username: session.user.username,
   };
-  const navItems = createNavItems(session?.user.permissions);
-
-  useEffect(() => {
-    const handleSessionChange = () => {
-      setSession(getStoredSession());
-    };
-
-    window.addEventListener(authSessionChangedEvent, handleSessionChange);
-
-    return () => {
-      window.removeEventListener(authSessionChangedEvent, handleSessionChange);
-    };
-  }, []);
+  const navItems = createNavItems(session.user.permissions);
 
   const handleSignOut = () => {
     if (signingOut) {

@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getStoredSession, resolveAssetUrl, storeSession, uploadAvatar } from '../src/lib/auth';
-import { createSession, createTestWindow } from './support/auth';
+import { resolveAssetUrl, uploadAvatar } from '../src/lib/auth';
+import {
+  clearAuthSession,
+  createSession,
+  createTestWindow,
+  getCurrentAuthSession,
+  seedAuthSession,
+} from './support/auth';
 
 describe('auth avatar client', () => {
   afterEach(() => {
+    clearAuthSession();
     vi.unstubAllGlobals();
   });
 
@@ -29,11 +36,11 @@ describe('auth avatar client', () => {
     });
 
     vi.stubGlobal('window', window);
+    await seedAuthSession(storedSession);
     vi.stubGlobal('fetch', fetchMock);
-    storeSession(storedSession);
 
     await expect(uploadAvatar(new File(['avatar'], 'avatar.png', { type: 'image/png' }))).resolves.toEqual(updatedUser);
-    expect(getStoredSession()?.user.avatarUrl).toBe('/uploads/avatars/avatar.png');
+    expect(getCurrentAuthSession()?.user.avatarUrl).toBe('/uploads/avatars/avatar.png');
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/avatar');
   });
 
@@ -52,7 +59,7 @@ describe('auth avatar client', () => {
           JSON.stringify({
             code: 401,
             error: 'AUTH_TOKEN_EXPIRED',
-            message: 'Authentication token has expired.',
+            message: '认证 token 已过期。',
           }),
           { status: 401 },
         ),
@@ -79,8 +86,8 @@ describe('auth avatar client', () => {
       );
 
     vi.stubGlobal('window', window);
+    await seedAuthSession(initialSession);
     vi.stubGlobal('fetch', fetchMock);
-    storeSession(initialSession);
 
     await expect(uploadAvatar(new File(['avatar'], 'avatar.png', { type: 'image/png' }))).resolves.toEqual(updatedUser);
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
@@ -88,7 +95,7 @@ describe('auth avatar client', () => {
       '/api/auth/refresh',
       '/api/auth/avatar',
     ]);
-    expect(getStoredSession()).toEqual({
+    expect(getCurrentAuthSession()).toEqual({
       ...refreshedSession,
       user: updatedUser,
     });

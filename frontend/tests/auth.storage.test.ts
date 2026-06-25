@@ -1,27 +1,41 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { authStore, fetchCurrentUser, getUserHandle, getUserInitials } from '../src/lib/auth';
 import {
   authSessionStorageKey,
-  clearStoredSession,
-  fetchCurrentUser,
-  getStoredSession,
-  getUserHandle,
-  getUserInitials,
-  storeSession,
-  validateStoredSession,
-} from '../src/lib/auth';
-import { createSession, createTestWindow } from './support/auth';
+  clearAuthSession,
+  createSession,
+  createTestWindow,
+  getCurrentAuthSession,
+  seedAuthSession,
+} from './support/auth';
 
 describe('auth session storage', () => {
   afterEach(() => {
-    clearStoredSession();
+    clearAuthSession();
     vi.unstubAllGlobals();
   });
+
+  function stubFailedRefresh() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            code: 401,
+            error: 'AUTH_REFRESH_TOKEN_INVALID',
+            message: 'Refresh token is invalid or expired.',
+          }),
+          { status: 401 },
+        );
+      }),
+    );
+  }
 
   it('formats username handles for account displays', () => {
     expect(getUserHandle('test_user')).toBe('@test_user');
     expect(getUserHandle('  test_user  ')).toBe('@test_user');
-    expect(getUserHandle()).toBe('@unknown-user');
+    expect(getUserHandle()).toBe('');
   });
 
   it('formats user initials for avatars', () => {
@@ -30,18 +44,22 @@ describe('auth session storage', () => {
     expect(getUserInitials()).toBe('U');
   });
 
-  it('stores and reads a valid session', () => {
+  it('stores and reads a valid session', async () => {
     const window = createTestWindow();
     vi.stubGlobal('window', window);
 
     const session = createSession(new Date(Date.now() + 60_000).toISOString());
 
-    storeSession(session);
+    await seedAuthSession(session);
 
-    expect(getStoredSession()).toEqual(session);
+    expect(getCurrentAuthSession()).toEqual(session);
     expect(JSON.parse(window.localStorage.getItem(authSessionStorageKey) ?? '{}')).toEqual({
       accessTokenExpiresAt: session.accessTokenExpiresAt,
       refreshTokenExpiresAt: session.refreshTokenExpiresAt,
+    });
+    expect(authStore.getSnapshot()).toMatchObject({
+      session,
+      status: 'authenticated',
     });
   });
 
@@ -56,44 +74,64 @@ describe('auth session storage', () => {
 
     window.localStorage.setItem(authSessionStorageKey, JSON.stringify(persistedSession));
 
-    expect(getStoredSession()).toEqual({
-      ...persistedSession,
-      user: {
-        username: '',
-        displayName: '',
-        email: '',
-        emailVerified: false,
-        phoneVerified: false,
-        roles: [],
-        permissions: [],
-      },
-    });
+    expect(window.localStorage.getItem(authSessionStorageKey)).toBe(JSON.stringify(persistedSession));
+    expect(getCurrentAuthSession()).toBeNull();
+    expect(authStore.getSnapshot().session).toBeNull();
   });
 
-  it('clears invalid sessions', () => {
+  it('clears persisted sessions with legacy user fields', async () => {
     const window = createTestWindow();
     vi.stubGlobal('window', window);
-    window.localStorage.setItem(authSessionStorageKey, '{invalid');
+    stubFailedRefresh();
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
 
-    expect(getStoredSession()).toBeNull();
+    window.localStorage.setItem(
+      authSessionStorageKey,
+      JSON.stringify({
+        accessTokenExpiresAt: session.accessTokenExpiresAt,
+        refreshTokenExpiresAt: session.refreshTokenExpiresAt,
+        user: session.user,
+      }),
+    );
+
+    await expect(authStore.restore()).resolves.toBeNull();
     expect(window.localStorage.getItem(authSessionStorageKey)).toBeNull();
   });
 
-  it('clears expired sessions', () => {
+  it('clears invalid sessions', async () => {
     const window = createTestWindow();
     vi.stubGlobal('window', window);
+    stubFailedRefresh();
+    window.localStorage.setItem(authSessionStorageKey, '{invalid');
 
-    storeSession(createSession(new Date(Date.now() - 60_000).toISOString()));
+    await expect(authStore.restore()).resolves.toBeNull();
+    expect(window.localStorage.getItem(authSessionStorageKey)).toBeNull();
+  });
 
-    expect(getStoredSession()).toBeNull();
+  it('clears expired sessions', async () => {
+    const window = createTestWindow();
+    vi.stubGlobal('window', window);
+    stubFailedRefresh();
+
+    const expiredSession = createSession(new Date(Date.now() - 60_000).toISOString());
+    window.localStorage.setItem(
+      authSessionStorageKey,
+      JSON.stringify({
+        accessTokenExpiresAt: expiredSession.accessTokenExpiresAt,
+        refreshTokenExpiresAt: expiredSession.refreshTokenExpiresAt,
+      }),
+    );
+
+    await expect(authStore.restore()).resolves.toBeNull();
     expect(window.localStorage.getItem(authSessionStorageKey)).toBeNull();
   });
 
   it.each(['accessTokenExpiresAt', 'refreshTokenExpiresAt'] as const)(
     'clears sessions with invalid %s dates',
-    (field) => {
+    async (field) => {
       const window = createTestWindow();
       vi.stubGlobal('window', window);
+      stubFailedRefresh();
       const session = {
         ...createSession(new Date(Date.now() + 60_000).toISOString()),
         [field]: 'not-a-date',
@@ -101,25 +139,25 @@ describe('auth session storage', () => {
 
       window.localStorage.setItem(authSessionStorageKey, JSON.stringify(session));
 
-      expect(getStoredSession()).toBeNull();
+      await expect(authStore.restore()).resolves.toBeNull();
       expect(window.localStorage.getItem(authSessionStorageKey)).toBeNull();
     },
   );
 
-  it('removes stored sessions', () => {
+  it('removes stored sessions', async () => {
     const window = createTestWindow();
     vi.stubGlobal('window', window);
 
-    storeSession(createSession(new Date(Date.now() + 60_000).toISOString()));
-    clearStoredSession();
+    await seedAuthSession(createSession(new Date(Date.now() + 60_000).toISOString()));
+    authStore.clear();
 
-    expect(getStoredSession()).toBeNull();
+    expect(getCurrentAuthSession()).toBeNull();
   });
 
   it('clears stored sessions when current user auth fails', async () => {
     const window = createTestWindow();
     vi.stubGlobal('window', window);
-    storeSession(createSession(new Date(Date.now() + 60_000).toISOString()));
+    await seedAuthSession(createSession(new Date(Date.now() + 60_000).toISOString()));
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
@@ -138,7 +176,7 @@ describe('auth session storage', () => {
       code: 'AUTH_INVALID_TOKEN',
       status: 401,
     });
-    expect(getStoredSession()).toBeNull();
+    expect(getCurrentAuthSession()).toBeNull();
   });
 
   it('refreshes the session and retries current user requests when the access token is missing', async () => {
@@ -182,18 +220,94 @@ describe('auth session storage', () => {
       );
 
     vi.stubGlobal('window', window);
+    await seedAuthSession(createSession(new Date(Date.now() + 60_000).toISOString()));
     vi.stubGlobal('fetch', fetchMock);
-    storeSession(createSession(new Date(Date.now() + 60_000).toISOString()));
 
     await expect(fetchCurrentUser()).resolves.toEqual(updatedUser);
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/auth/me', '/api/auth/refresh', '/api/auth/me']);
-    expect(getStoredSession()).toEqual(refreshedSession);
+    expect(getCurrentAuthSession()).toEqual(refreshedSession);
+  });
+
+  it('refreshes expired access metadata before validating stored sessions', async () => {
+    const window = createTestWindow();
+    const expiredAccessSession = {
+      ...createSession(new Date(Date.now() + 60_000).toISOString()),
+      accessTokenExpiresAt: new Date(Date.now() - 60_000).toISOString(),
+    };
+    const refreshedSession = createSession(new Date(Date.now() + 60_000).toISOString());
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 200,
+          error: null,
+          data: refreshedSession,
+        }),
+        { status: 200 },
+      );
+    });
+
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('fetch', fetchMock);
+    window.localStorage.setItem(
+      authSessionStorageKey,
+      JSON.stringify({
+        accessTokenExpiresAt: expiredAccessSession.accessTokenExpiresAt,
+        refreshTokenExpiresAt: expiredAccessSession.refreshTokenExpiresAt,
+      }),
+    );
+
+    await expect(authStore.restore()).resolves.toEqual(refreshedSession);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/auth/refresh']);
+    expect(getCurrentAuthSession()).toEqual(refreshedSession);
+  });
+
+  it('refreshes expired access tokens before authenticated requests', async () => {
+    const window = createTestWindow();
+    const storedSession = {
+      ...createSession(new Date(Date.now() + 60_000).toISOString()),
+      accessTokenExpiresAt: new Date(Date.now() - 60_000).toISOString(),
+    };
+    const refreshedSession = createSession(new Date(Date.now() + 60_000).toISOString());
+    const updatedUser = {
+      ...refreshedSession.user,
+      displayName: 'Updated User',
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 200,
+            error: null,
+            data: refreshedSession,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 200,
+            error: null,
+            data: updatedUser,
+          }),
+          { status: 200 },
+        ),
+      );
+
+    vi.stubGlobal('window', window);
+    await seedAuthSession(storedSession);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchCurrentUser()).resolves.toEqual(updatedUser);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/auth/refresh', '/api/auth/me']);
+    expect(getCurrentAuthSession()).toEqual(refreshedSession);
   });
 
   it('validates stored sessions and refreshes the stored user', async () => {
     const window = createTestWindow();
     vi.stubGlobal('window', window);
-    storeSession(createSession(new Date(Date.now() + 60_000).toISOString()));
+    await seedAuthSession(createSession(new Date(Date.now() + 60_000).toISOString()));
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
@@ -211,17 +325,69 @@ describe('auth session storage', () => {
       }),
     );
 
-    const session = await validateStoredSession();
+    const session = await authStore.restore();
 
     expect(session?.user.displayName).toBe('Updated User');
-    expect(getStoredSession()?.user.displayName).toBe('Updated User');
+    expect(getCurrentAuthSession()?.user.displayName).toBe('Updated User');
+  });
+
+  it('restores sessions from refresh cookies when local metadata is missing', async () => {
+    const window = createTestWindow();
+    const refreshedSession = createSession(new Date(Date.now() + 60_000).toISOString());
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 200,
+          error: null,
+          data: refreshedSession,
+        }),
+        { status: 200 },
+      );
+    });
+
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(authStore.restore()).resolves.toEqual(refreshedSession);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/auth/refresh']);
+    expect(getCurrentAuthSession()).toEqual(refreshedSession);
+  });
+
+  it('restores sessions from refresh cookies when local metadata is expired', async () => {
+    const window = createTestWindow();
+    const expiredSession = createSession(new Date(Date.now() - 60_000).toISOString());
+    const refreshedSession = createSession(new Date(Date.now() + 60_000).toISOString());
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 200,
+          error: null,
+          data: refreshedSession,
+        }),
+        { status: 200 },
+      );
+    });
+
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('fetch', fetchMock);
+    window.localStorage.setItem(
+      authSessionStorageKey,
+      JSON.stringify({
+        accessTokenExpiresAt: expiredSession.accessTokenExpiresAt,
+        refreshTokenExpiresAt: expiredSession.refreshTokenExpiresAt,
+      }),
+    );
+
+    await expect(authStore.restore()).resolves.toEqual(refreshedSession);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/auth/refresh']);
+    expect(getCurrentAuthSession()).toEqual(refreshedSession);
   });
 
   it('clears stored sessions when validation cannot reach the API', async () => {
     const window = createTestWindow();
     vi.stubGlobal('window', window);
     const storedSession = createSession(new Date(Date.now() + 60_000).toISOString());
-    storeSession(storedSession);
+    await seedAuthSession(storedSession);
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
@@ -229,7 +395,7 @@ describe('auth session storage', () => {
       }),
     );
 
-    await expect(validateStoredSession()).resolves.toBeNull();
-    expect(getStoredSession()).toBeNull();
+    await expect(authStore.restore()).resolves.toBeNull();
+    expect(getCurrentAuthSession()).toBeNull();
   });
 });

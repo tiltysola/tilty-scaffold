@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from '@/shadcn/components/ui/sonner';
 import { TooltipProvider } from '@/shadcn/components/ui/tooltip';
 
+import { AuthProvider } from './components/AuthProvider';
 import Router from './router';
 
 import './shadcn/index.css';
@@ -19,7 +20,9 @@ createRoot(container).render(
   <StrictMode>
     <TooltipProvider>
       <BrowserRouter>
-        <Router />
+        <AuthProvider>
+          <Router />
+        </AuthProvider>
       </BrowserRouter>
       <Toaster position="top-center" richColors />
     </TooltipProvider>

@@ -1,13 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchUsers, updateUser } from '../src/lib/users';
+import { clearAuthSession, createSession, createTestWindow, seedAuthSession } from './support/auth';
 
 describe('users API client', () => {
   afterEach(() => {
+    clearAuthSession();
     vi.unstubAllGlobals();
   });
 
   it('fetches paginated users with page query parameters', async () => {
+    const window = createTestWindow();
+    vi.stubGlobal('window', window);
+    await seedAuthSession(createSession(new Date(Date.now() + 60_000).toISOString()));
     const fetchMock = vi.fn<typeof fetch>(async () => {
       return new Response(
         JSON.stringify({
@@ -44,6 +49,9 @@ describe('users API client', () => {
   });
 
   it('updates a managed user with changed fields and roles', async () => {
+    const window = createTestWindow();
+    vi.stubGlobal('window', window);
+    await seedAuthSession(createSession(new Date(Date.now() + 60_000).toISOString()));
     const fetchMock = vi.fn<typeof fetch>(async () => {
       return new Response(
         JSON.stringify({

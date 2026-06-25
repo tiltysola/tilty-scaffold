@@ -1,4 +1,28 @@
-import { type AuthSession } from '../../src/lib/auth';
+import { vi } from 'vitest';
+
+import { type AuthSession, authStore } from '../../src/lib/auth';
+import { createApiSuccessResponse } from './api';
+
+export const authSessionStorageKey = 'tilty-scaffold.auth.session';
+
+export function clearAuthSession() {
+  authStore.clear();
+}
+
+export function getCurrentAuthSession() {
+  return authStore.getSnapshot().session;
+}
+
+export async function seedAuthSession(session: AuthSession) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      return createApiSuccessResponse(session);
+    }),
+  );
+
+  await authStore.refresh();
+}
 
 export function createSession(expiresAt: string): AuthSession {
   return {

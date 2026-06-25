@@ -75,7 +75,7 @@ all backend instances below the database connection limit.
 `APP_DOMAIN` defines the primary public application origin, including protocol,
 such as `https://app.example.com`. Setup uses this value as the default
 `APP_CORS_ORIGINS` allowlist and as the base for generated callback URLs such
-as `/login` and `/api/auth/sso/callback`.
+as `/sso/callback` and `/api/auth/sso/callback`.
 
 `SERVER_TRUST_PROXY=false` is the default. Enable `SERVER_TRUST_PROXY=true`
 only when the backend is deployed behind a trusted reverse proxy that controls
@@ -175,7 +175,7 @@ and discovery; OAuth 2.0 profiles use
 as `subjectField`, `emailField`, and `emailVerifiedField`.
 
 Production SSO URLs must use HTTPS. Setup defaults each profile
-`frontendCallbackUrl` to `{APP_DOMAIN}/login` and `redirectUri` to
+`frontendCallbackUrl` to `{APP_DOMAIN}/sso/callback` and `redirectUri` to
 `{APP_DOMAIN}/api/auth/sso/callback`; edit the redirect URI when the backend API
 uses a separate public origin. OIDC discovery endpoints must use the configured
 issuer origin. The provider callback should use `/api/auth/sso/callback`; after

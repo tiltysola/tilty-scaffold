@@ -1,26 +1,31 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  authStore,
   fetchAuthConfig,
-  getStoredSession,
   logout,
-  refreshSession,
   register,
   resetPassword,
   sendPasswordResetEmailVerification,
   sendProfileEmailVerification,
   sendProfilePhoneVerification,
   sendRegistrationEmailVerification,
-  storeSession,
   updateCurrentUser,
   verifyProfileEmail,
   verifyProfilePhone,
 } from '../src/lib/auth';
 import { createApiSuccessResponse } from './support/api';
-import { createSession, createTestWindow } from './support/auth';
+import {
+  clearAuthSession,
+  createSession,
+  createTestWindow,
+  getCurrentAuthSession,
+  seedAuthSession,
+} from './support/auth';
 
 describe('auth API client', () => {
   afterEach(() => {
+    clearAuthSession();
     vi.unstubAllGlobals();
   });
 
@@ -96,8 +101,8 @@ describe('auth API client', () => {
     });
 
     vi.stubGlobal('window', window);
+    await seedAuthSession(session);
     vi.stubGlobal('fetch', fetchMock);
-    storeSession(session);
 
     await expect(sendProfileEmailVerification()).resolves.toEqual({
       cooldownSeconds: 60,
@@ -125,8 +130,8 @@ describe('auth API client', () => {
     });
 
     vi.stubGlobal('window', window);
+    await seedAuthSession(session);
     vi.stubGlobal('fetch', fetchMock);
-    storeSession(session);
 
     await expect(
       sendProfilePhoneVerification({
@@ -173,7 +178,7 @@ describe('auth API client', () => {
         confirmPassword: 'password123',
       }),
     ).resolves.toEqual(session);
-    expect(getStoredSession()).toEqual(session);
+    expect(getCurrentAuthSession()).toEqual(session);
   });
 
   it('refreshes sessions and stores returned session metadata', async () => {
@@ -188,9 +193,35 @@ describe('auth API client', () => {
     vi.stubGlobal('window', window);
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(refreshSession()).resolves.toEqual(session);
+    await expect(authStore.refresh()).resolves.toEqual(session);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/refresh');
-    expect(getStoredSession()).toEqual(session);
+    expect(getCurrentAuthSession()).toEqual(session);
+  });
+
+  it('shares concurrent refresh session requests', async () => {
+    const window = createTestWindow();
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
+    let resolveRefresh: (response: Response) => void = () => {};
+    const fetchMock = vi.fn<typeof fetch>(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(authStore.getSnapshot().isRefreshing).toBe(false);
+    const firstRefresh = authStore.refresh();
+    const secondRefresh = authStore.refresh();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(authStore.getSnapshot().isRefreshing).toBe(true);
+    resolveRefresh(createApiSuccessResponse(session));
+    await expect(Promise.all([firstRefresh, secondRefresh])).resolves.toEqual([session, session]);
+    expect(authStore.getSnapshot().isRefreshing).toBe(false);
+    expect(getCurrentAuthSession()).toEqual(session);
   });
 
   it('updates the current user profile and stores returned user metadata', async () => {
@@ -213,8 +244,8 @@ describe('auth API client', () => {
     });
 
     vi.stubGlobal('window', window);
+    await seedAuthSession(session);
     vi.stubGlobal('fetch', fetchMock);
-    storeSession(session);
 
     await expect(
       updateCurrentUser({
@@ -223,7 +254,7 @@ describe('auth API client', () => {
       }),
     ).resolves.toEqual(updatedUser);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me');
-    expect(getStoredSession()).toEqual({
+    expect(getCurrentAuthSession()).toEqual({
       ...session,
       user: updatedUser,
     });
@@ -248,8 +279,8 @@ describe('auth API client', () => {
     });
 
     vi.stubGlobal('window', window);
+    await seedAuthSession(session);
     vi.stubGlobal('fetch', fetchMock);
-    storeSession(session);
 
     await expect(
       verifyProfileEmail({
@@ -257,7 +288,7 @@ describe('auth API client', () => {
       }),
     ).resolves.toEqual(updatedUser);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me/email-verification/confirm');
-    expect(getStoredSession()).toEqual({
+    expect(getCurrentAuthSession()).toEqual({
       ...session,
       user: updatedUser,
     });
@@ -284,8 +315,8 @@ describe('auth API client', () => {
     });
 
     vi.stubGlobal('window', window);
+    await seedAuthSession(session);
     vi.stubGlobal('fetch', fetchMock);
-    storeSession(session);
 
     await expect(
       verifyProfilePhone({
@@ -294,7 +325,7 @@ describe('auth API client', () => {
       }),
     ).resolves.toEqual(updatedUser);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me/phone-verification/confirm');
-    expect(getStoredSession()).toEqual({
+    expect(getCurrentAuthSession()).toEqual({
       ...session,
       user: updatedUser,
     });
@@ -309,12 +340,12 @@ describe('auth API client', () => {
     });
 
     vi.stubGlobal('window', window);
+    await seedAuthSession(createSession(new Date(Date.now() + 60_000).toISOString()));
     vi.stubGlobal('fetch', fetchMock);
-    storeSession(createSession(new Date(Date.now() + 60_000).toISOString()));
 
     await logout();
 
-    expect(getStoredSession()).toBeNull();
+    expect(getCurrentAuthSession()).toBeNull();
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/logout');
   });
 
@@ -330,19 +361,19 @@ describe('auth API client', () => {
     );
 
     vi.stubGlobal('window', window);
+    await seedAuthSession(session);
     vi.stubGlobal('fetch', fetchMock);
-    storeSession(session);
 
     const logoutPromise = logout();
 
-    expect(getStoredSession()).toEqual(session);
+    expect(getCurrentAuthSession()).toEqual(session);
     resolveLogout?.(
       createApiSuccessResponse({
         signedOut: true,
       }),
     );
     await logoutPromise;
-    expect(getStoredSession()).toBeNull();
+    expect(getCurrentAuthSession()).toBeNull();
   });
 
   it('keeps stored sessions when logout requests fail', async () => {
@@ -350,19 +381,19 @@ describe('auth API client', () => {
     const session = createSession(new Date(Date.now() + 60_000).toISOString());
 
     vi.stubGlobal('window', window);
+    await seedAuthSession(session);
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
         throw new Error('network down');
       }),
     );
-    storeSession(session);
 
     await expect(logout()).rejects.toMatchObject({
       code: 'NETWORK_ERROR',
       status: 0,
     });
-    expect(getStoredSession()).toEqual(session);
+    expect(getCurrentAuthSession()).toEqual(session);
   });
 
   it('resets passwords', async () => {

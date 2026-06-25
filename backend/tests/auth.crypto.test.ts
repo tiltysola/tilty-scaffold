@@ -11,10 +11,8 @@ import {
 
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
 const payload = {
+  sid: 'session-family-id',
   sub: 'user-id',
-  username: 'test_user',
-  displayName: 'Test User',
-  email: 'user@example.com',
 };
 
 describe('auth token crypto', () => {
@@ -60,6 +58,7 @@ describe('auth token crypto', () => {
     const token = await createRefreshToken(
       {
         jti: 'refresh-token-id',
+        sid: 'refresh-token-family-id',
         sub: payload.sub,
       },
       authTokenSecret,
@@ -71,6 +70,7 @@ describe('auth token crypto', () => {
     expect(Date.parse(token.expiresAt)).not.toBeNaN();
     expect(verified).toMatchObject({
       jti: 'refresh-token-id',
+      sid: 'refresh-token-family-id',
       sub: payload.sub,
       type: 'refresh',
     });

@@ -53,6 +53,7 @@ export class AuthController {
     const input = registerSchema.parse(ctx.request.body);
     const session = await this.authService.register(input);
 
+    setSensitiveAuthResponseHeaders(ctx);
     setAuthCookies(ctx, session, this.cookieConfig);
     ctx.status = 201;
     ctx.body = ok(toSessionResponse(session));
@@ -76,6 +77,7 @@ export class AuthController {
     const token = getAuthToken(ctx, this.cookieConfig);
     const result = await this.authService.sendProfileEmailVerification(token);
 
+    setSensitiveAuthResponseHeaders(ctx);
     ctx.body = ok(result);
   };
 
@@ -84,6 +86,7 @@ export class AuthController {
     const input = sendProfilePhoneVerificationSchema.parse(ctx.request.body);
     const result = await this.authService.sendProfilePhoneVerification(token, input);
 
+    setSensitiveAuthResponseHeaders(ctx);
     ctx.body = ok(result);
   };
 
@@ -91,6 +94,7 @@ export class AuthController {
     const input = loginSchema.parse(ctx.request.body);
     const session = await this.authService.login(input);
 
+    setSensitiveAuthResponseHeaders(ctx);
     setAuthCookies(ctx, session, this.cookieConfig);
     ctx.body = ok(toSessionResponse(session));
   };
@@ -99,6 +103,7 @@ export class AuthController {
     const input = resetPasswordSchema.parse(ctx.request.body);
     const result = await this.authService.resetPassword(input);
 
+    setSensitiveAuthResponseHeaders(ctx);
     ctx.body = ok(result);
   };
 
@@ -107,6 +112,7 @@ export class AuthController {
     const input = verifyProfileEmailSchema.parse(ctx.request.body);
     const user = await this.authService.verifyProfileEmail(token, input);
 
+    setSensitiveAuthResponseHeaders(ctx);
     ctx.body = ok(user);
   };
 
@@ -115,6 +121,7 @@ export class AuthController {
     const input = verifyProfilePhoneSchema.parse(ctx.request.body);
     const user = await this.authService.verifyProfilePhone(token, input);
 
+    setSensitiveAuthResponseHeaders(ctx);
     ctx.body = ok(user);
   };
 
@@ -122,6 +129,7 @@ export class AuthController {
     const token = getAuthToken(ctx, this.cookieConfig);
     const user = await this.authService.getCurrentUser(token);
 
+    setSensitiveAuthResponseHeaders(ctx);
     ctx.body = ok(user);
   };
 
@@ -130,6 +138,7 @@ export class AuthController {
     const input = updateCurrentUserSchema.parse(ctx.request.body);
     const user = await this.authService.updateCurrentUser(token, input);
 
+    setSensitiveAuthResponseHeaders(ctx);
     ctx.body = ok(user);
   };
 
@@ -141,17 +150,31 @@ export class AuthController {
     });
     const user = await this.authService.uploadAvatar(token, file);
 
+    setSensitiveAuthResponseHeaders(ctx);
     ctx.body = ok(user);
   };
 
   refresh: Middleware = async (ctx) => {
+    setSensitiveAuthResponseHeaders(ctx);
+
     const refreshToken = ctx.cookies.get(this.cookieConfig.refreshTokenName);
 
     if (!refreshToken) {
+      clearAuthCookies(ctx, this.cookieConfig);
       throw new AppError('AUTH_REFRESH_TOKEN_REQUIRED', 'Refresh token is required.', 401);
     }
 
-    const session = await this.authService.refreshSession(refreshToken);
+    let session: Awaited<ReturnType<AuthService['refreshSession']>>;
+
+    try {
+      session = await this.authService.refreshSession(refreshToken);
+    } catch (error) {
+      if (isAuthenticationFailure(error)) {
+        clearAuthCookies(ctx, this.cookieConfig);
+      }
+
+      throw error;
+    }
 
     setAuthCookies(ctx, session, this.cookieConfig);
     ctx.body = ok(toSessionResponse(session));
@@ -164,6 +187,7 @@ export class AuthController {
       await this.authService.revokeRefreshToken(refreshToken);
     }
 
+    setSensitiveAuthResponseHeaders(ctx);
     clearAuthCookies(ctx, this.cookieConfig);
     ctx.body = ok({ signedOut: true });
   };
@@ -203,6 +227,7 @@ export class AuthController {
     const input = ssoSessionSchema.parse(ctx.request.body);
     const session = await this.ssoService.exchangeHandoffToken(input.token);
 
+    setSensitiveAuthResponseHeaders(ctx);
     setAuthCookies(ctx, session, this.cookieConfig);
     ctx.body = ok(toSessionResponse(session));
   };
@@ -211,6 +236,7 @@ export class AuthController {
     const input = ssoCreateAccountSchema.parse(ctx.request.body);
     const session = await this.ssoService.createSsoAccount(input);
 
+    setSensitiveAuthResponseHeaders(ctx);
     setAuthCookies(ctx, session, this.cookieConfig);
     ctx.status = 201;
     ctx.body = ok(toSessionResponse(session));
@@ -220,6 +246,7 @@ export class AuthController {
     const input = ssoBindAccountSchema.parse(ctx.request.body);
     const session = await this.ssoService.bindSsoAccount(input);
 
+    setSensitiveAuthResponseHeaders(ctx);
     setAuthCookies(ctx, session, this.cookieConfig);
     ctx.body = ok(toSessionResponse(session));
   };
@@ -228,6 +255,7 @@ export class AuthController {
     const token = getAuthToken(ctx, this.cookieConfig);
     const { user } = await this.authService.authenticate(token);
 
+    setSensitiveAuthResponseHeaders(ctx);
     ctx.body = ok({
       identities: await this.ssoService.listUserIdentities(user.id),
     });
@@ -291,6 +319,15 @@ function clearAuthCookie(ctx: Parameters<Middleware>[0], name: string, config: A
     sameSite: config.sameSite,
     secure: isSecureRequest(ctx, config.secure),
   });
+}
+
+function setSensitiveAuthResponseHeaders(ctx: Parameters<Middleware>[0]) {
+  ctx.set('Cache-Control', 'no-store');
+  ctx.set('Pragma', 'no-cache');
+}
+
+function isAuthenticationFailure(error: unknown) {
+  return error instanceof AppError && error.status === 401;
 }
 
 function isSecureRequest(ctx: Parameters<Middleware>[0], policy: AuthCookieSecurePolicy) {

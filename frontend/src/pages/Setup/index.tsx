@@ -983,7 +983,11 @@ function getDefaultSsoProfileBase(appDomain?: string) {
     bindingEnabled: true,
     clientId: '',
     clientSecret: '',
-    frontendCallbackUrl: getUrlFromDomain(domain, routePath('login'), `${fallbackAppDomain}${routePath('login')}`),
+    frontendCallbackUrl: getUrlFromDomain(
+      domain,
+      routePath('ssoCallback'),
+      `${fallbackAppDomain}${routePath('ssoCallback')}`,
+    ),
     redirectUri: getUrlFromDomain(domain, '/api/auth/sso/callback', `${fallbackAppDomain}/api/auth/sso/callback`),
     requestTimeoutMs: '10000',
     scopes: 'openid profile email',
@@ -1010,7 +1014,7 @@ const ssoCommonTextFields: Array<{
   { key: 'iconUrl', label: 'Icon URL', placeholder: 'https://id.example.com/favicon.ico' },
   { key: 'clientId', label: 'Client ID', placeholder: 'client-id' },
   { key: 'clientSecret', label: 'Client Secret', placeholder: 'client-secret', type: 'password' },
-  { key: 'frontendCallbackUrl', label: 'Frontend Callback URL', placeholder: 'https://app.example.com/login' },
+  { key: 'frontendCallbackUrl', label: 'Frontend Callback URL', placeholder: 'https://app.example.com/sso/callback' },
   {
     key: 'redirectUri',
     label: 'Backend Redirect URI',

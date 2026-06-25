@@ -9,6 +9,7 @@ describe('frontend routes', () => {
     expect(getPageTitle('/')).toBe('Dashboard');
     expect(getPageTitle(routePath('dashboard'))).toBe('Dashboard');
     expect(getPageTitle(routePath('profile'))).toBe('Profile');
+    expect(getPageTitle(routePath('ssoCallback'))).toBe('SSO callback');
     expect(getPageTitle(routePath('users'))).toBe('Users');
     expect(getPageTitle(`${routePath('users')}/`)).toBe('Users');
     expect(getPageTitle('/unknown')).toBe('Dashboard');
