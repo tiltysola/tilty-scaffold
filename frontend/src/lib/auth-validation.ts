@@ -13,6 +13,34 @@ export const usernameSchema = z
   )
   .transform((username) => username.toLowerCase());
 export const displayNameSchema = z.string().trim().min(2, 'Display name must contain at least 2 characters.').max(64);
+export const profileGenderSchema = createOptionalProfileTextSchema(64);
+export const profileBirthdaySchema = z.preprocess(
+  normalizeEmptyProfileValue,
+  z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Birthday must use YYYY-MM-DD format.')
+    .refine(isValidDateOnly, {
+      message: 'Birthday must be a valid date.',
+    })
+    .refine((birthday) => birthday <= formatDateOnly(new Date()), {
+      message: 'Birthday cannot be in the future.',
+    })
+    .nullable(),
+);
+export const profileBioSchema = createOptionalProfileTextSchema(280);
+export const profileLocationSchema = createOptionalProfileTextSchema(128);
+export const profileWebsiteUrlSchema = z.preprocess(
+  normalizeEmptyProfileValue,
+  z
+    .string()
+    .trim()
+    .max(2048)
+    .refine(isHttpUrl, {
+      message: 'Homepage must be an HTTP or HTTPS URL.',
+    })
+    .nullable(),
+);
 export const emailSchema = z.string().trim().pipe(z.email('Provide a valid email address.'));
 export const phoneNumberSchema = z.string().trim().max(32).transform(normalizePhoneNumber).refine(isValidPhoneNumber, {
   message: 'Phone number must use E.164 format.',
@@ -43,6 +71,13 @@ export const loginCredentialsSchema = z.object({
   password: passwordSchema,
 });
 
+export const changePasswordSchema = createPasswordFormSchema({
+  currentPassword: passwordSchema,
+}).refine((input) => input.currentPassword !== input.password, {
+  message: 'New password must be different from current password.',
+  path: ['password'],
+});
+
 export function createPasswordFormSchema<T extends z.ZodRawShape>(shape: T) {
   return z
     .object({
@@ -51,4 +86,32 @@ export function createPasswordFormSchema<T extends z.ZodRawShape>(shape: T) {
       confirmPassword: confirmPasswordSchema,
     })
     .refine(hasMatchingPasswordConfirmation, passwordConfirmationIssue);
+}
+
+function normalizeEmptyProfileValue(value: unknown) {
+  return typeof value === 'string' && value.trim() === '' ? null : value;
+}
+
+function createOptionalProfileTextSchema(maxLength: number) {
+  return z.preprocess(normalizeEmptyProfileValue, z.string().trim().max(maxLength).nullable());
+}
+
+function isHttpUrl(value: string) {
+  try {
+    const url = new URL(value);
+
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function isValidDateOnly(value: string) {
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+
+  return !Number.isNaN(parsed.getTime()) && formatDateOnly(parsed) === value;
+}
+
+function formatDateOnly(date: Date) {
+  return date.toISOString().slice(0, 10);
 }

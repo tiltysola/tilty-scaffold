@@ -5,6 +5,8 @@ import {
   authSessionStorageKey,
   clearAuthSession,
   createSession,
+  createStorageBlockedTestWindow,
+  createStorageWriteBlockedTestWindow,
   createTestWindow,
   getCurrentAuthSession,
   seedAuthSession,
@@ -63,6 +65,23 @@ describe('auth session storage', () => {
     });
   });
 
+  it('preserves authenticated state across HMR-style module reloads', async () => {
+    const window = createTestWindow();
+    vi.stubGlobal('window', window);
+
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
+
+    await seedAuthSession(session);
+    vi.resetModules();
+
+    const { authStore: reloadedAuthStore } = await import('../src/lib/auth');
+
+    expect(reloadedAuthStore.getSnapshot()).toMatchObject({
+      session,
+      status: 'authenticated',
+    });
+  });
+
   it('restores persisted session metadata without storing user details', () => {
     const window = createTestWindow();
     vi.stubGlobal('window', window);
@@ -79,7 +98,58 @@ describe('auth session storage', () => {
     expect(authStore.getSnapshot().session).toBeNull();
   });
 
-  it('clears persisted sessions with legacy user fields', async () => {
+  it('treats unavailable browser storage as an anonymous session', async () => {
+    vi.stubGlobal('window', createStorageBlockedTestWindow());
+    stubFailedRefresh();
+
+    await expect(authStore.restore()).resolves.toBeNull();
+    expect(authStore.getSnapshot()).toMatchObject({
+      session: null,
+      status: 'anonymous',
+    });
+  });
+
+  it('keeps the in-memory session when browser storage rejects writes', async () => {
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
+    const updatedUser = {
+      ...session.user,
+      displayName: 'Updated User',
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 200,
+            error: null,
+            data: session,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 200,
+            error: null,
+            data: updatedUser,
+          }),
+          { status: 200 },
+        ),
+      );
+
+    vi.stubGlobal('window', createStorageWriteBlockedTestWindow());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authStore.refresh();
+
+    expect(getCurrentAuthSession()).toEqual(session);
+    await expect(fetchCurrentUser()).resolves.toEqual(updatedUser);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/auth/refresh', '/api/auth/me']);
+    expect(getCurrentAuthSession()).toEqual(session);
+  });
+
+  it('clears persisted sessions with unexpected user fields', async () => {
     const window = createTestWindow();
     vi.stubGlobal('window', window);
     stubFailedRefresh();

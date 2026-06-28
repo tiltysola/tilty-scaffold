@@ -12,6 +12,10 @@ describe('docs API', () => {
     const body = context.body as OpenApiDocument;
 
     expect(body.openapi).toBe('3.1.0');
+    expect(body.info).toEqual({
+      title: 'Tilty Scaffold API',
+      version: '0.1.8',
+    });
     expect(body.servers[0]).toEqual({
       url: '/',
       description: 'Current origin',
@@ -28,7 +32,10 @@ describe('docs API', () => {
     expect(body.paths['/api/auth/me/email-verification/confirm']).toBeDefined();
     expect(body.paths['/api/auth/me/phone-verification']).toBeDefined();
     expect(body.paths['/api/auth/me/phone-verification/confirm']).toBeDefined();
+    expect(body.paths['/api/auth/me/password']).toBeDefined();
     expect(body.paths['/api/auth/avatar']).toBeDefined();
+    expect(body.paths['/api/auth/profile-banner']).toBeDefined();
+    expect(body.paths['/api/auth/profile-background']).toBeDefined();
     expect(body.paths['/api/auth/sso/config']).toBeDefined();
     expect(body.paths['/api/auth/sso/start']).toBeDefined();
     expect(body.paths['/api/auth/sso/callback']).toBeDefined();
@@ -39,6 +46,21 @@ describe('docs API', () => {
     expect(body.paths['/api/users/']).toBeDefined();
     expect(body.paths['/api/users/{id}']).toBeDefined();
     expect(body.paths['/api/users/{id}/roles']).toBeDefined();
+    expect(body.paths['/api/users/{id}/details']).toBeDefined();
+    expect(body.paths['/api/users/{id}/mfa']).toBeDefined();
+    expect(body.paths['/api/users/{id}/totp/disable']).toBeDefined();
+    expect(body.paths['/api/users/{id}/passkeys/{passkeyId}']).toBeDefined();
+    expect(body.paths['/api/users/{id}/devices']).toBeDefined();
+    expect(body.paths['/api/users/{id}/sso-identities']).toBeDefined();
+    expect(body.paths['/api/users/{id}/sso-identities/{providerId}']).toBeDefined();
+    expect(body.paths['/api/users/{id}/avatar']).toBeDefined();
+    expect(body.paths['/api/users/{id}/profile-banner']).toBeDefined();
+    expect(body.paths['/api/users/{id}/profile-background']).toBeDefined();
+    expect(body.paths['/api/profile-options/genders']).toBeDefined();
+    expect(body.paths['/api/profile-options/locations/countries']).toBeDefined();
+    expect(body.paths['/api/profile-options/locations/regions']).toBeDefined();
+    expect(body.paths['/api/profile-options/locations/cities']).toBeDefined();
+    expect(body.paths['/api/system-settings/']).toBeDefined();
     expect(body.paths['/api/health']).toBeDefined();
     expect(body.paths['/api/health/ready']).toBeDefined();
     expect(body.paths['/api/openapi.json']).toBeDefined();
@@ -79,6 +101,7 @@ describe('docs API', () => {
       '403': 'CsrfForbidden',
       '429': 'RateLimited',
     });
+    expectSuccessSchemaRef(body, '/api/auth/login', 'post', 'LoginResponse');
     expectResponseRefs(body, '/api/auth/password-reset', 'post', {
       '400': 'ValidationError',
       '403': 'CsrfForbidden',
@@ -87,7 +110,7 @@ describe('docs API', () => {
     });
     expectResponseRefs(body, '/api/auth/me/email-verification', 'post', {
       '401': 'AuthRequired',
-      '403': 'CsrfForbidden',
+      '403': 'CsrfOrVerificationRequired',
       '404': 'EmailVerificationDisabled',
       '409': 'EmailAlreadyVerified',
       '429': 'RateLimited',
@@ -95,14 +118,14 @@ describe('docs API', () => {
     expectResponseRefs(body, '/api/auth/me/email-verification/confirm', 'post', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
-      '403': 'CsrfForbidden',
+      '403': 'CsrfOrVerificationRequired',
       '404': 'EmailVerificationDisabled',
       '429': 'RateLimited',
     });
     expectResponseRefs(body, '/api/auth/me/phone-verification', 'post', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
-      '403': 'CsrfForbidden',
+      '403': 'CsrfOrVerificationRequired',
       '404': 'SmsVerificationDisabled',
       '409': 'PhoneAlreadyVerified',
       '429': 'RateLimited',
@@ -110,7 +133,7 @@ describe('docs API', () => {
     expectResponseRefs(body, '/api/auth/me/phone-verification/confirm', 'post', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
-      '403': 'CsrfForbidden',
+      '403': 'CsrfOrVerificationRequired',
       '404': 'SmsVerificationDisabled',
       '409': 'PhoneIdentifierConflict',
       '429': 'RateLimited',
@@ -121,7 +144,57 @@ describe('docs API', () => {
     expectResponseRefs(body, '/api/auth/me', 'patch', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
-      '403': 'CsrfForbidden',
+      '403': 'CsrfOrVerificationRequired',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/me/password', 'patch', {
+      '400': 'ValidationError',
+      '401': 'ChangePasswordUnauthorized',
+      '403': 'CsrfOrVerificationRequired',
+      '429': 'RateLimited',
+    });
+    expectSuccessSchemaRef(body, '/api/auth/me/password', 'patch', 'PasswordChangeResponse');
+    expectResponseRefs(body, '/api/auth/totp/setup', 'post', {
+      '401': 'AuthRequired',
+      '403': 'CsrfOrVerificationRequired',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/totp/enable', 'post', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
+      '403': 'CsrfOrVerificationRequired',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/totp/disable', 'post', {
+      '401': 'AuthRequired',
+      '403': 'CsrfOrVerificationRequired',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/totp/recovery-codes', 'post', {
+      '401': 'AuthRequired',
+      '403': 'CsrfOrVerificationRequired',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/mfa', 'patch', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
+      '403': 'CsrfOrVerificationRequired',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/passkeys', 'post', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
+      '403': 'CsrfOrVerificationRequired',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/passkeys/registration-options', 'post', {
+      '401': 'AuthRequired',
+      '403': 'CsrfOrVerificationRequired',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/passkeys/{passkeyId}', 'delete', {
+      '401': 'AuthRequired',
+      '403': 'CsrfOrVerificationRequired',
       '429': 'RateLimited',
     });
     expectResponseRefs(body, '/api/auth/refresh', 'post', {
@@ -134,8 +207,41 @@ describe('docs API', () => {
       '403': 'CsrfForbidden',
       '429': 'RateLimited',
     });
+    expectResponseRefs(body, '/api/auth/avatar', 'delete', {
+      '401': 'AuthRequired',
+      '403': 'CsrfForbidden',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/profile-banner', 'post', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
+      '403': 'CsrfForbidden',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/profile-banner', 'delete', {
+      '401': 'AuthRequired',
+      '403': 'CsrfForbidden',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/profile-background', 'post', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
+      '403': 'CsrfForbidden',
+      '429': 'RateLimited',
+    });
+    expectResponseRefs(body, '/api/auth/profile-background', 'delete', {
+      '401': 'AuthRequired',
+      '403': 'CsrfForbidden',
+      '429': 'RateLimited',
+    });
     expectResponseRefs(body, '/api/auth/sso/start', 'get', {
       '400': 'ValidationError',
+      '404': 'SsoDisabled',
+    });
+    expectResponseRefs(body, '/api/auth/sso/bind/start', 'get', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
+      '403': 'SsoBindVerificationRequired',
       '404': 'SsoDisabled',
     });
     expectResponseRefs(body, '/api/auth/sso/callback', 'get', {
@@ -149,6 +255,7 @@ describe('docs API', () => {
       '403': 'CsrfForbidden',
       '404': 'SsoDisabled',
     });
+    expectSuccessSchemaRef(body, '/api/auth/sso/session', 'post', 'AuthSessionResponse');
     expectResponseRefs(body, '/api/auth/sso/account', 'post', {
       '400': 'ValidationError',
       '401': 'SsoFailed',
@@ -165,16 +272,42 @@ describe('docs API', () => {
       '409': 'SsoBindConflict',
       '429': 'RateLimited',
     });
+    expectSuccessSchemaRef(body, '/api/auth/sso/bind', 'post', 'LoginResponse');
     expectResponseRefs(body, '/api/users/{id}/roles', 'put', {
-      '403': 'CsrfOrPermissionForbidden',
+      '403': 'CsrfOrUserManagementAccessRequired',
     });
     expectResponseRefs(body, '/api/users/{id}', 'put', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
-      '403': 'CsrfOrPermissionForbidden',
+      '403': 'CsrfOrUserManagementAccessRequired',
+    });
+    expectSuccessSchemaRef(body, '/api/users/{id}/details', 'get', 'ManagedUserDetailsResponse');
+    expectSuccessSchemaRef(body, '/api/users/{id}/mfa', 'patch', 'ManagedUserSecurityResponse');
+    expectSuccessSchemaRef(body, '/api/users/{id}/totp/disable', 'post', 'ManagedUserSecurityResponse');
+    expectSuccessSchemaRef(body, '/api/users/{id}/passkeys/{passkeyId}', 'delete', 'ManagedUserSecurityResponse');
+    expectSuccessSchemaRef(body, '/api/profile-options/genders', 'get', 'ProfileOptionsResponse');
+    expectSuccessSchemaRef(body, '/api/profile-options/locations/countries', 'get', 'ProfileOptionsResponse');
+    expectSuccessSchemaRef(body, '/api/profile-options/locations/regions', 'get', 'ProfileOptionsResponse');
+    expectSuccessSchemaRef(body, '/api/profile-options/locations/cities', 'get', 'ProfileOptionsResponse');
+    expectResponseRefs(body, '/api/profile-options/genders', 'get', {
+      '401': 'AuthRequired',
+    });
+    expectResponseRefs(body, '/api/system-settings/', 'get', {
+      '401': 'AuthRequired',
+      '403': 'SystemSettingsAccessRequired',
+    });
+    expectResponseRefs(body, '/api/system-settings/', 'put', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
+      '403': 'CsrfOrSystemSettingsAccessRequired',
     });
 
     const ssoBindUnauthorized = body.components.responses.SsoBindUnauthorized;
+    const ssoBindStart = body.paths['/api/auth/sso/bind/start']?.get;
+    const ssoBindVerificationRequired = body.components.responses.SsoBindVerificationRequired;
+    const userList = body.paths['/api/users/']?.get;
+    const updateUser = body.paths['/api/users/{id}']?.put;
+    const verificationChallengeCreate = body.components.schemas.VerificationChallengeCreateRequest;
 
     expect(ssoBindUnauthorized?.content['application/json'].examples).toMatchObject({
       invalidCredentials: {
@@ -193,6 +326,11 @@ describe('docs API', () => {
         },
       },
     });
+    expect(ssoBindStart?.description).toContain('manage_sso');
+    expect(ssoBindVerificationRequired?.description).toContain('manage_sso');
+    expect(userList?.description).toContain('user_management');
+    expect(updateUser?.description).toContain('user_management');
+    expect(verificationChallengeCreate?.properties?.purpose?.description).toContain('manage_sso');
 
     const setupEnvironment = body.components.schemas.SetupEnvironment;
     const setupDefaults = body.components.schemas.SetupDefaults;
@@ -250,6 +388,16 @@ function expectResponseRefs(
   }
 }
 
+function expectSuccessSchemaRef(document: OpenApiDocument, path: string, method: OpenApiMethod, schema: string) {
+  const operation = document.paths[path]?.[method];
+  const successResponse = operation?.responses['200'] as OpenApiSchemaResponse | undefined;
+
+  expect(operation).toBeDefined();
+  expect(successResponse?.content['application/json'].schema).toEqual({
+    $ref: `#/components/schemas/${schema}`,
+  });
+}
+
 const setupUnsafePaths = [
   '/api/setup/validate',
   '/api/setup/validate/environment',
@@ -269,14 +417,14 @@ const csrfProtectedOperations = [
   ['/api/auth/password-reset/email-verification', 'post'],
   ['/api/auth/password-reset', 'post'],
   ['/api/auth/login', 'post'],
-  ['/api/auth/me/email-verification', 'post'],
-  ['/api/auth/me/email-verification/confirm', 'post'],
-  ['/api/auth/me/phone-verification', 'post'],
-  ['/api/auth/me/phone-verification/confirm', 'post'],
-  ['/api/auth/me', 'patch'],
   ['/api/auth/refresh', 'post'],
   ['/api/auth/logout', 'post'],
   ['/api/auth/avatar', 'post'],
+  ['/api/auth/avatar', 'delete'],
+  ['/api/auth/profile-banner', 'post'],
+  ['/api/auth/profile-banner', 'delete'],
+  ['/api/auth/profile-background', 'post'],
+  ['/api/auth/profile-background', 'delete'],
   ['/api/auth/sso/session', 'post'],
   ['/api/auth/sso/account', 'post'],
   ['/api/auth/sso/bind', 'post'],
@@ -285,7 +433,11 @@ const csrfProtectedOperations = [
 interface OpenApiDocument {
   components: {
     responses: Record<string, OpenApiResponse | undefined>;
-    schemas: Record<string, { required?: string[] } | undefined>;
+    schemas: Record<string, OpenApiSchema | undefined>;
+  };
+  info: {
+    title: string;
+    version: string;
   };
   openapi: string;
   paths: Record<string, OpenApiPathItem | undefined>;
@@ -295,9 +447,10 @@ interface OpenApiDocument {
   }>;
 }
 
-type OpenApiMethod = 'get' | 'patch' | 'post' | 'put';
+type OpenApiMethod = 'delete' | 'get' | 'patch' | 'post' | 'put';
 
 interface OpenApiPathItem {
+  delete?: OpenApiOperation;
   get?: OpenApiOperation;
   patch?: OpenApiOperation;
   post?: OpenApiOperation;
@@ -305,13 +458,32 @@ interface OpenApiPathItem {
 }
 
 interface OpenApiOperation {
+  description?: string;
   responses: Record<string, unknown>;
 }
 
 interface OpenApiResponse {
+  description?: string;
   content: {
     'application/json': {
       examples?: Record<string, { value: { error: string } }>;
+    };
+  };
+}
+
+interface OpenApiSchema {
+  properties?: Record<string, OpenApiSchemaProperty | undefined>;
+  required?: string[];
+}
+
+interface OpenApiSchemaProperty {
+  description?: string;
+}
+
+interface OpenApiSchemaResponse {
+  content: {
+    'application/json': {
+      schema: unknown;
     };
   };
 }

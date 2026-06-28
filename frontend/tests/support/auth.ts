@@ -34,6 +34,9 @@ export function createSession(expiresAt: string): AuthSession {
       email: 'user@example.com',
       emailVerified: false,
       phoneVerified: false,
+      totpEnabled: false,
+      mfaAllowedMethods: [],
+      mfaRequiredForSso: true,
       roles: [],
       permissions: [],
     },
@@ -50,6 +53,33 @@ export function createTestWindow() {
       key: (index: number) => Array.from(values.keys())[index] ?? null,
       removeItem: (key: string) => values.delete(key),
       setItem: (key: string, value: string) => values.set(key, value),
+      get length() {
+        return values.size;
+      },
+    },
+  } as unknown as Window;
+}
+
+export function createStorageBlockedTestWindow() {
+  return Object.defineProperty({}, 'localStorage', {
+    get() {
+      throw new Error('Storage is unavailable.');
+    },
+  }) as Window;
+}
+
+export function createStorageWriteBlockedTestWindow() {
+  const values = new Map<string, string>();
+
+  return {
+    localStorage: {
+      clear: () => values.clear(),
+      getItem: (key: string) => values.get(key) ?? null,
+      key: (index: number) => Array.from(values.keys())[index] ?? null,
+      removeItem: (key: string) => values.delete(key),
+      setItem: () => {
+        throw new Error('Storage writes are unavailable.');
+      },
       get length() {
         return values.size;
       },

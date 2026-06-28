@@ -6,18 +6,19 @@ import { type z } from 'zod';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { useEmailVerification } from '@/hooks/useEmailVerification';
 import { useFormState } from '@/hooks/useFormState';
-import { ApiError, getApiErrorMessage } from '@/lib/api';
+import { getApiErrorMessage } from '@/lib/api';
 import { fetchAuthConfig, resetPassword, sendPasswordResetEmailVerification } from '@/lib/auth';
 import { createPasswordFormSchema, emailSchema, verificationCodeSchema } from '@/lib/auth-validation';
 import { routePath } from '@/router';
 import { Button } from '@/shadcn/components/ui/button';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/shadcn/components/ui/card';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
 
+import { AuthCard } from '@/components/AuthCard';
 import FormMessage from '@/components/FormMessage';
 
-const passwordRecoveryUnavailableMessage = 'Password recovery is not available. Contact the site administrator.';
+import { getPasswordRecoveryErrorMessage, passwordRecoveryUnavailableMessage } from './utils';
+
 const resetPasswordSchema = createPasswordFormSchema({
   email: emailSchema,
   emailVerificationCode: verificationCodeSchema,
@@ -47,11 +48,11 @@ const Index = () => {
   const submitting = submitAction.pending;
 
   useEffect(() => {
-    let active = true;
+    let isActive = true;
 
     void fetchAuthConfig()
       .then((config) => {
-        if (!active) {
+        if (!isActive) {
           return;
         }
 
@@ -61,18 +62,18 @@ const Index = () => {
         }
       })
       .catch((requestError) => {
-        if (active) {
+        if (isActive) {
           setConfigError(getApiErrorMessage(requestError, 'Password recovery configuration could not be loaded.'));
         }
       })
       .finally(() => {
-        if (active) {
+        if (isActive) {
           setConfigLoading(false);
         }
       });
 
     return () => {
-      active = false;
+      isActive = false;
     };
   }, []);
 
@@ -128,101 +129,92 @@ const Index = () => {
   };
 
   return (
-    <main className="flex min-h-svh w-full items-center justify-center bg-muted px-4 py-10 text-foreground sm:px-6">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Password recovery</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form className="grid gap-4" onSubmit={handleSubmit}>
-            <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
-              <div className="flex gap-2">
-                <Input
-                  autoComplete="email"
-                  disabled={configLoading || submitting || sendingCode}
-                  id="email"
-                  name="email"
-                  onChange={handleChange('email')}
-                  placeholder="alex@example.com"
-                  type="email"
-                  value={form.email}
-                />
-                <Button
-                  disabled={configLoading || submitting || sendingCode || !passwordRecoveryEnabled}
-                  onClick={handleSendCode}
-                  type="button"
-                  variant="outline"
-                >
-                  {sendingCode ? 'Sending' : 'Send code'}
-                </Button>
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="emailVerificationCode">Verification code</Label>
-              <Input
-                autoComplete="one-time-code"
-                disabled={configLoading || submitting || !passwordRecoveryEnabled}
-                id="emailVerificationCode"
-                inputMode="numeric"
-                maxLength={6}
-                name="emailVerificationCode"
-                onChange={handleChange('emailVerificationCode')}
-                pattern="[0-9]{6}"
-                placeholder="000000"
-                value={form.emailVerificationCode}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="password">New password</Label>
-              <Input
-                autoComplete="new-password"
-                disabled={configLoading || submitting || !passwordRecoveryEnabled}
-                id="password"
-                name="password"
-                onChange={handleChange('password')}
-                placeholder="At least 8 characters"
-                type="password"
-                value={form.password}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="confirmPassword">Confirm password</Label>
-              <Input
-                autoComplete="new-password"
-                disabled={configLoading || submitting || !passwordRecoveryEnabled}
-                id="confirmPassword"
-                name="confirmPassword"
-                onChange={handleChange('confirmPassword')}
-                placeholder="Repeat password"
-                type="password"
-                value={form.confirmPassword}
-              />
-            </div>
-            <FormMessage message={error} variant="error" />
-            <FormMessage message={notice} variant="notice" />
-            <Button className="w-full" disabled={configLoading || submitting || !passwordRecoveryEnabled} type="submit">
-              {submitting ? 'Resetting password' : configLoading ? 'Loading' : 'Reset password'}
-            </Button>
-          </form>
-        </CardContent>
-        <CardFooter className="justify-center gap-2 text-sm text-muted-foreground">
+    <AuthCard
+      description="Reset your account password with an email verification code."
+      footer={
+        <>
           <span>Remember your password?</span>
           <Link className="font-medium text-primary hover:underline" to={routePath('login')}>
             Log in
           </Link>
-        </CardFooter>
-      </Card>
-    </main>
+        </>
+      }
+      footerClassName="justify-center gap-2 text-sm text-muted-foreground"
+      title="Password recovery"
+    >
+      <form className="grid gap-4" onSubmit={handleSubmit}>
+        <div className="grid gap-2">
+          <Label htmlFor="email">Email</Label>
+          <div className="flex gap-2">
+            <Input
+              autoComplete="email"
+              disabled={configLoading || submitting || sendingCode}
+              id="email"
+              name="email"
+              onChange={handleChange('email')}
+              placeholder="alex@example.com"
+              type="email"
+              value={form.email}
+            />
+            <Button
+              disabled={configLoading || submitting || sendingCode || !passwordRecoveryEnabled}
+              onClick={handleSendCode}
+              type="button"
+              variant="outline"
+            >
+              {sendingCode ? 'Sending' : 'Send code'}
+            </Button>
+          </div>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="emailVerificationCode">Verification code</Label>
+          <Input
+            autoComplete="one-time-code"
+            disabled={configLoading || submitting || !passwordRecoveryEnabled}
+            id="emailVerificationCode"
+            inputMode="numeric"
+            maxLength={6}
+            name="emailVerificationCode"
+            onChange={handleChange('emailVerificationCode')}
+            pattern="[0-9]{6}"
+            placeholder="000000"
+            value={form.emailVerificationCode}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="password">New password</Label>
+          <Input
+            autoComplete="new-password"
+            disabled={configLoading || submitting || !passwordRecoveryEnabled}
+            id="password"
+            name="password"
+            onChange={handleChange('password')}
+            placeholder="At least 8 characters"
+            type="password"
+            value={form.password}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="confirmPassword">Confirm password</Label>
+          <Input
+            autoComplete="new-password"
+            disabled={configLoading || submitting || !passwordRecoveryEnabled}
+            id="confirmPassword"
+            name="confirmPassword"
+            onChange={handleChange('confirmPassword')}
+            placeholder="Repeat password"
+            type="password"
+            value={form.confirmPassword}
+          />
+        </div>
+        <FormMessage message={error} variant="error" />
+        <FormMessage message={notice} variant="notice" />
+        <Button className="w-full" disabled={configLoading || submitting || !passwordRecoveryEnabled} type="submit">
+          {submitting ? 'Resetting password' : configLoading ? 'Loading' : 'Reset password'}
+        </Button>
+      </form>
+    </AuthCard>
   );
 };
-
-function getPasswordRecoveryErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError && error.code === 'EMAIL_VERIFICATION_DISABLED') {
-    return passwordRecoveryUnavailableMessage;
-  }
-
-  return getApiErrorMessage(error, fallback);
-}
 
 export default Index;

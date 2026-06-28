@@ -11,17 +11,31 @@ const RequirePermission = lazy(() => import('@/components/RequirePermission'));
 
 const DashboardPage = lazy(() => import('@/pages/Dashboard'));
 const ProfilePage = lazy(() => import('@/pages/Profile'));
+const SecurityPage = lazy(() => import('@/pages/Security'));
+const SystemSettingsPage = lazy(() => import('@/pages/SystemSettings'));
 const UsersPage = lazy(() => import('@/pages/Users'));
 const SetupPage = lazy(() => import('@/pages/Setup'));
 const LoginPage = lazy(() => import('@/pages/Login'));
 const RegisterPage = lazy(() => import('@/pages/Register'));
 const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPassword'));
 const SsoCallbackPage = lazy(() => import('@/pages/SsoCallback'));
+const VerifySignInPage = lazy(() => import('@/pages/VerifySignIn'));
 const NotFoundPage = lazy(() => import('@/pages/NotFound'));
 
 export type NavigationGroupId = 'admin' | 'applications' | 'profile';
-export type NavigationIcon = 'apiDocs' | 'dashboard' | 'profile' | 'users';
-type RouteId = 'dashboard' | 'profile' | 'users' | 'setup' | 'login' | 'register' | 'forgotPassword' | 'ssoCallback';
+export type NavigationIcon = 'apiDocs' | 'dashboard' | 'profile' | 'security' | 'settings' | 'users';
+type RouteId =
+  | 'dashboard'
+  | 'profile'
+  | 'security'
+  | 'systemSettings'
+  | 'users'
+  | 'setup'
+  | 'login'
+  | 'register'
+  | 'forgotPassword'
+  | 'ssoCallback'
+  | 'verifySignIn';
 
 interface PageRoute {
   id: RouteId;
@@ -48,12 +62,27 @@ const pageRoutes: PageRoute[] = [
     layout: 'app',
   },
   {
+    id: 'security',
+    path: '/security',
+    title: 'Security',
+    element: <SecurityPage />,
+    layout: 'app',
+  },
+  {
     id: 'users',
     path: '/users',
     title: 'Users',
     element: <UsersPage />,
     layout: 'app',
     permission: SystemPermission.UserList,
+  },
+  {
+    id: 'systemSettings',
+    path: '/settings',
+    title: 'System Settings',
+    element: <SystemSettingsPage />,
+    layout: 'app',
+    permission: SystemPermission.Root,
   },
   {
     id: 'setup',
@@ -88,6 +117,13 @@ const pageRoutes: PageRoute[] = [
     path: '/sso/callback',
     title: 'SSO callback',
     element: <SsoCallbackPage />,
+    layout: 'standalone',
+  },
+  {
+    id: 'verifySignIn',
+    path: '/verify-sign-in',
+    title: 'Verify sign-in',
+    element: <VerifySignInPage />,
     layout: 'standalone',
   },
 ];
@@ -134,7 +170,9 @@ const navigationItems: NavigationItem[] = [
     url: '/api/docs',
   },
   createNavigationRouteItem('profile', 'profile', 'profile'),
+  createNavigationRouteItem('security', 'profile', 'security'),
   createNavigationRouteItem('users', 'admin', 'users', SystemPermission.UserList),
+  createNavigationRouteItem('systemSettings', 'admin', 'settings', SystemPermission.Root),
 ];
 
 const appRouteObjects: RouteObject[] = [

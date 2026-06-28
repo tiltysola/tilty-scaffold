@@ -263,6 +263,30 @@ const envSchema = z
       .int()
       .positive()
       .default(30 * 24 * 60 * 60),
+    AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(5 * 60),
+    AUTH_VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+    AUTH_VERIFICATION_SUDO_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(15 * 60),
+    AUTH_PASSKEY_RP_NAME: z.string().trim().min(1).max(128).default('Tilty Scaffold'),
+    AUTH_PASSKEY_REGISTRATION_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(5 * 60),
+    AUTH_PASSKEY_OPERATION_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+    AUTH_TOTP_ISSUER: z.string().trim().min(1).max(128).default('Tilty Scaffold'),
+    AUTH_TOTP_SETUP_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(10 * 60),
     AUTH_ACCESS_TOKEN_COOKIE_NAME: cookieNameSchema.default('tilty_scaffold_access_token'),
     AUTH_REFRESH_TOKEN_COOKIE_NAME: cookieNameSchema.default('tilty_scaffold_refresh_token'),
     AUTH_COOKIE_SAME_SITE: authCookieSameSiteSchema.default('lax'),
@@ -683,11 +707,25 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
       accessTokenTtlSeconds: parsed.AUTH_ACCESS_TOKEN_TTL_SECONDS,
       refreshTokenTtlSeconds: parsed.AUTH_REFRESH_TOKEN_TTL_SECONDS,
     },
+    authVerification: {
+      challengeTtlMs: parsed.AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS * 1000,
+      maxChallengeAttempts: parsed.AUTH_VERIFICATION_MAX_ATTEMPTS,
+      sudoTtlMs: parsed.AUTH_VERIFICATION_SUDO_TTL_SECONDS * 1000,
+    },
     authCookies: {
       accessTokenName: parsed.AUTH_ACCESS_TOKEN_COOKIE_NAME,
       refreshTokenName: parsed.AUTH_REFRESH_TOKEN_COOKIE_NAME,
       sameSite: parsed.AUTH_COOKIE_SAME_SITE,
       secure: parsed.AUTH_COOKIE_SECURE,
+    },
+    passkey: {
+      rpName: parsed.AUTH_PASSKEY_RP_NAME,
+      registrationTtlMs: parsed.AUTH_PASSKEY_REGISTRATION_TTL_SECONDS * 1000,
+      operationTimeoutMs: parsed.AUTH_PASSKEY_OPERATION_TIMEOUT_MS,
+    },
+    totp: {
+      issuer: parsed.AUTH_TOTP_ISSUER,
+      setupTtlMs: parsed.AUTH_TOTP_SETUP_TTL_SECONDS * 1000,
     },
     email:
       parsed.EMAIL_VERIFICATION_SERVICE === 'smtp'

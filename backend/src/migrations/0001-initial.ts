@@ -19,6 +19,26 @@ export const up: MigrationFn<QueryInterface> = async ({ context: queryInterface 
       type: DataTypes.STRING(64),
       allowNull: false,
     },
+    gender: {
+      type: DataTypes.STRING(64),
+      allowNull: true,
+    },
+    birthday: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
+    bio: {
+      type: DataTypes.STRING(280),
+      allowNull: true,
+    },
+    location: {
+      type: DataTypes.STRING(128),
+      allowNull: true,
+    },
+    websiteUrl: {
+      type: DataTypes.STRING(2048),
+      allowNull: true,
+    },
     email: {
       type: DataTypes.STRING(255),
       allowNull: false,
@@ -46,6 +66,22 @@ export const up: MigrationFn<QueryInterface> = async ({ context: queryInterface 
       type: DataTypes.STRING(1024),
       allowNull: true,
     },
+    profileBannerUrl: {
+      type: DataTypes.STRING(1024),
+      allowNull: true,
+    },
+    profileBannerStorageKey: {
+      type: DataTypes.STRING(1024),
+      allowNull: true,
+    },
+    profileBackgroundUrl: {
+      type: DataTypes.STRING(1024),
+      allowNull: true,
+    },
+    profileBackgroundStorageKey: {
+      type: DataTypes.STRING(1024),
+      allowNull: true,
+    },
     passwordHash: {
       type: DataTypes.STRING(255),
       allowNull: true,
@@ -53,6 +89,29 @@ export const up: MigrationFn<QueryInterface> = async ({ context: queryInterface 
     passwordSalt: {
       type: DataTypes.STRING(64),
       allowNull: true,
+    },
+    totpEnabled: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    totpSecretEncrypted: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    totpRecoveryCodeHashes: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    mfaAllowedMethods: {
+      type: DataTypes.TEXT,
+      allowNull: false,
+      defaultValue: '[]',
+    },
+    mfaRequiredForSso: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
     },
     available: {
       type: DataTypes.BOOLEAN,
@@ -143,6 +202,153 @@ export const up: MigrationFn<QueryInterface> = async ({ context: queryInterface 
   await queryInterface.addIndex('user_sso_identities', ['userId', 'providerId'], {
     name: 'user_sso_identities_user_provider',
     unique: true,
+  });
+
+  await queryInterface.createTable('auth_passkeys', {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+      allowNull: false,
+    },
+    userId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      references: {
+        model: 'users',
+        key: 'id',
+      },
+      onDelete: 'CASCADE',
+      onUpdate: 'CASCADE',
+    },
+    name: {
+      type: DataTypes.STRING(128),
+      allowNull: false,
+    },
+    credentialId: {
+      type: DataTypes.TEXT,
+      allowNull: false,
+    },
+    publicKey: {
+      type: DataTypes.BLOB,
+      allowNull: false,
+    },
+    webauthnUserId: {
+      type: DataTypes.TEXT,
+      allowNull: false,
+    },
+    counter: {
+      type: DataTypes.BIGINT,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    deviceType: {
+      type: DataTypes.STRING(32),
+      allowNull: false,
+    },
+    backedUp: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+    },
+    transports: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    lastUsedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    createdAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+    updatedAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+  });
+
+  await queryInterface.createTable('auth_sessions', {
+    id: {
+      type: DataTypes.UUID,
+      primaryKey: true,
+      allowNull: false,
+    },
+    userId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      references: {
+        model: 'users',
+        key: 'id',
+      },
+      onDelete: 'CASCADE',
+      onUpdate: 'CASCADE',
+    },
+    deviceIdHash: {
+      type: DataTypes.STRING(128),
+      allowNull: true,
+    },
+    deviceName: {
+      type: DataTypes.STRING(128),
+      allowNull: false,
+    },
+    deviceType: {
+      type: DataTypes.STRING(32),
+      allowNull: false,
+    },
+    browser: {
+      type: DataTypes.STRING(128),
+      allowNull: false,
+    },
+    os: {
+      type: DataTypes.STRING(128),
+      allowNull: false,
+    },
+    ipAddress: {
+      type: DataTypes.STRING(64),
+      allowNull: false,
+    },
+    userAgentHash: {
+      type: DataTypes.STRING(128),
+      allowNull: false,
+    },
+    lastActiveAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+    expiresAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+    revokedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    createdAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+    updatedAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+  });
+
+  await queryInterface.addIndex('auth_passkeys', ['userId', 'createdAt'], {
+    name: 'auth_passkeys_user_created_at',
+  });
+  await queryInterface.addIndex('auth_passkeys', ['credentialId'], {
+    name: 'auth_passkeys_credential_id',
+    unique: true,
+  });
+  await queryInterface.addIndex('auth_sessions', ['userId', 'revokedAt', 'lastActiveAt'], {
+    name: 'auth_sessions_user_revoked_last_active',
+  });
+  await queryInterface.addIndex('auth_sessions', ['userId', 'deviceIdHash'], {
+    name: 'auth_sessions_user_device',
+  });
+  await queryInterface.addIndex('auth_sessions', ['expiresAt'], {
+    name: 'auth_sessions_expires_at',
   });
 
   await queryInterface.createTable('permissions', {
@@ -306,6 +512,8 @@ export const down: MigrationFn<QueryInterface> = async ({ context: queryInterfac
   await queryInterface.dropTable('role_permissions');
   await queryInterface.dropTable('roles');
   await queryInterface.dropTable('permissions');
+  await queryInterface.dropTable('auth_sessions');
+  await queryInterface.dropTable('auth_passkeys');
   await queryInterface.dropTable('user_sso_identities');
   await queryInterface.dropTable('users');
 };

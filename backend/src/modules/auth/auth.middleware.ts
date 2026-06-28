@@ -3,7 +3,7 @@ import { type Middleware } from 'koa';
 import { type SystemPermissionKey } from '@tilty/shared/access-control';
 
 import { assertPermission } from '../access-control/access-control.service';
-import { type AuthCookieConfig, getAuthToken } from './auth.controller';
+import { type AuthCookieConfig, getAuthToken } from './auth.http';
 import { type AuthService } from './auth.service';
 
 export function requireAuthenticated(authService: AuthService, cookieConfig: AuthCookieConfig): Middleware {
@@ -28,4 +28,28 @@ export function requirePermission(
       await next();
     });
   };
+}
+
+export function requireStrongSudoAccess(
+  authService: AuthService,
+  cookieConfig: AuthCookieConfig,
+  purpose: Parameters<AuthService['requireStrongSudoAccess']>[1],
+): Middleware {
+  return async (ctx, next) => {
+    await authService.requireStrongSudoAccess(getAuthToken(ctx, cookieConfig), purpose);
+
+    await next();
+  };
+}
+
+export function requireStrongVerifiedPermission(
+  authService: AuthService,
+  cookieConfig: AuthCookieConfig,
+  permission: SystemPermissionKey,
+  purpose: Parameters<AuthService['requireStrongSudoAccess']>[1],
+) {
+  return [
+    requirePermission(authService, cookieConfig, permission),
+    requireStrongSudoAccess(authService, cookieConfig, purpose),
+  ];
 }

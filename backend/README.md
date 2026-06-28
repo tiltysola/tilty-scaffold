@@ -60,6 +60,13 @@ Complete `/setup` in the frontend to write `config.toml`, apply migrations, and
 seed built-in access control. Setup creates the root administrator only when the
 selected database has no available users; otherwise existing users are retained.
 Restart the backend to load the generated configuration.
+After startup, users with `ROOT` can update the same runtime configuration from
+the system settings page. Saving settings writes `config.toml` and requires a
+backend restart before changes take effect. System settings access requires a
+configured passkey or authenticator app and a verified `system_settings`
+step-up challenge before settings are displayed or saved. The setup and system
+settings review pages list active configuration fields with sensitive values
+masked; inactive provider fields are omitted.
 Relative runtime paths such as `DATABASE_STORAGE`, `LOG_LOCAL_PATH`, and
 `FILE_LOCAL_ROOT` must resolve inside the backend application directory.
 
@@ -113,8 +120,8 @@ single-instance deployments and `oss` for multi-instance deployments. Local
 files are stored under `FILE_LOCAL_ROOT` and served from `FILE_PUBLIC_BASE_URL`.
 OSS requires `FILE_OSS_ACCESS_KEY_ID`, `FILE_OSS_ACCESS_KEY_SECRET`,
 `FILE_OSS_BUCKET`, `FILE_OSS_ENDPOINT`, and `FILE_OSS_REGION`. Absolute public
-file URLs must use HTTPS in production. Avatar uploads are limited by
-`FILE_UPLOAD_MAX_BYTES`.
+file URLs must use HTTPS in production. Avatar, profile banner, and profile
+background uploads are limited by `FILE_UPLOAD_MAX_BYTES`.
 
 Authentication uses short-lived access tokens and longer-lived refresh tokens.
 Browser sessions store both tokens in HttpOnly cookies. Token lifetimes are
@@ -129,6 +136,13 @@ entry.
 
 Authentication-sensitive routes use the configured cache store for the limiter
 configured by `AUTH_RATE_LIMIT_WINDOW_MS` and `AUTH_RATE_LIMIT_MAX`.
+Step-up verification timing and attempt limits are controlled by
+`AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS`,
+`AUTH_VERIFICATION_MAX_ATTEMPTS`, and
+`AUTH_VERIFICATION_SUDO_TTL_SECONDS`. Passkey display and WebAuthn timing use
+`AUTH_PASSKEY_RP_NAME`, `AUTH_PASSKEY_REGISTRATION_TTL_SECONDS`, and
+`AUTH_PASSKEY_OPERATION_TIMEOUT_MS`. Authenticator-app setup uses
+`AUTH_TOTP_ISSUER` and `AUTH_TOTP_SETUP_TTL_SECONDS`.
 
 Access control uses RBAC tables for permissions, roles, role permissions, and
 user roles. Built-in permissions and roles are defined in `@tilty/shared` and
@@ -194,7 +208,9 @@ advertises that algorithm. The optional `providerId` query selects a configured
 provider. The optional `redirect` query on `/api/auth/sso/start` and
 `/api/auth/sso/bind/start` must be a same-origin application path beginning with
 a single `/`; absolute URLs, protocol-relative URLs, and backslashes are
-rejected.
+rejected. Authenticated profile binding through `/api/auth/sso/bind/start`
+requires a verified `manage_sso` step-up grant before redirecting to the
+provider.
 
 ## API
 
@@ -202,50 +218,67 @@ Authentication and registration set access and refresh tokens as HttpOnly
 cookies and return only session metadata in the JSON response. Authenticated
 browser requests use the configured access-token cookie; session refresh and
 logout use the configured refresh-token cookie.
+Changing the current user's password requires the current password and, when
+the account has an available email, SMS, authenticator app, or passkey
+verifier, a verified `change_password` step-up grant.
+User administration endpoints require the matching user permission and a
+verified `user_management` step-up grant from a passkey or authenticator app.
 
-| Method  | Path                                          | Description                                     |
-| ------- | --------------------------------------------- | ----------------------------------------------- |
-| `GET`   | `/api/setup/defaults`                         | Return generated setup defaults                 |
-| `POST`  | `/api/setup/validate`                         | Validate setup input                            |
-| `POST`  | `/api/setup/validate/environment`             | Validate setup environment fields               |
-| `POST`  | `/api/setup/test/database`                    | Test database connectivity and user presence    |
-| `POST`  | `/api/setup/test/cache`                       | Test cache connectivity                         |
-| `POST`  | `/api/setup/test/file-storage`                | Test file storage configuration                 |
-| `POST`  | `/api/setup/test/logging`                     | Test logging configuration                      |
-| `POST`  | `/api/setup/test/email`                       | Test email configuration                        |
-| `POST`  | `/api/setup/test/sms`                         | Test SMS configuration                          |
-| `POST`  | `/api/setup/test/sso`                         | Test SSO provider discovery                     |
-| `POST`  | `/api/setup/complete`                         | Complete setup                                  |
-| `GET`   | `/api/auth/config`                            | Return public authentication configuration      |
-| `POST`  | `/api/auth/register`                          | Create an account                               |
-| `POST`  | `/api/auth/register/email-verification`       | Send a registration email verification code     |
-| `POST`  | `/api/auth/password-reset/email-verification` | Send a password reset email verification code   |
-| `POST`  | `/api/auth/password-reset`                    | Reset an account password                       |
-| `POST`  | `/api/auth/login`                             | Authenticate an account                         |
-| `GET`   | `/api/auth/me`                                | Return the authenticated user                   |
-| `PATCH` | `/api/auth/me`                                | Update the authenticated user's profile         |
-| `POST`  | `/api/auth/me/email-verification`             | Send a profile email verification code          |
-| `POST`  | `/api/auth/me/email-verification/confirm`     | Confirm a profile email verification code       |
-| `POST`  | `/api/auth/me/phone-verification`             | Send a profile phone verification code          |
-| `POST`  | `/api/auth/me/phone-verification/confirm`     | Confirm a profile phone verification code       |
-| `POST`  | `/api/auth/refresh`                           | Refresh the authenticated session               |
-| `POST`  | `/api/auth/logout`                            | Clear the authenticated session                 |
-| `POST`  | `/api/auth/avatar`                            | Upload the authenticated user's avatar          |
-| `GET`   | `/api/auth/sso/config`                        | Return public SSO authentication configuration  |
-| `GET`   | `/api/auth/sso/start`                         | Redirect to the configured SSO provider         |
-| `GET`   | `/api/auth/sso/bind/start`                    | Redirect to an SSO provider for profile binding |
-| `GET`   | `/api/auth/sso/identities`                    | Return SSO identities bound to the current user |
-| `GET`   | `/api/auth/sso/callback`                      | Handle the SSO provider callback                |
-| `POST`  | `/api/auth/sso/session`                       | Exchange an SSO handoff token for a session     |
-| `POST`  | `/api/auth/sso/account`                       | Create an account from an unbound SSO identity  |
-| `POST`  | `/api/auth/sso/bind`                          | Bind an SSO identity to an existing account     |
-| `GET`   | `/api/users/`                                 | List paginated users and available roles        |
-| `PUT`   | `/api/users/:id`                              | Update a managed user                           |
-| `PUT`   | `/api/users/:id/roles`                        | Replace a user's role assignments               |
-| `GET`   | `/api/health`                                 | Return service health                           |
-| `GET`   | `/api/health/ready`                           | Return service readiness                        |
-| `GET`   | `/api/openapi.json`                           | Return the OpenAPI document                     |
-| `GET`   | `/api/docs`                                   | Serve Swagger UI                                |
+| Method   | Path                                          | Description                                             |
+| -------- | --------------------------------------------- | ------------------------------------------------------- |
+| `GET`    | `/api/setup/defaults`                         | Return generated setup defaults                         |
+| `POST`   | `/api/setup/validate`                         | Validate setup input                                    |
+| `POST`   | `/api/setup/validate/environment`             | Validate setup environment fields                       |
+| `POST`   | `/api/setup/test/database`                    | Test database connectivity and user presence            |
+| `POST`   | `/api/setup/test/cache`                       | Test cache connectivity                                 |
+| `POST`   | `/api/setup/test/file-storage`                | Test file storage configuration                         |
+| `POST`   | `/api/setup/test/logging`                     | Test logging configuration                              |
+| `POST`   | `/api/setup/test/email`                       | Test email configuration                                |
+| `POST`   | `/api/setup/test/sms`                         | Test SMS configuration                                  |
+| `POST`   | `/api/setup/test/sso`                         | Test SSO provider discovery                             |
+| `POST`   | `/api/setup/complete`                         | Complete setup                                          |
+| `GET`    | `/api/auth/config`                            | Return public authentication configuration              |
+| `POST`   | `/api/auth/register`                          | Create an account                                       |
+| `POST`   | `/api/auth/register/email-verification`       | Send a registration email verification code             |
+| `POST`   | `/api/auth/password-reset/email-verification` | Send a password reset email verification code           |
+| `POST`   | `/api/auth/password-reset`                    | Reset an account password                               |
+| `POST`   | `/api/auth/login`                             | Authenticate an account                                 |
+| `GET`    | `/api/auth/me`                                | Return the authenticated user                           |
+| `PATCH`  | `/api/auth/me`                                | Update the authenticated user's profile                 |
+| `PATCH`  | `/api/auth/me/password`                       | Change the authenticated user's password                |
+| `POST`   | `/api/auth/me/email-verification`             | Send a profile email verification code                  |
+| `POST`   | `/api/auth/me/email-verification/confirm`     | Confirm a profile email verification code               |
+| `POST`   | `/api/auth/me/phone-verification`             | Send a profile phone verification code                  |
+| `POST`   | `/api/auth/me/phone-verification/confirm`     | Confirm a profile phone verification code               |
+| `POST`   | `/api/auth/refresh`                           | Refresh the authenticated session                       |
+| `POST`   | `/api/auth/logout`                            | Clear the authenticated session                         |
+| `POST`   | `/api/auth/avatar`                            | Upload the authenticated user's avatar                  |
+| `DELETE` | `/api/auth/avatar`                            | Remove the authenticated user's avatar                  |
+| `POST`   | `/api/auth/profile-banner`                    | Upload the authenticated user's profile banner          |
+| `DELETE` | `/api/auth/profile-banner`                    | Remove the authenticated user's profile banner          |
+| `POST`   | `/api/auth/profile-background`                | Upload the authenticated user's profile background      |
+| `DELETE` | `/api/auth/profile-background`                | Remove the authenticated user's profile background      |
+| `GET`    | `/api/auth/sso/config`                        | Return public SSO authentication configuration          |
+| `GET`    | `/api/auth/sso/start`                         | Redirect to the configured SSO provider                 |
+| `GET`    | `/api/auth/sso/bind/start`                    | Redirect for profile binding after step-up verification |
+| `GET`    | `/api/auth/sso/identities`                    | Return SSO identities bound to the current user         |
+| `GET`    | `/api/auth/sso/callback`                      | Handle the SSO provider callback                        |
+| `POST`   | `/api/auth/sso/session`                       | Exchange an SSO handoff token for a session             |
+| `POST`   | `/api/auth/sso/account`                       | Create an account from an unbound SSO identity          |
+| `POST`   | `/api/auth/sso/bind`                          | Bind an SSO identity to an existing account             |
+| `GET`    | `/api/users/`                                 | List users after user management verification           |
+| `PUT`    | `/api/users/:id`                              | Update a managed user after verification                |
+| `PUT`    | `/api/users/:id/roles`                        | Replace user roles after verification                   |
+| `GET`    | `/api/profile-options/genders`                | Return gender profile options                           |
+| `GET`    | `/api/profile-options/locations/countries`    | Return country location options                         |
+| `GET`    | `/api/profile-options/locations/regions`      | Return region location options                          |
+| `GET`    | `/api/profile-options/locations/cities`       | Return city location options                            |
+| `GET`    | `/api/system-settings/`                       | Return system settings                                  |
+| `PUT`    | `/api/system-settings/`                       | Update system settings                                  |
+| `GET`    | `/api/health`                                 | Return service health                                   |
+| `GET`    | `/api/health/ready`                           | Return service readiness                                |
+| `GET`    | `/api/openapi.json`                           | Return the OpenAPI document                             |
+| `GET`    | `/api/docs`                                   | Serve Swagger UI                                        |
 
 Error responses use this shape:
 
@@ -260,11 +293,12 @@ Error responses use this shape:
 
 ## Modules
 
-Setup, health, authentication, users, documentation, and demo modules are
-registered by default. The users module provides RBAC-protected administration
-endpoints. The documentation module serves the OpenAPI document and Swagger UI.
-The demo module has no public API routes; it registers a scheduler heartbeat job
-as an example module-owned job.
+Setup, health, authentication, users, system settings, profile options,
+documentation, and demo modules are registered by default. The users and system
+settings modules provide RBAC-protected administration endpoints. The profile
+options module serves profile form lookup data. The documentation module serves
+the OpenAPI document and Swagger UI. The demo module has no public API routes;
+it registers a scheduler heartbeat job as an example module-owned job.
 
 The scheduler core runs module-owned jobs when modules define them and
 `SCHEDULER_ENABLED=true`.

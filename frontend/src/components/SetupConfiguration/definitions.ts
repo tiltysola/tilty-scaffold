@@ -19,21 +19,21 @@ import { type SetupAdministrator, type SetupEnvironment } from '@/lib/setup';
 type FieldKind = 'password' | 'select' | 'sms-profiles' | 'smtp-profiles' | 'sso-profiles' | 'textarea' | 'text';
 
 export interface SetupFieldDefinition {
-  description?: string;
-  group?: string;
   key: string;
-  kind?: FieldKind;
+  group?: string;
   label: string;
+  kind?: FieldKind;
+  description?: string;
   options?: Array<{ label: string; value: string }>;
   placeholder?: string;
   visible?: (environment: SetupEnvironment) => boolean;
 }
 
-interface SetupStepDefinition {
-  fields?: SetupFieldDefinition[];
-  icon: LucideIcon;
+export interface SetupStepDefinition {
   id: string;
   title: string;
+  icon: LucideIcon;
+  fields?: SetupFieldDefinition[];
 }
 
 interface FieldHelp {
@@ -187,6 +187,38 @@ export const setupFieldHelp: Record<string, FieldHelp> = {
   AUTH_REFRESH_TOKEN_TTL_SECONDS: {
     description: 'Defines the validity period, in seconds, for refresh tokens.',
     placeholder: '2592000',
+  },
+  AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS: {
+    description: 'Defines how long an MFA challenge remains valid.',
+    placeholder: '300',
+  },
+  AUTH_VERIFICATION_MAX_ATTEMPTS: {
+    description: 'Specifies how many failed MFA responses are allowed before a challenge is invalidated.',
+    placeholder: '5',
+  },
+  AUTH_VERIFICATION_SUDO_TTL_SECONDS: {
+    description: 'Defines how long sensitive-action authorization remains valid after verification.',
+    placeholder: '900',
+  },
+  AUTH_PASSKEY_RP_NAME: {
+    description: 'Defines the passkey relying party name shown by browsers and authenticators.',
+    placeholder: 'Tilty Scaffold',
+  },
+  AUTH_PASSKEY_REGISTRATION_TTL_SECONDS: {
+    description: 'Defines how long passkey registration tokens remain valid.',
+    placeholder: '300',
+  },
+  AUTH_PASSKEY_OPERATION_TIMEOUT_MS: {
+    description: 'Defines the browser WebAuthn operation timeout in milliseconds.',
+    placeholder: '60000',
+  },
+  AUTH_TOTP_ISSUER: {
+    description: 'Defines the issuer name shown in authenticator applications.',
+    placeholder: 'Tilty Scaffold',
+  },
+  AUTH_TOTP_SETUP_TTL_SECONDS: {
+    description: 'Defines how long authenticator app setup tokens remain valid.',
+    placeholder: '600',
   },
   AUTH_ACCESS_TOKEN_COOKIE_NAME: {
     description: 'Specifies the browser cookie name used for access tokens.',
@@ -562,6 +594,30 @@ export const setupSteps: SetupStepDefinition[] = [
       { key: 'AUTH_TOKEN_SECRET', group: 'Tokens', label: 'Token Signing Secret', kind: 'password' },
       { key: 'AUTH_ACCESS_TOKEN_TTL_SECONDS', group: 'Tokens', label: 'Access Token TTL (seconds)' },
       { key: 'AUTH_REFRESH_TOKEN_TTL_SECONDS', group: 'Tokens', label: 'Refresh Token TTL (seconds)' },
+      {
+        key: 'AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS',
+        group: 'Verification',
+        label: 'MFA Challenge TTL (seconds)',
+      },
+      { key: 'AUTH_VERIFICATION_MAX_ATTEMPTS', group: 'Verification', label: 'MFA Attempt Limit' },
+      {
+        key: 'AUTH_VERIFICATION_SUDO_TTL_SECONDS',
+        group: 'Verification',
+        label: 'Sensitive Action TTL (seconds)',
+      },
+      { key: 'AUTH_PASSKEY_RP_NAME', group: 'Passkeys', label: 'Passkey Relying Party Name' },
+      {
+        key: 'AUTH_PASSKEY_REGISTRATION_TTL_SECONDS',
+        group: 'Passkeys',
+        label: 'Passkey Registration TTL (seconds)',
+      },
+      { key: 'AUTH_PASSKEY_OPERATION_TIMEOUT_MS', group: 'Passkeys', label: 'Passkey Operation Timeout (ms)' },
+      { key: 'AUTH_TOTP_ISSUER', group: 'Authenticator Apps', label: 'TOTP Issuer' },
+      {
+        key: 'AUTH_TOTP_SETUP_TTL_SECONDS',
+        group: 'Authenticator Apps',
+        label: 'TOTP Setup TTL (seconds)',
+      },
       { key: 'AUTH_ACCESS_TOKEN_COOKIE_NAME', group: 'Cookies', label: 'Access Token Cookie Name' },
       { key: 'AUTH_REFRESH_TOKEN_COOKIE_NAME', group: 'Cookies', label: 'Refresh Token Cookie Name' },
       {

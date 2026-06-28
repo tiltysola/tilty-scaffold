@@ -1,6 +1,6 @@
 {
   "name": "@tilty/backend",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "Tilty backend scaffold.",
   "scripts": {
@@ -20,13 +20,15 @@
     "prebuild": "npm --prefix ../shared run build",
     "build": "npm run clean && tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "clean": "rm -rf dist"
+    "clean": "node ../scripts/clean.mjs dist"
   },
   "dependencies": {
     "@alicloud/openapi-core": "^1.0.7",
     "@alicloud/sls20201230": "^5.10.1",
+    "@countrystatecity/countries": "^1.0.7",
     "@koa/cors": "^5.0.0",
     "@koa/router": "^15.6.0",
+    "@simplewebauthn/server": "^13.3.2",
     "@tilty/shared": "file:../shared",
     "ali-oss": "^6.23.0",
     "busboy": "^1.6.0",
@@ -37,6 +39,7 @@
     "mysql2": "^3.22.5",
     "node-schedule": "^2.1.1",
     "nodemailer": "^9.0.1",
+    "otplib": "^13.4.1",
     "pg": "^8.21.0",
     "pg-hstore": "^2.3.4",
     "redis": "^6.0.0",

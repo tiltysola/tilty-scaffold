@@ -21,23 +21,15 @@ import {
   verifySsoStateToken,
 } from './auth.crypto';
 import { emailSchema } from './auth.schemas';
-import { type AuthTokenConfig, createAuthSession } from './auth.service';
+import { type AuthTokenConfig, createAuthSession, defaultAuthSessionRequestContext } from './auth.service';
 import { assertPasswordConfirmation } from './auth.validation';
+import { type AuthSessionRequestContext, AuthSessionService } from './auth-session.service';
+import { AuthVerificationService, type SsoBindVerificationIdentity } from './auth-verification.service';
 
 type JoseModule = typeof import('jose', { with: { 'resolution-mode': 'import' } });
 type SsoCallbackMode = 'bind' | 'login';
 type SsoProviderPurpose = 'binding' | 'login';
 export type SsoProtocol = 'oauth2' | 'oidc';
-
-export interface SsoConfig {
-  clientId: string;
-  clientSecret: string;
-  frontendCallbackUrl: string;
-  issuerUrl: string;
-  redirectUri: string;
-  requestTimeoutMs: number;
-  scopes: string[];
-}
 
 export interface SsoProviderConfig {
   id: string;
@@ -67,7 +59,7 @@ export interface SsoProfilesConfig {
   profiles: SsoProviderConfig[];
 }
 
-export type SsoServiceConfig = SsoConfig | SsoProfilesConfig;
+export type SsoServiceConfig = SsoProfilesConfig;
 
 export interface SsoCallbackInput {
   code?: string | undefined;
@@ -193,12 +185,7 @@ interface OneTimeTokenRecord {
   used: boolean;
 }
 
-interface VerifiedSsoIdentity {
-  email: string;
-  providerId: string;
-  providerName: string;
-  providerSubject: string;
-}
+type VerifiedSsoIdentity = SsoBindVerificationIdentity;
 
 interface SsoIdentityListItem {
   providerId: string;
@@ -269,6 +256,8 @@ export class SsoService {
     config: SsoServiceConfig | undefined,
     cacheStore: CacheStore,
     private readonly tokenConfig: AuthTokenConfig,
+    private readonly sessionService: AuthSessionService,
+    private readonly verificationService: AuthVerificationService,
   ) {
     this.cacheStore = cacheStore;
     this.config = normalizeSsoConfig(config);
@@ -309,7 +298,7 @@ export class SsoService {
     });
   }
 
-  async handleCallback(input: SsoCallbackInput) {
+  async handleCallback(input: SsoCallbackInput, context: AuthSessionRequestContext = defaultAuthSessionRequestContext) {
     this.requireConfig();
 
     if (input.error) {
@@ -360,7 +349,7 @@ export class SsoService {
         throw new AppError('USER_UNAVAILABLE', 'User is not available.', 403);
       }
 
-      return this.createSessionCallbackUrl(provider, user, state.redirectPath);
+      return this.createSessionCallbackUrl(provider, user, state.redirectPath, context);
     }
 
     return this.createBindCallbackUrl(provider, {
@@ -372,7 +361,7 @@ export class SsoService {
     });
   }
 
-  async exchangeHandoffToken(token: string) {
+  async exchangeHandoffToken(token: string, context: AuthSessionRequestContext = defaultAuthSessionRequestContext) {
     this.requireConfig();
 
     const handoff = await verifySsoHandoffToken(token, this.tokenSecret);
@@ -383,10 +372,21 @@ export class SsoService {
       throw new AppError('AUTH_INVALID_TOKEN', 'Authentication token is invalid.', 401);
     }
 
-    return createAuthSession(user, this.tokenSecret, this.tokenConfig, this.cacheStore, this.accessControl);
+    return createAuthSession(
+      user,
+      this.tokenSecret,
+      this.tokenConfig,
+      this.cacheStore,
+      this.accessControl,
+      this.sessionService,
+      context,
+    );
   }
 
-  async createSsoAccount(input: CreateSsoAccountInput) {
+  async createSsoAccount(
+    input: CreateSsoAccountInput,
+    context: AuthSessionRequestContext = defaultAuthSessionRequestContext,
+  ) {
     this.requireConfig();
     assertPasswordConfirmation(input);
 
@@ -429,10 +429,21 @@ export class SsoService {
 
     await this.bootstrapRootRoleForFirstUser(user);
 
-    return createAuthSession(user, this.tokenSecret, this.tokenConfig, this.cacheStore, this.accessControl);
+    return createAuthSession(
+      user,
+      this.tokenSecret,
+      this.tokenConfig,
+      this.cacheStore,
+      this.accessControl,
+      this.sessionService,
+      context,
+    );
   }
 
-  async bindSsoAccount(input: BindSsoAccountInput) {
+  async bindSsoAccount(
+    input: BindSsoAccountInput,
+    context: AuthSessionRequestContext = defaultAuthSessionRequestContext,
+  ) {
     this.requireConfig();
 
     const bind = await verifySsoBindToken(input.token, this.tokenSecret);
@@ -454,11 +465,25 @@ export class SsoService {
       throwInvalidCredentials();
     }
 
-    const boundUser = await this.userService.bindSsoIdentity(user, identity);
+    await this.userService.assertCanBindSsoIdentity(user, identity);
+
+    if (user.mfaRequiredForSso && (await this.verificationService.shouldRequireLoginVerification(user))) {
+      await this.consumeOneTimeToken(tokenKey, tokenSubject);
+      return this.verificationService.createSsoBindChallenge(user, context, identity);
+    }
 
     await this.consumeOneTimeToken(tokenKey, tokenSubject);
+    const boundUser = await this.userService.bindSsoIdentity(user, identity);
 
-    return createAuthSession(boundUser, this.tokenSecret, this.tokenConfig, this.cacheStore, this.accessControl);
+    return createAuthSession(
+      boundUser,
+      this.tokenSecret,
+      this.tokenConfig,
+      this.cacheStore,
+      this.accessControl,
+      this.sessionService,
+      context,
+    );
   }
 
   async listUserIdentities(userId: string): Promise<SsoIdentityListItem[]> {
@@ -723,9 +748,29 @@ export class SsoService {
     return provider;
   }
 
-  private async createSessionCallbackUrl(provider: NormalizedSsoProviderConfig, user: UserModel, redirectPath: string) {
-    const handoffToken = await createSsoHandoffToken(this.tokenSecret);
+  private async createSessionCallbackUrl(
+    provider: NormalizedSsoProviderConfig,
+    user: UserModel,
+    redirectPath: string,
+    context: AuthSessionRequestContext,
+  ) {
     const callbackUrl = new URL(provider.frontendCallbackUrl);
+
+    if (user.mfaRequiredForSso && (await this.verificationService.shouldRequireLoginVerification(user))) {
+      const challenge = await this.verificationService.createLoginChallenge(user, context, 'sso');
+
+      setCallbackFragment(callbackUrl, {
+        redirect: redirectPath,
+        verification_default_method: challenge.defaultMethod,
+        verification_method_details: JSON.stringify(challenge.methods),
+        verification_methods: challenge.methods.map((method) => method.method).join(','),
+        verification_token: challenge.verificationToken,
+      });
+
+      return callbackUrl.toString();
+    }
+
+    const handoffToken = await createSsoHandoffToken(this.tokenSecret);
 
     await this.storeOneTimeToken(getSsoHandoffCacheKey(handoffToken.tokenId), user.id, ssoHandoffTtlMs);
 
@@ -869,38 +914,14 @@ function normalizeSsoConfig(config: SsoServiceConfig | undefined): NormalizedSso
     return undefined;
   }
 
-  if ('profiles' in config) {
-    const profiles = config.profiles.map(normalizeSsoProviderConfig);
+  const profiles = config.profiles.map(normalizeSsoProviderConfig);
 
-    return profiles.length > 0
-      ? {
-          loginEnabled: profiles.some((profile) => profile.loginEnabled),
-          profiles,
-        }
-      : undefined;
-  }
-
-  const issuerUrl = config.issuerUrl.replace(/\/+$/, '');
-
-  return {
-    loginEnabled: true,
-    profiles: [
-      {
-        id: getDefaultProviderId(issuerUrl),
-        name: 'SSO',
-        protocol: 'oidc',
-        loginEnabled: true,
-        bindingEnabled: true,
-        clientId: config.clientId,
-        clientSecret: config.clientSecret,
-        frontendCallbackUrl: config.frontendCallbackUrl,
-        issuerUrl,
-        redirectUri: config.redirectUri,
-        requestTimeoutMs: config.requestTimeoutMs,
-        scopes: config.scopes,
-      },
-    ],
-  };
+  return profiles.length > 0
+    ? {
+        loginEnabled: profiles.some((profile) => profile.loginEnabled),
+        profiles,
+      }
+    : undefined;
 }
 
 function normalizeSsoProviderConfig(profile: SsoProviderConfig): NormalizedSsoProviderConfig {
@@ -1169,14 +1190,6 @@ function isAllowedProviderUrl(value: unknown, provider: OidcProviderConfig): val
     return issuer.protocol !== 'https:' || url.protocol === 'https:';
   } catch {
     return false;
-  }
-}
-
-function getDefaultProviderId(issuerUrl: string) {
-  try {
-    return new URL(issuerUrl).host.toLowerCase();
-  } catch {
-    return 'default';
   }
 }
 

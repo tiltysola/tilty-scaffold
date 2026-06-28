@@ -81,6 +81,8 @@ describe('users API client', () => {
     await expect(
       updateUser('user-id', {
         displayName: 'Managed User',
+        bio: 'Managed profile bio.',
+        location: 'Tokyo',
         emailVerified: true,
         phoneVerified: true,
         password: 'newpassword123',
@@ -99,6 +101,8 @@ describe('users API client', () => {
     expect(init?.body).toBe(
       JSON.stringify({
         displayName: 'Managed User',
+        bio: 'Managed profile bio.',
+        location: 'Tokyo',
         emailVerified: true,
         phoneVerified: true,
         password: 'newpassword123',

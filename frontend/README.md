@@ -2,7 +2,7 @@
 
 Vite React frontend scaffold with React Router, Tailwind CSS, shadcn/ui,
 authentication, registration, password recovery, optional SSO authentication,
-protected dashboard, and permission-gated user administration page.
+protected dashboard, and permission-gated administration pages.
 
 ## Commands
 
@@ -40,8 +40,10 @@ cache, OSS storage, SLS logging, SMTP email, Aliyun SMS, and SSO must pass
 connection tests when enabled. The database step detects available users; setup
 creates the root administrator only when none exist. Existing users are
 retained. Configuration without a network dependency is validated for required
-values and URL or email format. The application domain defaults to the current
-frontend origin, and CORS origins default to that domain.
+values and URL or email format. Review pages list active configuration fields
+with sensitive values masked and omit inactive provider fields. The application
+domain defaults to the current frontend origin, and CORS origins default to
+that domain.
 
 Access and refresh tokens are stored by the backend in HttpOnly cookies and are
 not stored from API response bodies. localStorage keeps only token-expiration
@@ -53,11 +55,12 @@ displays authenticated user context and application status. The sidebar and
 protected routes use role and permission keys for navigation and page access;
 the backend remains the source of truth for API authorization.
 
-The profile page updates the current user's avatar through
-`/api/auth/avatar`, display name through `PATCH /api/auth/me`, and unverified
-email status through `/api/auth/me/email-verification` and
-`/api/auth/me/email-verification/confirm`. Phone binding uses
-`/api/auth/me/phone-verification` and
+The profile page updates the current user's public profile details through
+`PATCH /api/auth/me`. Gender and location editing use server-provided options
+while allowing custom text. Avatar, profile banner, and profile background uploads use `/api/auth/avatar`, `/api/auth/profile-banner`, and
+`/api/auth/profile-background`. Unverified email status uses
+`/api/auth/me/email-verification` and `/api/auth/me/email-verification/confirm`.
+Phone binding uses `/api/auth/me/phone-verification` and
 `/api/auth/me/phone-verification/confirm` when SMS verification is configured.
 
 The registration page reads `/api/auth/config` and shows email verification
@@ -70,14 +73,30 @@ by the SSO callback page.
 The password recovery page reads `/api/auth/config`; when SMTP-backed email is
 not enabled, it instructs the user to contact the site administrator.
 
+The security page changes the current user's password through
+`PATCH /api/auth/me/password`. When the account has an available email, SMS,
+authenticator app, or passkey verifier, the page completes a `change_password`
+step-up challenge before opening the password form. Successful password changes
+revoke the user's other active sessions.
+
 First-time SSO identities complete account creation or existing-account binding
-on the login page. The profile page reads `/api/auth/sso/identities` and can
-start profile provider binding through `/api/auth/sso/bind/start`.
+on the SSO callback page. The profile page reads `/api/auth/sso/identities` and
+starts profile provider binding through `/api/auth/sso/bind/start` only after a
+verified `manage_sso` step-up challenge.
 
 The users page calls `/api/users/` and is available only when the current user
-has `USER_LIST` or `ROOT`. Users with `USER_ADMIN` or `ROOT` can update managed
-user profile fields, password, account status, and role assignments through
-`/api/users/:id`.
+has `USER_LIST` or `ROOT`, has a passkey or authenticator app configured, and
+has completed a `user_management` step-up challenge. Users with `USER_ADMIN` or
+`ROOT` can update managed user profile fields, password, account status, and
+role assignments through `/api/users/:id` after the same `user_management`
+verification.
+
+The system settings page calls `/api/system-settings/` and is available only
+when the current user has `ROOT`. Before loading settings, the page creates a
+`system_settings` step-up verification challenge. The backend requires the root
+user to have a passkey or authenticator app configured, and settings remain
+hidden until that challenge is verified. Saving settings requires a backend
+restart before the updated configuration is used.
 
 ## Routes
 
@@ -86,6 +105,7 @@ user profile fields, password, account status, and role assignments through
 | `/`                | Dashboard            |
 | `/dashboard`       | Dashboard            |
 | `/users`           | Users                |
+| `/settings`        | System Settings      |
 | `/profile`         | Profile              |
 | `/setup`           | Setup                |
 | `/login`           | Log in               |

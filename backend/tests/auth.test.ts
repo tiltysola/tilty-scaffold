@@ -1,19 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { initModels } from '../src/composition/models';
+import { createServices } from '../src/composition/services';
 import { type RouteDefinition } from '../src/core/module';
 import { MemoryCacheStore } from '../src/infra/cache';
 import { createSequelize } from '../src/infra/database';
 import { type FileStorage, type SaveFileInput } from '../src/infra/file-storage';
 import { createMigrator } from '../src/infra/migrator';
 import { errorMiddleware } from '../src/middleware/error';
-import { createServices, initModels } from '../src/modules';
 import { createAuthModule } from '../src/modules/auth';
-import { defaultAuthCookieConfig } from '../src/modules/auth/auth.controller';
 import { type EmailSender, EmailVerificationService } from '../src/modules/auth/auth.email';
-import { AuthService, defaultAuthTokenConfig } from '../src/modules/auth/auth.service';
+import { defaultAuthCookieConfig } from '../src/modules/auth/auth.http';
+import {
+  AuthService,
+  defaultAuthSessionRequestContext,
+  defaultAuthTokenConfig,
+} from '../src/modules/auth/auth.service';
 import { type SmsSender, SmsVerificationService } from '../src/modules/auth/auth.sms';
+import { TotpService } from '../src/modules/auth/auth.totp';
+import { AuthVerificationService } from '../src/modules/auth/auth-verification.service';
 import { UserService } from '../src/modules/users/user.service';
-import { createTestContext, getTestRouteHandler, runMiddleware, runMiddlewares } from './support/http';
+import { createTestContext, getTestRoute, getTestRouteHandler, runMiddleware, runMiddlewares } from './support/http';
+import { createTotpCode } from './support/totp';
 
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
 
@@ -42,6 +50,35 @@ describe('auth API', () => {
   afterEach(async () => {
     await sequelize.close();
   });
+
+  function createAuthService(options: CreateAuthServiceOptions = {}) {
+    const cacheStore = options.cacheStore ?? new MemoryCacheStore();
+    const emailVerification = options.emailVerification ?? new EmailVerificationService();
+    const smsVerification = options.smsVerification ?? new SmsVerificationService();
+    const totpService = new TotpService(models.user, cacheStore, authTokenSecret);
+
+    return new AuthService(
+      new UserService(models.user, models.ssoIdentity),
+      services.accessControl,
+      authTokenSecret,
+      emailVerification,
+      options.fileStorage,
+      defaultAuthTokenConfig,
+      cacheStore,
+      services.authSession,
+      totpService,
+      services.authPasskey,
+      new AuthVerificationService(
+        cacheStore,
+        authTokenSecret,
+        services.authPasskey,
+        totpService,
+        emailVerification,
+        smsVerification,
+      ),
+      smsVerification,
+    );
+  }
 
   it('registers, logs in, and returns the current user', async () => {
     const credentials = {
@@ -222,15 +259,10 @@ describe('auth API', () => {
 
   it('rejects refresh tokens when cache consumption loses a race', async () => {
     const cacheStore = new RejectingCompareAndSetCacheStore();
-    const authService = new AuthService(
-      new UserService(models.user, models.ssoIdentity),
-      services.accessControl,
-      authTokenSecret,
-      new EmailVerificationService(),
+    const authService = createAuthService({
       fileStorage,
-      defaultAuthTokenConfig,
       cacheStore,
-    );
+    });
     const session = await authService.register({
       username: 'refresh_race_user',
       displayName: 'Refresh Race User',
@@ -304,7 +336,164 @@ describe('auth API', () => {
     });
   });
 
-  it('updates the current user display name', async () => {
+  it('uploads the current user profile banner', async () => {
+    const session = await services.auth.register({
+      username: 'profile_banner_user',
+      displayName: 'Profile Banner User',
+      email: 'profile-banner@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const user = await services.auth.uploadProfileBanner(session.accessToken, {
+      content: Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
+      contentType: 'image/png',
+      filename: 'profile-banner.png',
+    });
+
+    expect(user.profileBannerUrl).toMatch(/^\/uploads\/profile-banners\/.+\.png$/);
+    expect(fileStorage.saved?.contentType).toBe('image/png');
+    expect(fileStorage.saved?.key).toMatch(/^profile-banners\/[^/]+\.png$/);
+    await expect(services.auth.getCurrentUser(session.accessToken)).resolves.toMatchObject({
+      profileBannerUrl: user.profileBannerUrl,
+    });
+  });
+
+  it('uploads the current user profile background', async () => {
+    const session = await services.auth.register({
+      username: 'profile_background_user',
+      displayName: 'Profile Background User',
+      email: 'profile-background@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const user = await services.auth.uploadProfileBackground(session.accessToken, {
+      content: Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
+      contentType: 'image/png',
+      filename: 'profile-background.png',
+    });
+
+    expect(user.profileBackgroundUrl).toMatch(/^\/uploads\/profile-backgrounds\/.+\.png$/);
+    expect(fileStorage.saved?.contentType).toBe('image/png');
+    expect(fileStorage.saved?.key).toMatch(/^profile-backgrounds\/[^/]+\.png$/);
+    await expect(services.auth.getCurrentUser(session.accessToken)).resolves.toMatchObject({
+      profileBackgroundUrl: user.profileBackgroundUrl,
+    });
+  });
+
+  it('removes the previous profile banner object after replacement', async () => {
+    const session = await services.auth.register({
+      username: 'profile_banner_replace_user',
+      displayName: 'Profile Banner Replace User',
+      email: 'profile-banner-replace@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const upload = {
+      content: Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
+      contentType: 'image/png',
+      filename: 'profile-banner.png',
+    };
+
+    await services.auth.uploadProfileBanner(session.accessToken, upload);
+    const firstKey = fileStorage.saved?.key;
+    await services.auth.uploadProfileBanner(session.accessToken, upload);
+
+    expect(firstKey).toEqual(expect.any(String));
+    expect(fileStorage.deletedKeys).toEqual([firstKey]);
+  });
+
+  it('removes the previous profile background object after replacement', async () => {
+    const session = await services.auth.register({
+      username: 'profile_background_replace_user',
+      displayName: 'Profile Background Replace User',
+      email: 'profile-background-replace@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const upload = {
+      content: Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
+      contentType: 'image/png',
+      filename: 'profile-background.png',
+    };
+
+    await services.auth.uploadProfileBackground(session.accessToken, upload);
+    const firstKey = fileStorage.saved?.key;
+    await services.auth.uploadProfileBackground(session.accessToken, upload);
+
+    expect(firstKey).toEqual(expect.any(String));
+    expect(fileStorage.deletedKeys).toEqual([firstKey]);
+  });
+
+  it('deletes the current user avatar', async () => {
+    const session = await services.auth.register({
+      username: 'avatar_delete_user',
+      displayName: 'Avatar Delete User',
+      email: 'avatar-delete@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+
+    await services.auth.uploadAvatar(session.accessToken, {
+      content: Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
+      contentType: 'image/png',
+      filename: 'avatar.png',
+    });
+    const avatarKey = fileStorage.saved?.key;
+    const user = await services.auth.deleteAvatar(session.accessToken);
+
+    expect(avatarKey).toEqual(expect.any(String));
+    expect(fileStorage.deletedKeys).toEqual([avatarKey]);
+    expect(user).not.toHaveProperty('avatarUrl');
+    await expect(services.auth.getCurrentUser(session.accessToken)).resolves.not.toHaveProperty('avatarUrl');
+  });
+
+  it('deletes the current user profile banner', async () => {
+    const session = await services.auth.register({
+      username: 'profile_banner_delete_user',
+      displayName: 'Profile Banner Delete User',
+      email: 'profile-banner-delete@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+
+    await services.auth.uploadProfileBanner(session.accessToken, {
+      content: Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
+      contentType: 'image/png',
+      filename: 'profile-banner.png',
+    });
+    const profileBannerKey = fileStorage.saved?.key;
+    const user = await services.auth.deleteProfileBanner(session.accessToken);
+
+    expect(profileBannerKey).toEqual(expect.any(String));
+    expect(fileStorage.deletedKeys).toEqual([profileBannerKey]);
+    expect(user).not.toHaveProperty('profileBannerUrl');
+    await expect(services.auth.getCurrentUser(session.accessToken)).resolves.not.toHaveProperty('profileBannerUrl');
+  });
+
+  it('deletes the current user profile background', async () => {
+    const session = await services.auth.register({
+      username: 'profile_background_delete_user',
+      displayName: 'Profile Background Delete User',
+      email: 'profile-background-delete@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+
+    await services.auth.uploadProfileBackground(session.accessToken, {
+      content: Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
+      contentType: 'image/png',
+      filename: 'profile-background.png',
+    });
+    const profileBackgroundKey = fileStorage.saved?.key;
+    const user = await services.auth.deleteProfileBackground(session.accessToken);
+
+    expect(profileBackgroundKey).toEqual(expect.any(String));
+    expect(fileStorage.deletedKeys).toEqual([profileBackgroundKey]);
+    expect(user).not.toHaveProperty('profileBackgroundUrl');
+    await expect(services.auth.getCurrentUser(session.accessToken)).resolves.not.toHaveProperty('profileBackgroundUrl');
+  });
+
+  it('updates the current user profile details', async () => {
     const session = await services.auth.register({
       username: 'profile_user',
       displayName: 'Profile User',
@@ -317,6 +506,11 @@ describe('auth API', () => {
       createTestContext(
         {
           displayName: 'Updated Profile User',
+          gender: 'Wuzhuang Helicopter',
+          birthday: '2008-05-23',
+          bio: 'Frontend is waking up.',
+          location: 'Chaoyang, Beijing',
+          websiteUrl: 'https://www.tiltysola.com/',
         },
         {},
         undefined,
@@ -332,10 +526,299 @@ describe('auth API', () => {
     expect(body.data).toMatchObject({
       username: 'profile_user',
       displayName: 'Updated Profile User',
+      gender: 'Wuzhuang Helicopter',
+      birthday: '2008-05-23',
+      bio: 'Frontend is waking up.',
+      location: 'Chaoyang, Beijing',
+      websiteUrl: 'https://www.tiltysola.com/',
       email: 'profile@example.com',
     });
     await expect(services.auth.getCurrentUser(session.accessToken)).resolves.toMatchObject({
       displayName: 'Updated Profile User',
+      gender: 'Wuzhuang Helicopter',
+      birthday: '2008-05-23',
+      bio: 'Frontend is waking up.',
+      location: 'Chaoyang, Beijing',
+      websiteUrl: 'https://www.tiltysola.com/',
+    });
+  });
+
+  it('changes the current user password and revokes other device sessions', async () => {
+    const credentials = {
+      username: 'change_password_user',
+      displayName: 'Change Password User',
+      email: 'change-password@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    };
+    const currentSession = await services.auth.register(credentials);
+    const otherSession = await services.auth.login({
+      identifier: credentials.email,
+      password: credentials.password,
+    });
+    const context = await runMiddleware(
+      getTestRouteHandler(routes, 'patch', '/me/password'),
+      createTestContext(
+        {
+          currentPassword: 'password123',
+          password: 'newpassword123',
+          confirmPassword: 'newpassword123',
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: currentSession.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(context.body).toEqual({
+      code: 200,
+      error: null,
+      data: {
+        changed: true,
+      },
+    });
+    expect(context.responseHeaders['cache-control']).toBe('no-store');
+    await expect(services.auth.getCurrentUser(currentSession.accessToken)).resolves.toMatchObject({
+      email: credentials.email,
+    });
+    await expect(services.auth.getCurrentUser(otherSession.accessToken)).rejects.toMatchObject({
+      code: 'AUTH_SESSION_INVALID',
+      status: 401,
+    });
+    await expect(
+      services.auth.login({
+        identifier: credentials.email,
+        password: 'password123',
+      }),
+    ).rejects.toMatchObject({
+      code: 'AUTH_INVALID_CREDENTIALS',
+      status: 401,
+    });
+    await expect(
+      services.auth.login({
+        identifier: credentials.email,
+        password: 'newpassword123',
+      }),
+    ).resolves.toMatchObject({
+      user: {
+        email: credentials.email,
+      },
+    });
+  });
+
+  it('requires step-up verification for password changes when an email verifier is available', async () => {
+    let sentCode = '';
+    const emailVerification = new EmailVerificationService({
+      codeCooldownMs: 60_000,
+      codeExpiresInMs: 10 * 60_000,
+      sender: {
+        send: async (input) => {
+          sentCode = /code is (\d{6})/.exec(input.text)?.[1] ?? '';
+        },
+      },
+    });
+    const authService = createAuthService({ emailVerification });
+    const session = await services.auth.register({
+      username: 'change_password_email_user',
+      displayName: 'Change Password Email User',
+      email: 'change-password-email@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const user = await models.user.findOne({
+      where: {
+        email: 'change-password-email@example.com',
+      },
+    });
+
+    expect(user).toBeTruthy();
+    user!.emailVerified = true;
+    await user!.save();
+
+    routes = createAuthModule(authService, {
+      cookies: defaultAuthCookieConfig,
+      ssoService: services.sso,
+    }).routes;
+
+    await expect(
+      runMiddleware(
+        getTestRouteHandler(routes, 'patch', '/me/password'),
+        createTestContext(
+          {
+            currentPassword: 'password123',
+            password: 'newpassword123',
+            confirmPassword: 'newpassword123',
+          },
+          {},
+          undefined,
+          {
+            cookies: {
+              tilty_scaffold_access_token: session.accessToken,
+            },
+          },
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: 'AUTH_VERIFICATION_REQUIRED',
+      status: 403,
+    });
+
+    const challengeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/challenges'),
+      createTestContext(
+        {
+          purpose: 'change_password',
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+    const challengeBody = challengeContext.body as VerificationRequiredBody;
+
+    expect(challengeBody.data).toMatchObject({
+      requiresVerification: true,
+      defaultMethod: 'email',
+      purpose: 'change_password',
+    });
+    expect(challengeBody.data.methods.map((method) => method.method)).toEqual(['email']);
+
+    await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/code'),
+      createTestContext({
+        method: 'email',
+        verificationToken: challengeBody.data.verificationToken,
+      }),
+    );
+
+    expect(sentCode).toMatch(/^\d{6}$/);
+
+    await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/confirm'),
+      createTestContext({
+        code: sentCode,
+        method: 'email',
+        verificationToken: challengeBody.data.verificationToken,
+      }),
+    );
+
+    const changeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'patch', '/me/password'),
+      createTestContext(
+        {
+          currentPassword: 'password123',
+          password: 'newpassword123',
+          confirmPassword: 'newpassword123',
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(changeContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        changed: true,
+      },
+    });
+    await expect(
+      authService.login({
+        identifier: 'change-password-email@example.com',
+        password: 'newpassword123',
+      }),
+    ).resolves.toMatchObject({
+      user: {
+        email: 'change-password-email@example.com',
+      },
+    });
+  });
+
+  it('rejects current user password changes with an invalid current password', async () => {
+    const session = await services.auth.register({
+      username: 'change_password_invalid_user',
+      displayName: 'Change Password Invalid User',
+      email: 'change-password-invalid@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+
+    await expect(
+      runMiddleware(
+        getTestRouteHandler(routes, 'patch', '/me/password'),
+        createTestContext(
+          {
+            currentPassword: 'wrongpassword',
+            password: 'newpassword123',
+            confirmPassword: 'newpassword123',
+          },
+          {},
+          undefined,
+          {
+            cookies: {
+              tilty_scaffold_access_token: session.accessToken,
+            },
+          },
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: 'AUTH_INVALID_CREDENTIALS',
+      status: 401,
+    });
+    await expect(
+      services.auth.login({
+        identifier: 'change-password-invalid@example.com',
+        password: 'password123',
+      }),
+    ).resolves.toMatchObject({
+      user: {
+        email: 'change-password-invalid@example.com',
+      },
+    });
+  });
+
+  it('rejects current user password changes when the new password matches the current password', async () => {
+    const session = await services.auth.register({
+      username: 'change_password_same_user',
+      displayName: 'Change Password Same User',
+      email: 'change-password-same@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+
+    await expect(
+      runMiddleware(
+        getTestRouteHandler(routes, 'patch', '/me/password'),
+        createTestContext(
+          {
+            currentPassword: 'password123',
+            password: 'password123',
+            confirmPassword: 'password123',
+          },
+          {},
+          undefined,
+          {
+            cookies: {
+              tilty_scaffold_access_token: session.accessToken,
+            },
+          },
+        ),
+      ),
+    ).rejects.toMatchObject({
+      name: 'ZodError',
     });
   });
 
@@ -405,6 +888,71 @@ describe('auth API', () => {
     expect(avatarRoute?.handlers[0]).toBe(rateLimit);
   });
 
+  it('applies rate limiting middleware to avatar deletion', () => {
+    const rateLimit = vi.fn(async (_ctx, next) => {
+      await next();
+    });
+    const avatarRoute = createAuthModule(services.auth, {
+      cookies: defaultAuthCookieConfig,
+      rateLimit,
+      ssoService: services.sso,
+    }).routes.find((route) => route.method === 'delete' && route.path === '/avatar');
+
+    expect(avatarRoute?.handlers[0]).toBe(rateLimit);
+  });
+
+  it('applies rate limiting middleware to profile banner uploads', () => {
+    const rateLimit = vi.fn(async (_ctx, next) => {
+      await next();
+    });
+    const profileBannerRoute = createAuthModule(services.auth, {
+      cookies: defaultAuthCookieConfig,
+      rateLimit,
+      ssoService: services.sso,
+    }).routes.find((route) => route.method === 'post' && route.path === '/profile-banner');
+
+    expect(profileBannerRoute?.handlers[0]).toBe(rateLimit);
+  });
+
+  it('applies rate limiting middleware to profile banner deletion', () => {
+    const rateLimit = vi.fn(async (_ctx, next) => {
+      await next();
+    });
+    const profileBannerRoute = createAuthModule(services.auth, {
+      cookies: defaultAuthCookieConfig,
+      rateLimit,
+      ssoService: services.sso,
+    }).routes.find((route) => route.method === 'delete' && route.path === '/profile-banner');
+
+    expect(profileBannerRoute?.handlers[0]).toBe(rateLimit);
+  });
+
+  it('applies rate limiting middleware to profile background uploads', () => {
+    const rateLimit = vi.fn(async (_ctx, next) => {
+      await next();
+    });
+    const profileBackgroundRoute = createAuthModule(services.auth, {
+      cookies: defaultAuthCookieConfig,
+      rateLimit,
+      ssoService: services.sso,
+    }).routes.find((route) => route.method === 'post' && route.path === '/profile-background');
+
+    expect(profileBackgroundRoute?.handlers[0]).toBe(rateLimit);
+  });
+
+  it('applies rate limiting middleware to profile background deletion', () => {
+    const rateLimit = vi.fn(async (_ctx, next) => {
+      await next();
+    });
+    const profileBackgroundRoute = createAuthModule(services.auth, {
+      cookies: defaultAuthCookieConfig,
+      rateLimit,
+      ssoService: services.sso,
+    }).routes.find((route) => route.method === 'delete' && route.path === '/profile-background');
+
+    expect(profileBackgroundRoute?.handlers[0]).toBe(rateLimit);
+  });
+
   it('applies rate limiting middleware to profile updates', () => {
     const rateLimit = vi.fn(async (_ctx, next) => {
       await next();
@@ -416,6 +964,19 @@ describe('auth API', () => {
     }).routes.find((route) => route.method === 'patch' && route.path === '/me');
 
     expect(profileRoute?.handlers[0]).toBe(rateLimit);
+  });
+
+  it('applies rate limiting middleware to password changes', () => {
+    const rateLimit = vi.fn(async (_ctx, next) => {
+      await next();
+    });
+    const passwordRoute = createAuthModule(services.auth, {
+      cookies: defaultAuthCookieConfig,
+      rateLimit,
+      ssoService: services.sso,
+    }).routes.find((route) => route.method === 'patch' && route.path === '/me/password');
+
+    expect(passwordRoute?.handlers[0]).toBe(rateLimit);
   });
 
   it('rejects duplicate email registration', async () => {
@@ -490,6 +1051,7 @@ describe('auth API', () => {
       code: 200,
       error: null,
       data: {
+        fileUploadMaxBytes: 2 * 1024 * 1024,
         passwordRecoveryEnabled: false,
         phoneCountryCodes: [],
         profileEmailVerificationEnabled: false,
@@ -502,21 +1064,14 @@ describe('auth API', () => {
     const smsSender: SmsSender = {
       send: async () => undefined,
     };
-    const authService = new AuthService(
-      new UserService(models.user, models.ssoIdentity),
-      services.accessControl,
-      authTokenSecret,
-      new EmailVerificationService(),
-      undefined,
-      defaultAuthTokenConfig,
-      new MemoryCacheStore(),
-      new SmsVerificationService({
+    const authService = createAuthService({
+      smsVerification: new SmsVerificationService({
         codeCooldownMs: 60_000,
         codeExpiresInMs: 10 * 60_000,
         phoneCountryCodes: ['+86'],
         sender: smsSender,
       }),
-    );
+    });
     routes = createAuthModule(authService, {
       cookies: defaultAuthCookieConfig,
       ssoService: services.sso,
@@ -529,6 +1084,24 @@ describe('auth API', () => {
       error: null,
       data: {
         phoneCountryCodes: ['+86'],
+      },
+    });
+  });
+
+  it('returns the configured upload limit in auth public configuration', async () => {
+    routes = createAuthModule(services.auth, {
+      avatarUploadMaxBytes: 1_048_576,
+      cookies: defaultAuthCookieConfig,
+      ssoService: services.sso,
+    }).routes;
+
+    const context = await runMiddleware(getTestRouteHandler(routes, 'get', '/config'), createTestContext());
+
+    expect(context.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        fileUploadMaxBytes: 1_048_576,
       },
     });
   });
@@ -565,20 +1138,13 @@ describe('auth API', () => {
         sentCode = /code is (\d{6})/.exec(input.text)?.[1] ?? '';
       },
     };
-    const userService = new UserService(models.user, models.ssoIdentity);
-    const authService = new AuthService(
-      userService,
-      services.accessControl,
-      authTokenSecret,
-      new EmailVerificationService({
+    const authService = createAuthService({
+      emailVerification: new EmailVerificationService({
         codeCooldownMs: 60_000,
         codeExpiresInMs: 10 * 60_000,
         sender,
       }),
-      undefined,
-      defaultAuthTokenConfig,
-      new MemoryCacheStore(),
-    );
+    });
     routes = createAuthModule(authService, {
       cookies: defaultAuthCookieConfig,
       ssoService: services.sso,
@@ -590,6 +1156,7 @@ describe('auth API', () => {
       code: 200,
       error: null,
       data: {
+        fileUploadMaxBytes: 2 * 1024 * 1024,
         passwordRecoveryEnabled: true,
         phoneCountryCodes: [],
         profileEmailVerificationEnabled: true,
@@ -654,23 +1221,49 @@ describe('auth API', () => {
       password: 'password123',
       confirmPassword: 'password123',
     });
-    const authService = new AuthService(
-      new UserService(models.user, models.ssoIdentity),
-      services.accessControl,
-      authTokenSecret,
-      new EmailVerificationService({
+    const authService = createAuthService({
+      emailVerification: new EmailVerificationService({
         codeCooldownMs: 60_000,
         codeExpiresInMs: 10 * 60_000,
         sender,
       }),
-      undefined,
-      defaultAuthTokenConfig,
-      new MemoryCacheStore(),
-    );
+    });
     routes = createAuthModule(authService, {
       cookies: defaultAuthCookieConfig,
       ssoService: services.sso,
     }).routes;
+
+    const challengeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/challenges'),
+      createTestContext(
+        {
+          purpose: 'update_contact',
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+    const challengeBody = challengeContext.body as VerificationRequiredBody;
+
+    expect(challengeBody.data).toMatchObject({
+      requiresVerification: true,
+      defaultMethod: 'password',
+      purpose: 'update_contact',
+    });
+
+    await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/confirm'),
+      createTestContext({
+        method: 'password',
+        password: 'password123',
+        verificationToken: challengeBody.data.verificationToken,
+      }),
+    );
 
     const sendContext = await runMiddleware(
       getTestRouteHandler(routes, 'post', '/me/email-verification'),
@@ -715,6 +1308,9 @@ describe('auth API', () => {
 
   it('verifies the current profile phone with an SMS verification code', async () => {
     let sentCode = '';
+    const emailSender: EmailSender = {
+      send: async () => undefined,
+    };
     const sender: SmsSender = {
       send: async (input) => {
         sentCode = input.code;
@@ -727,25 +1323,52 @@ describe('auth API', () => {
       password: 'password123',
       confirmPassword: 'password123',
     });
-    const authService = new AuthService(
-      new UserService(models.user, models.ssoIdentity),
-      services.accessControl,
-      authTokenSecret,
-      new EmailVerificationService(),
-      undefined,
-      defaultAuthTokenConfig,
-      new MemoryCacheStore(),
-      new SmsVerificationService({
+    const user = await models.user.findOne({ where: { email: 'profile-phone@example.com' } });
+    user!.emailVerified = true;
+    await user!.save();
+    const authService = createAuthService({
+      emailVerification: new EmailVerificationService({
+        codeCooldownMs: 60_000,
+        codeExpiresInMs: 10 * 60_000,
+        sender: emailSender,
+      }),
+      smsVerification: new SmsVerificationService({
         codeCooldownMs: 60_000,
         codeExpiresInMs: 10 * 60_000,
         phoneCountryCodes: ['+86'],
         sender,
       }),
-    );
+    });
     routes = createAuthModule(authService, {
       cookies: defaultAuthCookieConfig,
       ssoService: services.sso,
     }).routes;
+
+    const challengeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/challenges'),
+      createTestContext(
+        {
+          purpose: 'update_contact',
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+    const challengeBody = challengeContext.body as VerificationRequiredBody;
+
+    await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/confirm'),
+      createTestContext({
+        method: 'password',
+        password: 'password123',
+        verificationToken: challengeBody.data.verificationToken,
+      }),
+    );
 
     const sendContext = await runMiddleware(
       getTestRouteHandler(routes, 'post', '/me/phone-verification'),
@@ -790,12 +1413,12 @@ describe('auth API', () => {
       ),
     );
     const verifyBody = verifyContext.body as AuthUserBody;
-    const user = await models.user.findOne({ where: { email: 'profile-phone@example.com' } });
+    const verifiedUser = await models.user.findOne({ where: { email: 'profile-phone@example.com' } });
 
     expect(verifyBody.data.phoneNumber).toBe('+8613800138000');
     expect(verifyBody.data.phoneVerified).toBe(true);
-    expect(user?.phoneNumber).toBe('+8613800138000');
-    expect(user?.phoneVerified).toBe(true);
+    expect(verifiedUser?.phoneNumber).toBe('+8613800138000');
+    expect(verifiedUser?.phoneVerified).toBe(true);
   });
 
   it('resets passwords with emailed verification codes when email is enabled', async () => {
@@ -805,20 +1428,13 @@ describe('auth API', () => {
         sentCode = /code is (\d{6})/.exec(input.text)?.[1] ?? '';
       },
     };
-    const userService = new UserService(models.user, models.ssoIdentity);
-    const authService = new AuthService(
-      userService,
-      services.accessControl,
-      authTokenSecret,
-      new EmailVerificationService({
+    const authService = createAuthService({
+      emailVerification: new EmailVerificationService({
         codeCooldownMs: 60_000,
         codeExpiresInMs: 10 * 60_000,
         sender,
       }),
-      undefined,
-      defaultAuthTokenConfig,
-      new MemoryCacheStore(),
-    );
+    });
     routes = createAuthModule(authService, {
       cookies: defaultAuthCookieConfig,
       ssoService: services.sso,
@@ -904,6 +1520,895 @@ describe('auth API', () => {
     });
   });
 
+  it('requires step-up verification before starting profile SSO binding', async () => {
+    const session = await services.auth.register({
+      username: 'sso_bind_user',
+      displayName: 'SSO Bind User',
+      email: 'sso-bind@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const bindStartRoute = getTestRoute(routes, 'get', '/sso/bind/start');
+    const blockedContext = await runMiddlewares(
+      [errorMiddleware(), ...bindStartRoute.handlers],
+      createTestContext(undefined, { accept: 'text/html' }, undefined, {
+        cookies: {
+          tilty_scaffold_access_token: session.accessToken,
+        },
+        query: {
+          redirect: '/profile',
+        },
+      }),
+    );
+
+    expect(blockedContext.status).toBe(403);
+    expect(blockedContext.body).toMatchObject({
+      error: 'AUTH_VERIFICATION_REQUIRED',
+      details: {
+        purpose: 'manage_sso',
+      },
+    });
+
+    const challenge = await services.auth.createVerificationChallenge(
+      session.accessToken,
+      'manage_sso',
+      defaultAuthSessionRequestContext,
+    );
+
+    if (!('verificationToken' in challenge)) {
+      throw new Error('SSO binding should require password verification when no MFA method exists.');
+    }
+
+    await services.auth.verifyAuthenticationChallenge(
+      {
+        method: 'password',
+        password: 'password123',
+        verificationToken: challenge.verificationToken,
+      },
+      defaultAuthSessionRequestContext,
+    );
+
+    const verifiedContext = await runMiddlewares(
+      [errorMiddleware(), ...bindStartRoute.handlers],
+      createTestContext(undefined, { accept: 'text/html' }, undefined, {
+        cookies: {
+          tilty_scaffold_access_token: session.accessToken,
+        },
+        query: {
+          redirect: '/profile',
+        },
+      }),
+    );
+
+    expect(verifiedContext.status).toBe(404);
+    expect(verifiedContext.body).toMatchObject({
+      error: 'SSO_DISABLED',
+    });
+  });
+
+  it('requires two-step verification for enabled accounts before issuing session cookies', async () => {
+    await services.auth.register({
+      username: 'totp_user',
+      displayName: 'TOTP User',
+      email: 'totp@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const user = await models.user.findOne({
+      where: {
+        email: 'totp@example.com',
+      },
+    });
+
+    expect(user).toBeTruthy();
+
+    const setup = await services.totp.createSetup(user!);
+    const setupCode = createTotpCode(setup.secret);
+    const enableResult = await services.totp.enable(user!, setup.setupToken, setupCode);
+
+    expect(services.totp.getStatus(user!)).toMatchObject({
+      enabled: true,
+      recoveryCodesRemaining: 10,
+    });
+    expect(enableResult.recoveryCodes).toHaveLength(10);
+
+    const loginContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/login'),
+      createTestContext({
+        identifier: 'totp@example.com',
+        password: 'password123',
+      }),
+    );
+    const loginBody = loginContext.body as VerificationRequiredBody;
+
+    expect(loginBody.data).toMatchObject({
+      requiresVerification: true,
+      defaultMethod: 'totp',
+      purpose: 'login',
+      remainingAttempts: 5,
+    });
+    expect(loginBody.data.verificationToken).toEqual(expect.any(String));
+    expect(loginBody.data.methods.map((method) => method.method)).toEqual(['totp']);
+    expect(loginContext.responseHeaders['set-cookie:tilty_scaffold_access_token']).toBeUndefined();
+    expect(loginContext.responseHeaders['set-cookie:tilty_scaffold_refresh_token']).toBeUndefined();
+
+    const verifyContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/confirm'),
+      createTestContext({
+        code: createTotpCode(setup.secret),
+        method: 'totp',
+        verificationToken: loginBody.data.verificationToken,
+      }),
+    );
+    const verifyBody = verifyContext.body as AuthSessionBody;
+
+    expect(verifyBody.data.user.email).toBe('totp@example.com');
+    expect(getAuthCookie(verifyContext, 'tilty_scaffold_access_token')).toEqual(expect.any(String));
+    expect(getAuthCookie(verifyContext, 'tilty_scaffold_refresh_token')).toEqual(expect.any(String));
+  });
+
+  it('keeps the authenticator setup token valid after an invalid setup code', async () => {
+    await services.auth.register({
+      username: 'totp_retry_user',
+      displayName: 'TOTP Retry User',
+      email: 'totp-retry@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const user = await models.user.findOne({
+      where: {
+        email: 'totp-retry@example.com',
+      },
+    });
+
+    expect(user).toBeTruthy();
+
+    const setup = await services.totp.createSetup(user!);
+    const validCode = createTotpCode(setup.secret);
+    const invalidCode = validCode === '000000' ? '000001' : '000000';
+
+    await expect(services.totp.enable(user!, setup.setupToken, invalidCode)).rejects.toMatchObject({
+      code: 'TOTP_CODE_INVALID',
+      status: 401,
+    });
+
+    const enableResult = await services.totp.enable(user!, setup.setupToken, validCode);
+
+    expect(enableResult.recoveryCodes).toHaveLength(10);
+    expect(services.totp.getStatus(user!)).toMatchObject({
+      enabled: true,
+      recoveryCodesRemaining: 10,
+    });
+  });
+
+  it('toggles contact-method MFA and falls back to password verification when disabled', async () => {
+    const authService = createAuthService({
+      emailVerification: new EmailVerificationService({
+        codeCooldownMs: 60_000,
+        codeExpiresInMs: 10 * 60_000,
+        sender: {
+          send: async () => undefined,
+        },
+      }),
+      smsVerification: new SmsVerificationService({
+        codeCooldownMs: 60_000,
+        codeExpiresInMs: 10 * 60_000,
+        phoneCountryCodes: ['+86'],
+        sender: {
+          send: async () => undefined,
+        },
+      }),
+    });
+    routes = createAuthModule(authService, {
+      cookies: defaultAuthCookieConfig,
+      ssoService: services.sso,
+    }).routes;
+    const session = await services.auth.register({
+      username: 'contact_mfa_user',
+      displayName: 'Contact MFA User',
+      email: 'contact-mfa@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const user = await models.user.findOne({ where: { email: 'contact-mfa@example.com' } });
+
+    user!.emailVerified = true;
+    user!.phoneNumber = '+8613800138000';
+    user!.phoneVerified = true;
+    await user!.save();
+
+    const unverifiedContactSession = await services.auth.login({
+      identifier: 'contact-mfa@example.com',
+      password: 'password123',
+    });
+
+    const settingsContext = await runMiddleware(
+      getTestRouteHandler(routes, 'get', '/mfa'),
+      createTestContext(undefined, {}, undefined, {
+        cookies: {
+          tilty_scaffold_access_token: session.accessToken,
+        },
+      }),
+    );
+
+    expect(settingsContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        availableMethods: ['sms', 'email'],
+        effectiveMethods: [],
+        mfaRequiredForSso: true,
+        passkeyCount: 0,
+        twoStepCanDisable: true,
+        twoStepCanEnable: true,
+        twoStepEnabled: false,
+      },
+    });
+
+    const loginContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/login'),
+      createTestContext({
+        identifier: 'contact-mfa@example.com',
+        password: 'password123',
+      }),
+    );
+    const loginBody = loginContext.body as AuthSessionBody;
+
+    expect(loginBody.data.user.email).toBe('contact-mfa@example.com');
+
+    const sudoChallengeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/challenges'),
+      createTestContext(
+        {
+          purpose: 'manage_mfa',
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+    const sudoChallengeBody = sudoChallengeContext.body as VerificationRequiredBody;
+
+    expect(sudoChallengeBody.data.defaultMethod).toBe('password');
+
+    await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/confirm'),
+      createTestContext({
+        method: 'password',
+        password: 'password123',
+        verificationToken: sudoChallengeBody.data.verificationToken,
+      }),
+    );
+
+    const updateContext = await runMiddleware(
+      getTestRouteHandler(routes, 'patch', '/mfa'),
+      createTestContext(
+        {
+          enabled: true,
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(updateContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        availableMethods: ['sms', 'email'],
+        effectiveMethods: ['sms', 'email'],
+        twoStepCanDisable: true,
+        twoStepCanEnable: true,
+        twoStepEnabled: true,
+      },
+    });
+
+    await expect(
+      runMiddleware(
+        getTestRouteHandler(routes, 'patch', '/me/password'),
+        createTestContext(
+          {
+            currentPassword: 'password123',
+            password: 'newpassword123',
+            confirmPassword: 'newpassword123',
+          },
+          {},
+          undefined,
+          {
+            cookies: {
+              tilty_scaffold_access_token: unverifiedContactSession.accessToken,
+            },
+          },
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: 'AUTH_VERIFICATION_REQUIRED',
+      status: 403,
+    });
+
+    const changePasswordChallengeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/challenges'),
+      createTestContext(
+        {
+          purpose: 'change_password',
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: unverifiedContactSession.accessToken,
+          },
+        },
+      ),
+    );
+    const changePasswordChallengeBody = changePasswordChallengeContext.body as VerificationRequiredBody;
+
+    expect(changePasswordChallengeBody.data.defaultMethod).toBe('sms');
+    expect(changePasswordChallengeBody.data.methods.map((method) => method.method)).toEqual(['sms', 'email']);
+
+    const mfaRoutes = routes;
+
+    routes = createAuthModule(
+      createAuthService({
+        emailVerification: new EmailVerificationService({
+          codeCooldownMs: 60_000,
+          codeExpiresInMs: 10 * 60_000,
+          sender: {
+            send: async () => undefined,
+          },
+        }),
+        smsVerification: new SmsVerificationService({
+          codeCooldownMs: 60_000,
+          codeExpiresInMs: 10 * 60_000,
+          phoneCountryCodes: ['+86'],
+          sender: {
+            send: async () => undefined,
+          },
+        }),
+      }),
+      {
+        cookies: defaultAuthCookieConfig,
+        ssoService: services.sso,
+      },
+    ).routes;
+
+    const contactChallengeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/login'),
+      createTestContext({
+        identifier: 'contact-mfa@example.com',
+        password: 'password123',
+      }),
+    );
+    const contactChallengeBody = contactChallengeContext.body as VerificationRequiredBody;
+
+    expect(contactChallengeBody.data.defaultMethod).toBe('sms');
+    expect(contactChallengeBody.data.methods.map((method) => method.method)).toEqual(['sms', 'email']);
+
+    const smsCodeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/code'),
+      createTestContext({
+        method: 'sms',
+        verificationToken: contactChallengeBody.data.verificationToken,
+      }),
+    );
+    const smsCodeBody = smsCodeContext.body as VerificationCodeSendBody;
+
+    expect(smsCodeBody.data).toMatchObject({
+      cooldownSeconds: expect.any(Number),
+      expiresInSeconds: expect.any(Number),
+      maskedTarget: '+86138****8000',
+    });
+
+    const emailCodeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/code'),
+      createTestContext({
+        method: 'email',
+        verificationToken: contactChallengeBody.data.verificationToken,
+      }),
+    );
+    const emailCodeBody = emailCodeContext.body as VerificationCodeSendBody;
+
+    expect(emailCodeBody.data).toMatchObject({
+      cooldownSeconds: expect.any(Number),
+      expiresInSeconds: expect.any(Number),
+      maskedTarget: '***@example.com',
+    });
+
+    const disableContext = await runMiddleware(
+      getTestRouteHandler(mfaRoutes, 'patch', '/mfa'),
+      createTestContext(
+        {
+          enabled: false,
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(disableContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        availableMethods: ['sms', 'email'],
+        effectiveMethods: [],
+        twoStepCanDisable: true,
+        twoStepCanEnable: true,
+        twoStepEnabled: false,
+      },
+    });
+  });
+
+  it('toggles strong-method MFA and prefers passkey before authenticator app', async () => {
+    const authService = createAuthService({
+      emailVerification: new EmailVerificationService({
+        sender: {
+          send: async () => undefined,
+        },
+      }),
+      smsVerification: new SmsVerificationService({
+        phoneCountryCodes: ['+86'],
+        sender: {
+          send: async () => undefined,
+        },
+      }),
+    });
+    routes = createAuthModule(authService, {
+      cookies: defaultAuthCookieConfig,
+      ssoService: services.sso,
+    }).routes;
+    const session = await services.auth.register({
+      username: 'strong_mfa_user',
+      displayName: 'Strong MFA User',
+      email: 'strong-mfa@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const user = await models.user.findOne({ where: { email: 'strong-mfa@example.com' } });
+
+    user!.emailVerified = true;
+    user!.phoneNumber = '+8613800138001';
+    user!.phoneVerified = true;
+    await user!.save();
+
+    const unverifiedSession = await services.auth.login({
+      identifier: 'strong-mfa@example.com',
+      password: 'password123',
+    });
+
+    const setup = await services.totp.createSetup(user!);
+    await services.totp.enable(user!, setup.setupToken, createTotpCode(setup.secret));
+
+    const settingsContext = await runMiddleware(
+      getTestRouteHandler(routes, 'get', '/mfa'),
+      createTestContext(undefined, {}, undefined, {
+        cookies: {
+          tilty_scaffold_access_token: session.accessToken,
+        },
+      }),
+    );
+
+    expect(settingsContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        availableMethods: ['totp', 'sms', 'email'],
+        effectiveMethods: ['totp'],
+        passkeyCount: 0,
+        twoStepCanDisable: false,
+        twoStepCanEnable: true,
+        twoStepEnabled: true,
+      },
+    });
+
+    const sudoChallengeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/challenges'),
+      createTestContext(
+        {
+          purpose: 'manage_mfa',
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+    const sudoChallengeBody = sudoChallengeContext.body as VerificationRequiredBody;
+
+    expect(sudoChallengeBody.data.defaultMethod).toBe('totp');
+    expect(sudoChallengeBody.data.methods.map((method) => method.method)).toEqual(['totp']);
+
+    await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/confirm'),
+      createTestContext({
+        code: createTotpCode(setup.secret),
+        method: 'totp',
+        verificationToken: sudoChallengeBody.data.verificationToken,
+      }),
+    );
+
+    const updateContext = await runMiddleware(
+      getTestRouteHandler(routes, 'patch', '/mfa'),
+      createTestContext(
+        {
+          enabled: true,
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(updateContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        availableMethods: ['totp', 'sms', 'email'],
+        effectiveMethods: ['totp'],
+        twoStepCanDisable: false,
+        twoStepCanEnable: true,
+        twoStepEnabled: true,
+      },
+    });
+    await user!.reload();
+    expect(user!.mfaAllowedMethods).toBe('[]');
+
+    await models.authPasskey.create({
+      userId: user!.id,
+      name: 'Strong MFA passkey',
+      credentialId: 'strong-mfa-credential',
+      publicKey: Buffer.from('public-key'),
+      webauthnUserId: 'strong-mfa-webauthn-user',
+      deviceType: 'singleDevice',
+      backedUp: false,
+      transports: '[]',
+    });
+
+    const mfaRoutes = routes;
+
+    const passkeySettingsContext = await runMiddleware(
+      getTestRouteHandler(routes, 'get', '/mfa'),
+      createTestContext(undefined, {}, undefined, {
+        cookies: {
+          tilty_scaffold_access_token: session.accessToken,
+        },
+      }),
+    );
+
+    expect(passkeySettingsContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        availableMethods: ['passkey', 'totp', 'sms', 'email'],
+        effectiveMethods: ['passkey', 'totp'],
+        passkeyCount: 1,
+        twoStepCanDisable: false,
+        twoStepCanEnable: true,
+        twoStepEnabled: true,
+      },
+    });
+
+    routes = createAuthModule(
+      createAuthService({
+        emailVerification: new EmailVerificationService({
+          sender: {
+            send: async () => undefined,
+          },
+        }),
+        smsVerification: new SmsVerificationService({
+          phoneCountryCodes: ['+86'],
+          sender: {
+            send: async () => undefined,
+          },
+        }),
+      }),
+      {
+        cookies: defaultAuthCookieConfig,
+        ssoService: services.sso,
+      },
+    ).routes;
+
+    const passkeyChallengeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/login'),
+      createTestContext({
+        identifier: 'strong-mfa@example.com',
+        password: 'password123',
+      }),
+    );
+    const passkeyChallengeBody = passkeyChallengeContext.body as VerificationRequiredBody;
+
+    expect(passkeyChallengeBody.data.defaultMethod).toBe('passkey');
+    expect(passkeyChallengeBody.data.methods.map((method) => method.method)).toEqual(['passkey', 'totp']);
+
+    await expect(
+      runMiddleware(
+        getTestRouteHandler(routes, 'patch', '/me/password'),
+        createTestContext(
+          {
+            currentPassword: 'password123',
+            password: 'newpassword123',
+            confirmPassword: 'newpassword123',
+          },
+          {},
+          undefined,
+          {
+            cookies: {
+              tilty_scaffold_access_token: unverifiedSession.accessToken,
+            },
+          },
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: 'AUTH_VERIFICATION_REQUIRED',
+      status: 403,
+    });
+
+    const changePasswordChallengeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/challenges'),
+      createTestContext(
+        {
+          purpose: 'change_password',
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: unverifiedSession.accessToken,
+          },
+        },
+      ),
+    );
+    const changePasswordChallengeBody = changePasswordChallengeContext.body as VerificationRequiredBody;
+
+    expect(changePasswordChallengeBody.data.defaultMethod).toBe('passkey');
+    expect(changePasswordChallengeBody.data.methods.map((method) => method.method)).toEqual(['passkey', 'totp']);
+
+    await expect(
+      runMiddleware(
+        getTestRouteHandler(mfaRoutes, 'patch', '/mfa'),
+        createTestContext(
+          {
+            enabled: false,
+          },
+          {},
+          undefined,
+          {
+            cookies: {
+              tilty_scaffold_access_token: session.accessToken,
+            },
+          },
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: 'MFA_REQUIRED_FOR_STRONG_VERIFIER',
+      status: 409,
+    });
+  });
+
+  it('counts invalid passkey verification responses against challenge attempts', async () => {
+    await services.auth.register(
+      {
+        username: 'passkey_attempt_user',
+        displayName: 'Passkey Attempt User',
+        email: 'passkey-attempt@example.com',
+        password: 'password123',
+        confirmPassword: 'password123',
+      },
+      {
+        deviceId: 'passkey-attempt-device',
+        ipAddress: '203.0.113.50',
+        userAgent: 'Mozilla/5.0 Passkey Attempt Browser',
+      },
+    );
+    const user = await models.user.findOne({ where: { email: 'passkey-attempt@example.com' } });
+
+    await models.authPasskey.create({
+      userId: user!.id,
+      name: 'Registered passkey',
+      credentialId: 'registered-passkey-credential',
+      publicKey: Buffer.from('public-key'),
+      webauthnUserId: 'registered-webauthn-user',
+      deviceType: 'singleDevice',
+      backedUp: false,
+      transports: '[]',
+    });
+
+    const context = {
+      deviceId: 'passkey-attempt-device',
+      ipAddress: '203.0.113.50',
+      userAgent: 'Mozilla/5.0 Passkey Attempt Browser',
+    };
+    const loginResult = await services.auth.login(
+      {
+        identifier: 'passkey-attempt@example.com',
+        password: 'password123',
+      },
+      context,
+    );
+
+    if (!('requiresVerification' in loginResult)) {
+      throw new Error('Passkey challenge was expected for this account.');
+    }
+
+    await services.auth.createPasskeyVerificationOptions(loginResult.verificationToken, context);
+    const invalidPasskeyResponse = {
+      id: 'missing-passkey-credential',
+      rawId: 'missing-passkey-credential',
+      response: {},
+      type: 'public-key',
+    } as NonNullable<Parameters<typeof services.auth.verifyAuthenticationChallenge>[0]['passkeyResponse']>;
+
+    await expect(
+      services.auth.verifyAuthenticationChallenge(
+        {
+          method: 'passkey',
+          passkeyResponse: invalidPasskeyResponse,
+          verificationToken: loginResult.verificationToken,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: 'AUTH_VERIFICATION_INVALID',
+      details: {
+        remainingAttempts: 4,
+      },
+      status: 401,
+    });
+  });
+
+  it('uses password verification for first-time sensitive security setup when no verification method exists', async () => {
+    const session = await services.auth.register({
+      username: 'first_mfa_user',
+      displayName: 'First MFA User',
+      email: 'first-mfa@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+
+    const challengeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/challenges'),
+      createTestContext(
+        {
+          purpose: 'manage_totp',
+        },
+        {},
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: session.accessToken,
+          },
+        },
+      ),
+    );
+    const challengeBody = challengeContext.body as VerificationRequiredBody;
+
+    expect(challengeBody.data).toMatchObject({
+      requiresVerification: true,
+      defaultMethod: 'password',
+      purpose: 'manage_totp',
+    });
+    expect(challengeBody.data.methods.map((method) => method.method)).toEqual(['password']);
+
+    await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/verification/confirm'),
+      createTestContext({
+        method: 'password',
+        password: 'password123',
+        verificationToken: challengeBody.data.verificationToken,
+      }),
+    );
+
+    const setupContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/totp/setup'),
+      createTestContext(undefined, {}, undefined, {
+        cookies: {
+          tilty_scaffold_access_token: session.accessToken,
+        },
+      }),
+    );
+
+    expect(setupContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        setupToken: expect.any(String),
+        secret: expect.any(String),
+      },
+    });
+  });
+
+  it('lists active login devices and revokes other sessions server-side', async () => {
+    const primarySession = await services.auth.register(
+      {
+        username: 'device_user',
+        displayName: 'Device User',
+        email: 'devices@example.com',
+        password: 'password123',
+        confirmPassword: 'password123',
+      },
+      {
+        deviceId: 'primary-device',
+        ipAddress: '203.0.113.10',
+        userAgent:
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36',
+      },
+    );
+    const secondaryResult = await services.auth.login(
+      {
+        identifier: 'devices@example.com',
+        password: 'password123',
+      },
+      {
+        deviceId: 'secondary-device',
+        ipAddress: '203.0.113.20',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
+      },
+    );
+
+    if ('requiresVerification' in secondaryResult) {
+      throw new Error('Verification challenge was not expected for this account.');
+    }
+
+    const listContext = await runMiddleware(
+      getTestRouteHandler(routes, 'get', '/devices'),
+      createTestContext(undefined, {}, undefined, {
+        cookies: {
+          tilty_scaffold_access_token: primarySession.accessToken,
+        },
+      }),
+    );
+    const listBody = listContext.body as AuthDeviceSessionsBody;
+
+    expect(listBody.data.sessions).toHaveLength(2);
+    expect(listBody.data.sessions.filter((device) => device.isCurrent)).toHaveLength(1);
+    expect(listBody.data.sessions.map((device) => device.deviceType).sort()).toEqual(['desktop', 'desktop']);
+    expect(listBody.data.sessions.map((device) => device.ipAddress).sort()).toEqual(['203.0.113.10', '203.0.113.20']);
+
+    const revokeContext = await runMiddleware(
+      getTestRouteHandler(routes, 'delete', '/devices/others'),
+      createTestContext(undefined, {}, undefined, {
+        cookies: {
+          tilty_scaffold_access_token: primarySession.accessToken,
+        },
+      }),
+    );
+
+    expect(revokeContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        revoked: true,
+      },
+    });
+    await expect(services.auth.getCurrentUser(secondaryResult.accessToken)).rejects.toMatchObject({
+      code: 'AUTH_SESSION_INVALID',
+      status: 401,
+    });
+    await expect(services.auth.getCurrentUser(primarySession.accessToken)).resolves.toMatchObject({
+      email: 'devices@example.com',
+    });
+  });
+
   it('rejects unsafe SSO redirect paths at the request boundary', async () => {
     for (const redirect of ['//evil.example.com', '/\\evil', '/dashboard\nx']) {
       const context = await runMiddlewares(
@@ -930,11 +2435,57 @@ interface AuthSessionBody {
     user: {
       username: string;
       displayName: string;
+      gender?: string;
+      birthday?: string;
+      bio?: string;
+      location?: string;
+      websiteUrl?: string;
       email: string;
       emailVerified: boolean;
       phoneNumber?: string;
       phoneVerified: boolean;
     };
+  };
+}
+
+interface VerificationRequiredBody {
+  data: {
+    defaultMethod: string;
+    expiresAt: string;
+    methods: Array<{
+      label: string;
+      method: string;
+      maskedTarget?: string;
+    }>;
+    purpose: string;
+    remainingAttempts: number;
+    requiresVerification: true;
+    verificationToken: string;
+  };
+}
+
+interface VerificationCodeSendBody {
+  data: {
+    cooldownSeconds: number;
+    expiresInSeconds: number;
+    maskedTarget?: string;
+  };
+}
+
+interface AuthDeviceSessionsBody {
+  data: {
+    sessions: Array<{
+      id: string;
+      deviceName: string;
+      deviceType: string;
+      browser: string;
+      os: string;
+      ipAddress: string;
+      lastActiveAt: string;
+      createdAt: string;
+      expiresAt: string;
+      isCurrent: boolean;
+    }>;
   };
 }
 
@@ -949,11 +2500,18 @@ interface AuthUserBody {
   data: {
     username: string;
     displayName: string;
+    gender?: string;
+    birthday?: string;
+    bio?: string;
+    location?: string;
+    websiteUrl?: string;
     email: string;
     emailVerified: boolean;
     phoneNumber?: string;
     phoneVerified: boolean;
     avatarUrl?: string;
+    profileBannerUrl?: string;
+    profileBackgroundUrl?: string;
   };
 }
 
@@ -983,4 +2541,11 @@ class RejectingCompareAndSetCacheStore extends MemoryCacheStore {
 
     return false;
   }
+}
+
+interface CreateAuthServiceOptions {
+  cacheStore?: MemoryCacheStore;
+  emailVerification?: EmailVerificationService;
+  fileStorage?: FileStorage;
+  smsVerification?: SmsVerificationService;
 }

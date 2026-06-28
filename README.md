@@ -27,8 +27,13 @@ npm run dev
 output.
 
 Frontend runs on `http://localhost:8011`. Complete `/setup` to write
-`backend/config.toml` and apply migrations. Backend defaults to
-`http://localhost:3000`; Swagger UI is available at `/api/docs`.
+`backend/config.toml`, apply migrations, and seed built-in access control.
+Backend defaults to `http://localhost:3000`; Swagger UI is available at
+`/api/docs`.
+
+After setup, runtime configuration is managed from System Settings. That page
+is available only to `ROOT` users with a configured passkey or authenticator app
+and requires step-up verification before settings are displayed or saved.
 
 For production, run `npm run build` and `npm run start:backend`. The backend
 serves the compiled frontend files from `frontend/dist`.

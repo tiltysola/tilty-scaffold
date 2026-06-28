@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, readFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { configureLogger, flushLogger, logger } from '../src/core/logger';
+import { flushLogger, logger } from '../src/core/logger';
+import { configureLogger } from '../src/infra/logger';
 
 describe('logger', () => {
   afterEach(async () => {

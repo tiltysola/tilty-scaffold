@@ -34,6 +34,14 @@ const setupEnvironmentKeys = [
   'AUTH_TOKEN_SECRET',
   'AUTH_ACCESS_TOKEN_TTL_SECONDS',
   'AUTH_REFRESH_TOKEN_TTL_SECONDS',
+  'AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS',
+  'AUTH_VERIFICATION_MAX_ATTEMPTS',
+  'AUTH_VERIFICATION_SUDO_TTL_SECONDS',
+  'AUTH_PASSKEY_RP_NAME',
+  'AUTH_PASSKEY_REGISTRATION_TTL_SECONDS',
+  'AUTH_PASSKEY_OPERATION_TIMEOUT_MS',
+  'AUTH_TOTP_ISSUER',
+  'AUTH_TOTP_SETUP_TTL_SECONDS',
   'AUTH_ACCESS_TOKEN_COOKIE_NAME',
   'AUTH_REFRESH_TOKEN_COOKIE_NAME',
   'AUTH_COOKIE_SAME_SITE',
@@ -66,11 +74,170 @@ const setupEnvironmentKeys = [
   'SSO_PROFILES',
 ] as const;
 
+function createProfileOptionsOperation(
+  summary: string,
+  parameters: Array<{ description: string; name: string; required?: boolean }>,
+  options: { authenticated?: boolean } = {},
+) {
+  return {
+    tags: ['Profile Options'],
+    summary,
+    ...(options.authenticated
+      ? {
+          security: [
+            {
+              accessCookieAuth: [],
+            },
+          ],
+        }
+      : {}),
+    parameters: parameters.map((parameter) => ({
+      name: parameter.name,
+      in: 'query',
+      required: parameter.required ?? false,
+      schema: {
+        type: 'string',
+      },
+      description: parameter.description,
+    })),
+    responses: {
+      '200': {
+        description: 'Profile options',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ProfileOptionsResponse',
+            },
+          },
+        },
+      },
+      ...(options.authenticated
+        ? {
+            '401': {
+              $ref: '#/components/responses/AuthRequired',
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+function createManagedUserImageOperation(summary: string, fieldName: string) {
+  return {
+    tags: ['Users'],
+    summary,
+    security: [
+      {
+        accessCookieAuth: [],
+      },
+    ],
+    parameters: [
+      {
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: {
+          type: 'string',
+          format: 'uuid',
+        },
+      },
+    ],
+    requestBody: {
+      required: true,
+      content: {
+        'multipart/form-data': {
+          schema: {
+            type: 'object',
+            required: [fieldName],
+            properties: {
+              [fieldName]: {
+                type: 'string',
+                format: 'binary',
+              },
+            },
+          },
+        },
+      },
+    },
+    responses: {
+      '200': {
+        description: 'Managed user details',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ManagedUserDetailsResponse',
+            },
+          },
+        },
+      },
+      '400': {
+        $ref: '#/components/responses/ValidationError',
+      },
+      '401': {
+        $ref: '#/components/responses/AuthRequired',
+      },
+      '403': {
+        $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
+      },
+      '404': {
+        $ref: '#/components/responses/NotFound',
+      },
+      '413': {
+        $ref: '#/components/responses/ValidationError',
+      },
+    },
+  };
+}
+
+function createManagedUserImageDeleteOperation(summary: string) {
+  return {
+    tags: ['Users'],
+    summary,
+    security: [
+      {
+        accessCookieAuth: [],
+      },
+    ],
+    parameters: [
+      {
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: {
+          type: 'string',
+          format: 'uuid',
+        },
+      },
+    ],
+    responses: {
+      '200': {
+        description: 'Managed user details',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ManagedUserDetailsResponse',
+            },
+          },
+        },
+      },
+      '401': {
+        $ref: '#/components/responses/AuthRequired',
+      },
+      '403': {
+        $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
+      },
+      '404': {
+        $ref: '#/components/responses/NotFound',
+      },
+    },
+  };
+}
+
 export const openApiDocument = {
   openapi: '3.1.0',
   info: {
     title: 'Tilty Scaffold API',
-    version: '0.1.5',
+    version: '0.1.8',
   },
   servers: [
     {
@@ -90,6 +257,14 @@ export const openApiDocument = {
     {
       name: 'Users',
       description: 'User administration endpoints',
+    },
+    {
+      name: 'System Settings',
+      description: 'System settings endpoints',
+    },
+    {
+      name: 'Profile Options',
+      description: 'Profile option lookup endpoints',
     },
     {
       name: 'Health',
@@ -571,6 +746,91 @@ export const openApiDocument = {
         },
       },
     },
+    '/api/system-settings/': {
+      get: {
+        tags: ['System Settings'],
+        summary: 'Return system settings',
+        description:
+          'Requires an authenticated ROOT user with a configured passkey or authenticator app and a verified system_settings sudo grant.',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'System settings',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/SetupDefaults',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/SystemSettingsAccessRequired',
+          },
+        },
+      },
+      put: {
+        tags: ['System Settings'],
+        summary: 'Update system settings',
+        description:
+          'Requires an authenticated ROOT user with a configured passkey or authenticator app, a verified system_settings sudo grant, and an allowed unsafe request origin.',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SystemSettingsUpdateRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'System settings updated',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SystemSettingsUpdateResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrSystemSettingsAccessRequired',
+          },
+        },
+      },
+    },
     '/api/auth/config': {
       get: {
         tags: ['Auth'],
@@ -748,7 +1008,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/AuthRequired',
           },
           '403': {
-            $ref: '#/components/responses/CsrfForbidden',
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
           },
           '404': {
             $ref: '#/components/responses/EmailVerificationDisabled',
@@ -811,7 +1071,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/AuthRequired',
           },
           '403': {
-            $ref: '#/components/responses/CsrfForbidden',
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
           },
           '404': {
             $ref: '#/components/responses/EmailVerificationDisabled',
@@ -859,7 +1119,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/AuthRequired',
           },
           '403': {
-            $ref: '#/components/responses/CsrfForbidden',
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
           },
           '404': {
             $ref: '#/components/responses/SmsVerificationDisabled',
@@ -922,7 +1182,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/AuthRequired',
           },
           '403': {
-            $ref: '#/components/responses/CsrfForbidden',
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
           },
           '404': {
             $ref: '#/components/responses/SmsVerificationDisabled',
@@ -992,11 +1252,11 @@ export const openApiDocument = {
         },
         responses: {
           '200': {
-            description: 'Authenticated browser session metadata; tokens are set in HttpOnly cookies',
+            description: 'Authenticated browser session metadata or a required verification challenge',
             content: {
               'application/json': {
                 schema: {
-                  $ref: '#/components/schemas/AuthSessionResponse',
+                  $ref: '#/components/schemas/LoginResponse',
                 },
               },
             },
@@ -1101,7 +1361,52 @@ export const openApiDocument = {
             $ref: '#/components/responses/AuthRequired',
           },
           '403': {
-            $ref: '#/components/responses/CsrfForbidden',
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/me/password': {
+      patch: {
+        tags: ['Auth'],
+        summary: "Change the authenticated user's password",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/ChangePasswordRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Password change result',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PasswordChangeResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/ChangePasswordUnauthorized',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
           },
           '429': {
             $ref: '#/components/responses/RateLimited',
@@ -1251,6 +1556,907 @@ export const openApiDocument = {
           },
         },
       },
+      delete: {
+        tags: ['Auth'],
+        summary: "Remove the authenticated user's avatar",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Updated authenticated user',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/AuthUser',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/profile-banner': {
+      post: {
+        tags: ['Auth'],
+        summary: "Upload the authenticated user's profile banner",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['profileBanner'],
+                properties: {
+                  profileBanner: {
+                    type: 'string',
+                    format: 'binary',
+                    description: 'JPEG, PNG, WebP, or GIF image.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated authenticated user',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/AuthUser',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '413': {
+            description: 'Uploaded file is too large',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+      delete: {
+        tags: ['Auth'],
+        summary: "Remove the authenticated user's profile banner",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Updated authenticated user',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/AuthUser',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/profile-background': {
+      post: {
+        tags: ['Auth'],
+        summary: "Upload the authenticated user's profile background",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['profileBackground'],
+                properties: {
+                  profileBackground: {
+                    type: 'string',
+                    format: 'binary',
+                    description: 'JPEG, PNG, WebP, or GIF image.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated authenticated user',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/AuthUser',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '413': {
+            description: 'Uploaded file is too large',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+      delete: {
+        tags: ['Auth'],
+        summary: "Remove the authenticated user's profile background",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Updated authenticated user',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    {
+                      $ref: '#/components/schemas/ApiSuccess',
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          $ref: '#/components/schemas/AuthUser',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/totp': {
+      get: {
+        tags: ['Auth'],
+        summary: "Return the authenticated user's authenticator-app status",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Authenticator-app status',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/TotpStatusResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+        },
+      },
+    },
+    '/api/auth/totp/setup': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Create authenticator-app setup options',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Authenticator-app setup options',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/TotpSetupResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/totp/enable': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Enable authenticator-app verification',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/TotpEnableRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Authenticator-app verification enabled',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/TotpEnableResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/totp/disable': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Disable authenticator-app verification',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Authenticator-app verification disabled',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/TotpStatusResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/totp/recovery-codes': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Regenerate authenticator-app recovery codes',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'New recovery codes',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/TotpRecoveryCodesResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/verification/challenges': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Create a step-up verification challenge',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/VerificationChallengeCreateRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Verification challenge or existing sudo grant',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/VerificationChallengeCreateResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/verification/code': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Send an email or SMS verification code for a challenge',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/VerificationCodeSendRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Verification send metadata',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/EmailVerificationSendResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/verification/passkey/options': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Create passkey authentication options for a challenge',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/VerificationTokenRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'WebAuthn authentication options',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/WebAuthnOptionsResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/verification/confirm': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Confirm a sign-in or step-up verification challenge',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/VerificationConfirmRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Authenticated session or verified sudo grant',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/VerificationConfirmResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/mfa': {
+      get: {
+        tags: ['Auth'],
+        summary: "Return the authenticated user's MFA settings",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'MFA settings',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/MfaSettingsResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+        },
+      },
+      patch: {
+        tags: ['Auth'],
+        summary: "Update the authenticated user's MFA settings",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/MfaSettingsUpdateRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated MFA settings',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/MfaSettingsResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/passkeys': {
+      get: {
+        tags: ['Auth'],
+        summary: "List the authenticated user's passkeys",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Passkey list',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PasskeyListResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+        },
+      },
+      post: {
+        tags: ['Auth'],
+        summary: 'Verify and add a passkey',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/PasskeyRegistrationVerifyRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Added passkey',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PasskeySummaryResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/passkeys/registration-options': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Create passkey registration options',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'WebAuthn registration options',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PasskeyRegistrationOptionsResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/passkeys/{passkeyId}': {
+      delete: {
+        tags: ['Auth'],
+        summary: "Remove one of the authenticated user's passkeys",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'passkeyId',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Passkey deleted',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/DeletePasskeyResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrVerificationRequired',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/devices': {
+      get: {
+        tags: ['Auth'],
+        summary: "List the authenticated user's active devices",
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Active device sessions',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/AuthDeviceSessionListResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+        },
+      },
+    },
+    '/api/auth/devices/others': {
+      delete: {
+        tags: ['Auth'],
+        summary: 'Revoke all other authenticated device sessions',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Other devices revoked',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/RevokeAuthDeviceSessionsResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
+    '/api/auth/devices/{sessionId}': {
+      delete: {
+        tags: ['Auth'],
+        summary: 'Revoke an authenticated device session',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'sessionId',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Device session revoked',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/RevokeAuthDeviceSessionsResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfForbidden',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
     },
     '/api/auth/sso/config': {
       get: {
@@ -1325,6 +2531,8 @@ export const openApiDocument = {
       get: {
         tags: ['Auth'],
         summary: 'Redirect an authenticated user to bind an SSO provider',
+        description:
+          'Requires an authenticated user with a verified manage_sso sudo grant before redirecting to the configured SSO provider.',
         security: [
           {
             accessCookieAuth: [],
@@ -1337,6 +2545,8 @@ export const openApiDocument = {
             required: false,
             schema: {
               type: 'string',
+              description:
+                'Same-origin application path. Absolute URLs, protocol-relative URLs, and backslashes are rejected.',
               example: '/profile',
             },
           },
@@ -1359,6 +2569,9 @@ export const openApiDocument = {
           },
           '401': {
             $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/SsoBindVerificationRequired',
           },
           '404': {
             $ref: '#/components/responses/SsoDisabled',
@@ -1463,7 +2676,7 @@ export const openApiDocument = {
         },
         responses: {
           '200': {
-            description: 'Authenticated browser session metadata; tokens are set in HttpOnly cookies',
+            description: 'Authenticated browser session metadata',
             content: {
               'application/json': {
                 schema: {
@@ -1549,11 +2762,11 @@ export const openApiDocument = {
         },
         responses: {
           '200': {
-            description: 'Authenticated browser session metadata; tokens are set in HttpOnly cookies',
+            description: 'Authenticated browser session metadata or a required verification challenge',
             content: {
               'application/json': {
                 schema: {
-                  $ref: '#/components/schemas/AuthSessionResponse',
+                  $ref: '#/components/schemas/LoginResponse',
                 },
               },
             },
@@ -1583,6 +2796,8 @@ export const openApiDocument = {
       get: {
         tags: ['Users'],
         summary: 'List users and available roles',
+        description:
+          'Requires USER_LIST or ROOT permission, a configured passkey or authenticator app, and verified user_management access.',
         security: [
           {
             accessCookieAuth: [],
@@ -1624,7 +2839,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/AuthRequired',
           },
           '403': {
-            $ref: '#/components/responses/Forbidden',
+            $ref: '#/components/responses/UserManagementAccessRequired',
           },
         },
       },
@@ -1633,6 +2848,8 @@ export const openApiDocument = {
       put: {
         tags: ['Users'],
         summary: 'Update a managed user',
+        description:
+          'Requires USER_ADMIN or ROOT permission, a configured passkey or authenticator app, verified user_management access, and an allowed unsafe request origin.',
         security: [
           {
             accessCookieAuth: [],
@@ -1689,7 +2906,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/AuthRequired',
           },
           '403': {
-            $ref: '#/components/responses/CsrfOrPermissionForbidden',
+            $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
           },
           '404': {
             description: 'User or role was not found',
@@ -1718,6 +2935,8 @@ export const openApiDocument = {
       put: {
         tags: ['Users'],
         summary: 'Replace a user role assignment set',
+        description:
+          'Requires USER_ADMIN or ROOT permission, a configured passkey or authenticator app, verified user_management access, and an allowed unsafe request origin.',
         security: [
           {
             accessCookieAuth: [],
@@ -1774,7 +2993,7 @@ export const openApiDocument = {
             $ref: '#/components/responses/AuthRequired',
           },
           '403': {
-            $ref: '#/components/responses/CsrfOrPermissionForbidden',
+            $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
           },
           '404': {
             description: 'User or role was not found',
@@ -1798,6 +3017,408 @@ export const openApiDocument = {
           },
         },
       },
+    },
+    '/api/users/{id}/details': {
+      get: {
+        tags: ['Users'],
+        summary: 'Return managed user details for administrator editing',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Managed user details',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ManagedUserDetailsResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/UserManagementAccessRequired',
+          },
+          '404': {
+            $ref: '#/components/responses/NotFound',
+          },
+        },
+      },
+    },
+    '/api/users/{id}/mfa': {
+      patch: {
+        tags: ['Users'],
+        summary: 'Update managed user MFA settings',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/MfaSettingsUpdateRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Managed user security state',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ManagedUserSecurityResponse',
+                },
+              },
+            },
+          },
+          '400': {
+            $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
+          },
+          '404': {
+            $ref: '#/components/responses/NotFound',
+          },
+          '409': {
+            $ref: '#/components/responses/Conflict',
+          },
+        },
+      },
+    },
+    '/api/users/{id}/totp/disable': {
+      post: {
+        tags: ['Users'],
+        summary: 'Remove the managed user authenticator app',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Managed user security state',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ManagedUserSecurityResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
+          },
+          '404': {
+            $ref: '#/components/responses/NotFound',
+          },
+          '409': {
+            $ref: '#/components/responses/Conflict',
+          },
+        },
+      },
+    },
+    '/api/users/{id}/passkeys/{passkeyId}': {
+      delete: {
+        tags: ['Users'],
+        summary: 'Remove a managed user passkey',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+          {
+            name: 'passkeyId',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Managed user security state',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ManagedUserSecurityResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
+          },
+          '404': {
+            $ref: '#/components/responses/NotFound',
+          },
+        },
+      },
+    },
+    '/api/users/{id}/devices': {
+      get: {
+        tags: ['Users'],
+        summary: 'List managed user login devices',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Managed user login devices',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/AuthDeviceSessionListResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/UserManagementAccessRequired',
+          },
+          '404': {
+            $ref: '#/components/responses/NotFound',
+          },
+        },
+      },
+    },
+    '/api/users/{id}/sso-identities': {
+      get: {
+        tags: ['Users'],
+        summary: 'List managed user SSO bindings',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Managed user SSO bindings',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SsoIdentityListResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/UserManagementAccessRequired',
+          },
+          '404': {
+            $ref: '#/components/responses/NotFound',
+          },
+        },
+      },
+    },
+    '/api/users/{id}/sso-identities/{providerId}': {
+      delete: {
+        tags: ['Users'],
+        summary: 'Remove a managed user SSO binding',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+          {
+            name: 'providerId',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 64,
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Remaining managed user SSO bindings',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SsoIdentityListResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
+          },
+          '404': {
+            $ref: '#/components/responses/NotFound',
+          },
+        },
+      },
+    },
+    '/api/users/{id}/avatar': {
+      post: createManagedUserImageOperation('Upload a managed user avatar', 'avatar'),
+      delete: createManagedUserImageDeleteOperation('Remove a managed user avatar'),
+    },
+    '/api/users/{id}/profile-banner': {
+      post: createManagedUserImageOperation('Upload a managed user profile banner', 'profileBanner'),
+      delete: createManagedUserImageDeleteOperation('Remove a managed user profile banner'),
+    },
+    '/api/users/{id}/profile-background': {
+      post: createManagedUserImageOperation('Upload a managed user profile background', 'profileBackground'),
+      delete: createManagedUserImageDeleteOperation('Remove a managed user profile background'),
+    },
+    '/api/profile-options/genders': {
+      get: createProfileOptionsOperation(
+        'Return gender profile options',
+        [
+          {
+            name: 'q',
+            description: 'Optional gender search text.',
+          },
+        ],
+        { authenticated: true },
+      ),
+    },
+    '/api/profile-options/locations/countries': {
+      get: createProfileOptionsOperation('Return country location options', [
+        {
+          name: 'q',
+          description: 'Optional country search text.',
+        },
+      ]),
+    },
+    '/api/profile-options/locations/regions': {
+      get: createProfileOptionsOperation('Return region location options', [
+        {
+          name: 'country',
+          required: true,
+          description: 'Selected country name, code, or option id.',
+        },
+        {
+          name: 'q',
+          description: 'Optional region search text.',
+        },
+      ]),
+    },
+    '/api/profile-options/locations/cities': {
+      get: createProfileOptionsOperation('Return city location options', [
+        {
+          name: 'country',
+          required: true,
+          description: 'Selected country name, code, or option id.',
+        },
+        {
+          name: 'region',
+          required: true,
+          description: 'Selected region name, code, or option id.',
+        },
+        {
+          name: 'q',
+          description: 'Optional city search text.',
+        },
+      ]),
     },
     '/api/health': {
       get: {
@@ -1930,8 +3551,72 @@ export const openApiDocument = {
           },
         },
       },
+      ChangePasswordUnauthorized: {
+        description: 'Authentication is required, invalid, or the current password is invalid',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+            examples: {
+              authRequired: {
+                summary: 'Missing access token',
+                value: {
+                  code: 401,
+                  error: 'AUTH_REQUIRED',
+                  message: 'Authentication is required.',
+                },
+              },
+              invalidCredentials: {
+                summary: 'Invalid current password',
+                value: {
+                  code: 401,
+                  error: 'AUTH_INVALID_CREDENTIALS',
+                  message: 'The account identifier or password is invalid.',
+                },
+              },
+              invalidToken: {
+                summary: 'Invalid access token',
+                value: {
+                  code: 401,
+                  error: 'AUTH_INVALID_TOKEN',
+                  message: 'Authentication token is invalid.',
+                },
+              },
+              expiredToken: {
+                summary: 'Expired access token',
+                value: {
+                  code: 401,
+                  error: 'AUTH_TOKEN_EXPIRED',
+                  message: 'Authentication token has expired.',
+                },
+              },
+            },
+          },
+        },
+      },
       Forbidden: {
         description: 'The authenticated user does not have the required permission',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
+      NotFound: {
+        description: 'The requested resource was not found',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
+      Conflict: {
+        description: 'The requested update conflicts with current resource state',
         content: {
           'application/json': {
             schema: {
@@ -1956,6 +3641,238 @@ export const openApiDocument = {
           'application/json': {
             schema: {
               $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
+      CsrfOrVerificationRequired: {
+        description: 'The unsafe request origin is missing or not allowed, or step-up verification is required',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+            examples: {
+              csrfForbidden: {
+                summary: 'Unsafe request origin not allowed',
+                value: {
+                  code: 403,
+                  error: 'CSRF_ORIGIN_INVALID',
+                  message: 'Request origin is not allowed.',
+                },
+              },
+              verificationRequired: {
+                summary: 'Missing step-up verification',
+                value: {
+                  code: 403,
+                  error: 'AUTH_VERIFICATION_REQUIRED',
+                  message: 'Additional authentication is required.',
+                },
+              },
+            },
+          },
+        },
+      },
+      VerificationRequiredForbidden: {
+        description: 'Step-up verification is required before continuing',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+            examples: {
+              verificationRequired: {
+                summary: 'Missing step-up verification',
+                value: {
+                  code: 403,
+                  error: 'AUTH_VERIFICATION_REQUIRED',
+                  message: 'Additional authentication is required.',
+                },
+              },
+            },
+          },
+        },
+      },
+      SsoBindVerificationRequired: {
+        description: 'A verified manage_sso step-up grant is required before starting profile SSO binding',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+            examples: {
+              verificationRequired: {
+                summary: 'Missing manage_sso step-up verification',
+                value: {
+                  code: 403,
+                  error: 'AUTH_VERIFICATION_REQUIRED',
+                  message: 'Additional authentication is required.',
+                },
+              },
+            },
+          },
+        },
+      },
+      SystemSettingsAccessRequired: {
+        description:
+          'ROOT permission, a configured passkey or authenticator app, and verified system_settings access are required',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+            examples: {
+              forbidden: {
+                summary: 'Missing ROOT permission',
+                value: {
+                  code: 403,
+                  error: 'AUTH_FORBIDDEN',
+                  message: 'You do not have permission to perform this action.',
+                },
+              },
+              strongVerifierRequired: {
+                summary: 'Missing passkey or authenticator app',
+                value: {
+                  code: 403,
+                  error: 'SYSTEM_SETTINGS_STRONG_VERIFICATION_REQUIRED',
+                  message: 'System settings require a passkey or authenticator app before access is allowed.',
+                },
+              },
+              verificationRequired: {
+                summary: 'Missing step-up verification',
+                value: {
+                  code: 403,
+                  error: 'AUTH_VERIFICATION_REQUIRED',
+                  message: 'Additional authentication is required.',
+                },
+              },
+            },
+          },
+        },
+      },
+      CsrfOrSystemSettingsAccessRequired: {
+        description:
+          'The unsafe request origin is missing or not allowed, or system settings access requirements are not satisfied',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+            examples: {
+              csrfForbidden: {
+                summary: 'Unsafe request origin not allowed',
+                value: {
+                  code: 403,
+                  error: 'CSRF_ORIGIN_INVALID',
+                  message: 'Request origin is not allowed.',
+                },
+              },
+              forbidden: {
+                summary: 'Missing ROOT permission',
+                value: {
+                  code: 403,
+                  error: 'AUTH_FORBIDDEN',
+                  message: 'You do not have permission to perform this action.',
+                },
+              },
+              strongVerifierRequired: {
+                summary: 'Missing passkey or authenticator app',
+                value: {
+                  code: 403,
+                  error: 'SYSTEM_SETTINGS_STRONG_VERIFICATION_REQUIRED',
+                  message: 'System settings require a passkey or authenticator app before access is allowed.',
+                },
+              },
+              verificationRequired: {
+                summary: 'Missing step-up verification',
+                value: {
+                  code: 403,
+                  error: 'AUTH_VERIFICATION_REQUIRED',
+                  message: 'Additional authentication is required.',
+                },
+              },
+            },
+          },
+        },
+      },
+      UserManagementAccessRequired: {
+        description:
+          'User list/admin permission, a configured passkey or authenticator app, and verified user_management access are required',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+            examples: {
+              forbidden: {
+                summary: 'Missing user permission',
+                value: {
+                  code: 403,
+                  error: 'AUTH_FORBIDDEN',
+                  message: 'You do not have permission to perform this action.',
+                },
+              },
+              strongVerifierRequired: {
+                summary: 'Missing passkey or authenticator app',
+                value: {
+                  code: 403,
+                  error: 'USER_MANAGEMENT_STRONG_VERIFICATION_REQUIRED',
+                  message: 'User management requires a passkey or authenticator app before access is allowed.',
+                },
+              },
+              verificationRequired: {
+                summary: 'Missing step-up verification',
+                value: {
+                  code: 403,
+                  error: 'AUTH_VERIFICATION_REQUIRED',
+                  message: 'Additional authentication is required.',
+                },
+              },
+            },
+          },
+        },
+      },
+      CsrfOrUserManagementAccessRequired: {
+        description:
+          'The unsafe request origin is missing or not allowed, or user management access requirements are not satisfied',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+            examples: {
+              csrfForbidden: {
+                summary: 'Unsafe request origin not allowed',
+                value: {
+                  code: 403,
+                  error: 'CSRF_ORIGIN_INVALID',
+                  message: 'Request origin is not allowed.',
+                },
+              },
+              forbidden: {
+                summary: 'Missing user permission',
+                value: {
+                  code: 403,
+                  error: 'AUTH_FORBIDDEN',
+                  message: 'You do not have permission to perform this action.',
+                },
+              },
+              strongVerifierRequired: {
+                summary: 'Missing passkey or authenticator app',
+                value: {
+                  code: 403,
+                  error: 'USER_MANAGEMENT_STRONG_VERIFICATION_REQUIRED',
+                  message: 'User management requires a passkey or authenticator app before access is allowed.',
+                },
+              },
+              verificationRequired: {
+                summary: 'Missing step-up verification',
+                value: {
+                  code: 403,
+                  error: 'AUTH_VERIFICATION_REQUIRED',
+                  message: 'Additional authentication is required.',
+                },
+              },
             },
           },
         },
@@ -2171,6 +4088,52 @@ export const openApiDocument = {
           data: {},
         },
       },
+      ProfileOption: {
+        type: 'object',
+        required: ['id', 'label', 'value'],
+        properties: {
+          id: {
+            type: 'string',
+            example: 'country:233',
+          },
+          label: {
+            type: 'string',
+            example: 'United States',
+          },
+          value: {
+            type: 'string',
+            example: 'United States',
+          },
+          description: {
+            type: 'string',
+            example: 'US',
+          },
+        },
+      },
+      ProfileOptionsResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['options'],
+                properties: {
+                  options: {
+                    type: 'array',
+                    items: {
+                      $ref: '#/components/schemas/ProfileOption',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
       SetupEnvironment: {
         type: 'object',
         description:
@@ -2253,6 +4216,41 @@ export const openApiDocument = {
             description: 'When provided, validates only the setup step represented by this identifier.',
           },
         },
+      },
+      SystemSettingsUpdateRequest: {
+        type: 'object',
+        required: ['environment'],
+        properties: {
+          environment: {
+            $ref: '#/components/schemas/SetupEnvironment',
+          },
+        },
+      },
+      SystemSettingsUpdateResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['restartRequired', 'updated'],
+                properties: {
+                  restartRequired: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                  updated: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                },
+              },
+            },
+          },
+        ],
       },
       SetupConnectionTestResponse: {
         allOf: [
@@ -2508,6 +4506,746 @@ export const openApiDocument = {
           },
         ],
       },
+      LoginResponse: {
+        oneOf: [
+          {
+            $ref: '#/components/schemas/AuthSessionResponse',
+          },
+          {
+            $ref: '#/components/schemas/VerificationRequiredResponse',
+          },
+        ],
+      },
+      MfaMethod: {
+        type: 'string',
+        enum: ['passkey', 'totp', 'sms', 'email'],
+      },
+      VerificationMethodName: {
+        type: 'string',
+        enum: ['passkey', 'totp', 'sms', 'email', 'password'],
+      },
+      VerificationPurpose: {
+        type: 'string',
+        description:
+          'Verification challenge purpose. Use manage_sso before profile SSO binding. system_settings and user_management require a configured passkey or authenticator app.',
+        enum: [
+          'change_password',
+          'login',
+          'manage_mfa',
+          'manage_passkey',
+          'manage_sso',
+          'manage_totp',
+          'system_settings',
+          'sso',
+          'update_contact',
+          'user_management',
+        ],
+      },
+      VerificationMethod: {
+        type: 'object',
+        required: ['method', 'label'],
+        properties: {
+          method: {
+            $ref: '#/components/schemas/VerificationMethodName',
+          },
+          label: {
+            type: 'string',
+          },
+          maskedTarget: {
+            type: 'string',
+          },
+        },
+      },
+      VerificationRequired: {
+        type: 'object',
+        required: [
+          'requiresVerification',
+          'verificationToken',
+          'purpose',
+          'defaultMethod',
+          'methods',
+          'expiresAt',
+          'remainingAttempts',
+        ],
+        properties: {
+          requiresVerification: {
+            type: 'boolean',
+            const: true,
+          },
+          verificationToken: {
+            type: 'string',
+            format: 'uuid',
+          },
+          purpose: {
+            $ref: '#/components/schemas/VerificationPurpose',
+          },
+          defaultMethod: {
+            $ref: '#/components/schemas/VerificationMethodName',
+          },
+          methods: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/VerificationMethod',
+            },
+          },
+          expiresAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+          remainingAttempts: {
+            type: 'integer',
+            minimum: 0,
+          },
+        },
+      },
+      VerificationRequiredResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                $ref: '#/components/schemas/VerificationRequired',
+              },
+            },
+          },
+        ],
+      },
+      SudoVerification: {
+        type: 'object',
+        required: ['verified', 'sudoExpiresAt'],
+        properties: {
+          verified: {
+            type: 'boolean',
+            const: true,
+          },
+          sudoExpiresAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+        },
+      },
+      VerificationChallengeCreateRequest: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['purpose'],
+        properties: {
+          purpose: {
+            type: 'string',
+            description:
+              'Use manage_sso before profile SSO binding, system_settings before reading or updating system settings, and user_management before opening user administration. Only passkey and authenticator app verification are accepted for system_settings and user_management.',
+            enum: [
+              'change_password',
+              'manage_mfa',
+              'manage_passkey',
+              'manage_sso',
+              'manage_totp',
+              'system_settings',
+              'update_contact',
+              'user_management',
+            ],
+          },
+        },
+      },
+      VerificationChallengeCreateResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                oneOf: [
+                  {
+                    $ref: '#/components/schemas/VerificationRequired',
+                  },
+                  {
+                    $ref: '#/components/schemas/SudoVerification',
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+      VerificationCodeSendRequest: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['method', 'verificationToken'],
+        properties: {
+          method: {
+            type: 'string',
+            enum: ['email', 'sms'],
+          },
+          verificationToken: {
+            type: 'string',
+            format: 'uuid',
+          },
+        },
+      },
+      VerificationTokenRequest: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['verificationToken'],
+        properties: {
+          verificationToken: {
+            type: 'string',
+            format: 'uuid',
+          },
+        },
+      },
+      WebAuthnCredentialResponse: {
+        type: 'object',
+        additionalProperties: true,
+        required: ['id', 'rawId', 'response', 'type'],
+        properties: {
+          id: {
+            type: 'string',
+          },
+          rawId: {
+            type: 'string',
+          },
+          response: {
+            type: 'object',
+            additionalProperties: true,
+          },
+          type: {
+            type: 'string',
+            const: 'public-key',
+          },
+          authenticatorAttachment: {
+            type: 'string',
+          },
+          clientExtensionResults: {
+            type: 'object',
+            additionalProperties: true,
+          },
+        },
+      },
+      VerificationConfirmRequest: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['verificationToken', 'method'],
+        properties: {
+          verificationToken: {
+            type: 'string',
+            format: 'uuid',
+          },
+          method: {
+            $ref: '#/components/schemas/VerificationMethodName',
+          },
+          code: {
+            type: 'string',
+            pattern: '^\\d{6}$',
+          },
+          password: {
+            type: 'string',
+            minLength: 8,
+            maxLength: 128,
+          },
+          recoveryCode: {
+            type: 'string',
+            minLength: 8,
+            maxLength: 32,
+          },
+          passkeyResponse: {
+            $ref: '#/components/schemas/WebAuthnCredentialResponse',
+          },
+        },
+      },
+      VerificationConfirmResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                oneOf: [
+                  {
+                    $ref: '#/components/schemas/AuthSession',
+                  },
+                  {
+                    $ref: '#/components/schemas/SudoVerification',
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+      WebAuthnOptionsResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                additionalProperties: true,
+              },
+            },
+          },
+        ],
+      },
+      TotpStatus: {
+        type: 'object',
+        required: ['enabled', 'recoveryCodesRemaining'],
+        properties: {
+          enabled: {
+            type: 'boolean',
+          },
+          recoveryCodesRemaining: {
+            type: 'integer',
+            minimum: 0,
+          },
+        },
+      },
+      TotpStatusResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                $ref: '#/components/schemas/TotpStatus',
+              },
+            },
+          },
+        ],
+      },
+      TotpSetup: {
+        type: 'object',
+        required: ['setupToken', 'secret', 'otpauthUrl', 'expiresAt'],
+        properties: {
+          setupToken: {
+            type: 'string',
+            format: 'uuid',
+          },
+          secret: {
+            type: 'string',
+          },
+          otpauthUrl: {
+            type: 'string',
+          },
+          expiresAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+        },
+      },
+      TotpSetupResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                $ref: '#/components/schemas/TotpSetup',
+              },
+            },
+          },
+        ],
+      },
+      TotpEnableRequest: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['setupToken', 'code'],
+        properties: {
+          setupToken: {
+            type: 'string',
+            format: 'uuid',
+          },
+          code: {
+            type: 'string',
+            pattern: '^\\d{6}$',
+          },
+        },
+      },
+      TotpEnableResult: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/TotpStatus',
+          },
+          {
+            type: 'object',
+            required: ['recoveryCodes'],
+            properties: {
+              recoveryCodes: {
+                type: 'array',
+                items: {
+                  type: 'string',
+                },
+              },
+            },
+          },
+        ],
+      },
+      TotpEnableResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                $ref: '#/components/schemas/TotpEnableResult',
+              },
+            },
+          },
+        ],
+      },
+      TotpRecoveryCodesResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['recoveryCodes'],
+                properties: {
+                  recoveryCodes: {
+                    type: 'array',
+                    items: {
+                      type: 'string',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      MfaSettings: {
+        type: 'object',
+        required: [
+          'availableMethods',
+          'effectiveMethods',
+          'mfaRequiredForSso',
+          'passkeyCount',
+          'twoStepCanDisable',
+          'twoStepCanEnable',
+          'twoStepEnabled',
+        ],
+        properties: {
+          availableMethods: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/MfaMethod',
+            },
+          },
+          defaultMethod: {
+            $ref: '#/components/schemas/MfaMethod',
+          },
+          effectiveMethods: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/MfaMethod',
+            },
+          },
+          mfaRequiredForSso: {
+            type: 'boolean',
+          },
+          passkeyCount: {
+            type: 'integer',
+            minimum: 0,
+          },
+          twoStepCanDisable: {
+            type: 'boolean',
+          },
+          twoStepCanEnable: {
+            type: 'boolean',
+          },
+          twoStepEnabled: {
+            type: 'boolean',
+          },
+        },
+      },
+      MfaSettingsResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                $ref: '#/components/schemas/MfaSettings',
+              },
+            },
+          },
+        ],
+      },
+      MfaSettingsUpdateRequest: {
+        type: 'object',
+        additionalProperties: false,
+        minProperties: 1,
+        properties: {
+          enabled: {
+            type: 'boolean',
+            description:
+              'Enables contact-method MFA when no strong verifier exists. Cannot disable MFA while an authenticator app or passkey is configured.',
+          },
+          requiredForSso: {
+            type: 'boolean',
+          },
+        },
+      },
+      PasskeySummary: {
+        type: 'object',
+        required: ['id', 'name', 'deviceType', 'backedUp', 'transports', 'createdAt'],
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+          },
+          name: {
+            type: 'string',
+          },
+          deviceType: {
+            type: 'string',
+          },
+          backedUp: {
+            type: 'boolean',
+          },
+          transports: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          lastUsedAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+          createdAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+        },
+      },
+      PasskeyListResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['passkeys'],
+                properties: {
+                  passkeys: {
+                    type: 'array',
+                    items: {
+                      $ref: '#/components/schemas/PasskeySummary',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      PasskeySummaryResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                $ref: '#/components/schemas/PasskeySummary',
+              },
+            },
+          },
+        ],
+      },
+      PasskeyRegistrationOptionsResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['registrationToken', 'options', 'expiresAt'],
+                properties: {
+                  registrationToken: {
+                    type: 'string',
+                    format: 'uuid',
+                  },
+                  options: {
+                    type: 'object',
+                    additionalProperties: true,
+                  },
+                  expiresAt: {
+                    type: 'string',
+                    format: 'date-time',
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      PasskeyRegistrationVerifyRequest: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'registrationToken', 'response'],
+        properties: {
+          name: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 128,
+          },
+          registrationToken: {
+            type: 'string',
+            format: 'uuid',
+          },
+          response: {
+            $ref: '#/components/schemas/WebAuthnCredentialResponse',
+          },
+        },
+      },
+      DeletePasskeyResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['deleted'],
+                properties: {
+                  deleted: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      AuthDeviceSession: {
+        type: 'object',
+        required: [
+          'id',
+          'deviceName',
+          'deviceType',
+          'browser',
+          'os',
+          'ipAddress',
+          'lastActiveAt',
+          'createdAt',
+          'expiresAt',
+          'isCurrent',
+        ],
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+          },
+          deviceName: {
+            type: 'string',
+          },
+          deviceType: {
+            type: 'string',
+            enum: ['desktop', 'mobile', 'tablet'],
+          },
+          browser: {
+            type: 'string',
+          },
+          os: {
+            type: 'string',
+          },
+          ipAddress: {
+            type: 'string',
+          },
+          lastActiveAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+          createdAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+          expiresAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+          isCurrent: {
+            type: 'boolean',
+          },
+        },
+      },
+      AuthDeviceSessionListResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['sessions'],
+                properties: {
+                  sessions: {
+                    type: 'array',
+                    items: {
+                      $ref: '#/components/schemas/AuthDeviceSession',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      RevokeAuthDeviceSessionsResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['revoked'],
+                properties: {
+                  revoked: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
       UpdateCurrentUserRequest: {
         type: 'object',
         additionalProperties: false,
@@ -2518,6 +5256,28 @@ export const openApiDocument = {
             minLength: 2,
             maxLength: 64,
           },
+          gender: {
+            type: ['string', 'null'],
+            maxLength: 64,
+          },
+          birthday: {
+            type: ['string', 'null'],
+            format: 'date',
+          },
+          bio: {
+            type: ['string', 'null'],
+            maxLength: 280,
+          },
+          location: {
+            type: ['string', 'null'],
+            maxLength: 128,
+          },
+          websiteUrl: {
+            type: ['string', 'null'],
+            format: 'uri',
+            maxLength: 2048,
+            description: 'Only HTTP and HTTPS URLs are accepted.',
+          },
           phoneNumber: {
             type: ['string', 'null'],
             maxLength: 32,
@@ -2527,9 +5287,65 @@ export const openApiDocument = {
           },
         },
       },
+      ChangePasswordRequest: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['currentPassword', 'password', 'confirmPassword'],
+        properties: {
+          currentPassword: {
+            type: 'string',
+            minLength: 8,
+            maxLength: 128,
+          },
+          password: {
+            type: 'string',
+            minLength: 8,
+            maxLength: 128,
+            description: 'Must be different from the current password.',
+          },
+          confirmPassword: {
+            type: 'string',
+            minLength: 8,
+            maxLength: 128,
+          },
+        },
+      },
+      PasswordChangeResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['changed'],
+                properties: {
+                  changed: {
+                    type: 'boolean',
+                    const: true,
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
       AuthUser: {
         type: 'object',
-        required: ['username', 'displayName', 'email', 'emailVerified', 'phoneVerified', 'roles', 'permissions'],
+        required: [
+          'username',
+          'displayName',
+          'email',
+          'emailVerified',
+          'phoneVerified',
+          'totpEnabled',
+          'mfaAllowedMethods',
+          'mfaRequiredForSso',
+          'roles',
+          'permissions',
+        ],
         properties: {
           username: {
             type: 'string',
@@ -2540,6 +5356,27 @@ export const openApiDocument = {
             type: 'string',
             minLength: 2,
             maxLength: 64,
+          },
+          gender: {
+            type: 'string',
+            maxLength: 64,
+          },
+          birthday: {
+            type: 'string',
+            format: 'date',
+          },
+          bio: {
+            type: 'string',
+            maxLength: 280,
+          },
+          location: {
+            type: 'string',
+            maxLength: 128,
+          },
+          websiteUrl: {
+            type: 'string',
+            format: 'uri',
+            maxLength: 2048,
           },
           email: {
             type: 'string',
@@ -2555,7 +5392,27 @@ export const openApiDocument = {
           phoneVerified: {
             type: 'boolean',
           },
+          totpEnabled: {
+            type: 'boolean',
+          },
+          mfaAllowedMethods: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/MfaMethod',
+            },
+          },
+          mfaRequiredForSso: {
+            type: 'boolean',
+          },
           avatarUrl: {
+            type: 'string',
+            format: 'uri-reference',
+          },
+          profileBannerUrl: {
+            type: 'string',
+            format: 'uri-reference',
+          },
+          profileBackgroundUrl: {
             type: 'string',
             format: 'uri-reference',
           },
@@ -2632,6 +5489,27 @@ export const openApiDocument = {
           displayName: {
             type: 'string',
           },
+          gender: {
+            type: 'string',
+            maxLength: 64,
+          },
+          birthday: {
+            type: 'string',
+            format: 'date',
+          },
+          bio: {
+            type: 'string',
+            maxLength: 280,
+          },
+          location: {
+            type: 'string',
+            maxLength: 128,
+          },
+          websiteUrl: {
+            type: 'string',
+            format: 'uri',
+            maxLength: 2048,
+          },
           email: {
             type: 'string',
             format: 'email',
@@ -2647,6 +5525,14 @@ export const openApiDocument = {
             type: 'boolean',
           },
           avatarUrl: {
+            type: 'string',
+            format: 'uri-reference',
+          },
+          profileBannerUrl: {
+            type: 'string',
+            format: 'uri-reference',
+          },
+          profileBackgroundUrl: {
             type: 'string',
             format: 'uri-reference',
           },
@@ -2708,6 +5594,78 @@ export const openApiDocument = {
           },
         ],
       },
+      ManagedUserSecurity: {
+        type: 'object',
+        required: ['mfaSettings', 'passkeys', 'totpStatus'],
+        properties: {
+          mfaSettings: {
+            $ref: '#/components/schemas/MfaSettings',
+          },
+          passkeys: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/PasskeySummary',
+            },
+          },
+          totpStatus: {
+            $ref: '#/components/schemas/TotpStatus',
+          },
+        },
+      },
+      ManagedUserSecurityResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                $ref: '#/components/schemas/ManagedUserSecurity',
+              },
+            },
+          },
+        ],
+      },
+      ManagedUserDetails: {
+        type: 'object',
+        required: ['user', 'security', 'devices', 'ssoIdentities'],
+        properties: {
+          user: {
+            $ref: '#/components/schemas/UserListItem',
+          },
+          security: {
+            $ref: '#/components/schemas/ManagedUserSecurity',
+          },
+          devices: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/AuthDeviceSession',
+            },
+          },
+          ssoIdentities: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/SsoIdentity',
+            },
+          },
+        },
+      },
+      ManagedUserDetailsResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                $ref: '#/components/schemas/ManagedUserDetails',
+              },
+            },
+          },
+        ],
+      },
       PaginationMetadata: {
         type: 'object',
         required: ['page', 'pageSize', 'total', 'totalPages'],
@@ -2759,6 +5717,28 @@ export const openApiDocument = {
             minLength: 2,
             maxLength: 64,
           },
+          gender: {
+            type: ['string', 'null'],
+            maxLength: 64,
+          },
+          birthday: {
+            type: ['string', 'null'],
+            format: 'date',
+          },
+          bio: {
+            type: ['string', 'null'],
+            maxLength: 280,
+          },
+          location: {
+            type: ['string', 'null'],
+            maxLength: 128,
+          },
+          websiteUrl: {
+            type: ['string', 'null'],
+            format: 'uri',
+            maxLength: 2048,
+            description: 'Only HTTP and HTTPS URLs are accepted.',
+          },
           email: {
             type: 'string',
             format: 'email',
@@ -2797,12 +5777,17 @@ export const openApiDocument = {
       AuthConfig: {
         type: 'object',
         required: [
+          'fileUploadMaxBytes',
           'passwordRecoveryEnabled',
           'phoneCountryCodes',
           'profileEmailVerificationEnabled',
           'registrationEmailVerificationRequired',
         ],
         properties: {
+          fileUploadMaxBytes: {
+            type: 'integer',
+            minimum: 1,
+          },
           passwordRecoveryEnabled: {
             type: 'boolean',
           },
@@ -2899,6 +5884,9 @@ export const openApiDocument = {
                     type: 'integer',
                     minimum: 1,
                   },
+                  maskedTarget: {
+                    type: 'string',
+                  },
                 },
               },
             },
@@ -2948,6 +5936,33 @@ export const openApiDocument = {
           },
         },
       },
+      SsoIdentity: {
+        type: 'object',
+        required: ['providerId', 'providerName', 'providerSubject', 'email', 'createdAt'],
+        properties: {
+          providerId: {
+            type: 'string',
+          },
+          providerName: {
+            type: 'string',
+          },
+          providerSubject: {
+            type: 'string',
+          },
+          email: {
+            type: 'string',
+            format: 'email',
+          },
+          createdAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+          iconUrl: {
+            type: 'string',
+            format: 'uri-reference',
+          },
+        },
+      },
       SsoIdentityListResponse: {
         allOf: [
           {
@@ -2963,30 +5978,7 @@ export const openApiDocument = {
                   identities: {
                     type: 'array',
                     items: {
-                      type: 'object',
-                      required: ['providerId', 'providerName', 'providerSubject', 'email', 'createdAt'],
-                      properties: {
-                        providerId: {
-                          type: 'string',
-                        },
-                        providerName: {
-                          type: 'string',
-                        },
-                        providerSubject: {
-                          type: 'string',
-                        },
-                        email: {
-                          type: 'string',
-                          format: 'email',
-                        },
-                        createdAt: {
-                          type: 'string',
-                          format: 'date-time',
-                        },
-                        iconUrl: {
-                          type: 'string',
-                        },
-                      },
+                      $ref: '#/components/schemas/SsoIdentity',
                     },
                   },
                 },

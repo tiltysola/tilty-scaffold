@@ -183,6 +183,30 @@ AUTH_ACCESS_TOKEN_TTL_SECONDS = "900"
 # Must be greater than AUTH_ACCESS_TOKEN_TTL_SECONDS.
 AUTH_REFRESH_TOKEN_TTL_SECONDS = "2592000"
 
+# MFA challenge lifetime in seconds.
+AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS = "300"
+
+# Maximum failed MFA challenge attempts before the challenge is invalidated.
+AUTH_VERIFICATION_MAX_ATTEMPTS = "5"
+
+# Elevated authorization lifetime after a successful sensitive-action challenge, in seconds.
+AUTH_VERIFICATION_SUDO_TTL_SECONDS = "900"
+
+# Human-readable passkey relying party name shown by browsers and authenticators.
+AUTH_PASSKEY_RP_NAME = "Tilty Scaffold"
+
+# Passkey registration token lifetime in seconds.
+AUTH_PASSKEY_REGISTRATION_TTL_SECONDS = "300"
+
+# WebAuthn browser operation timeout in milliseconds.
+AUTH_PASSKEY_OPERATION_TIMEOUT_MS = "60000"
+
+# Authenticator app issuer name shown in TOTP applications.
+AUTH_TOTP_ISSUER = "Tilty Scaffold"
+
+# Authenticator app setup token lifetime in seconds.
+AUTH_TOTP_SETUP_TTL_SECONDS = "600"
+
 # HttpOnly cookie name for the access token.
 AUTH_ACCESS_TOKEN_COOKIE_NAME = "tilty_scaffold_access_token"
 

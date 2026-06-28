@@ -1,44 +1,16 @@
-import { appendFile, mkdir } from 'fs/promises';
-import { dirname } from 'path';
-
-import { resolveApplicationPath } from './files';
-
 type LogArg = string | number | boolean | null | undefined | object | Error;
 type LogLevel = 'debug' | 'error' | 'info' | 'warn';
-type LogTarget = 'console' | 'local' | 'sls';
 
-interface SlsLoggerConfig {
-  accessKeyId: string;
-  accessKeySecret: string;
-  endpoint: string;
-  logstore: string;
-  project: string;
-  source: string;
-  topic: string;
-}
-
-interface LoggerConfig {
-  localPath?: string;
-  maxPendingWrites?: number;
-  sls?: SlsLoggerConfig;
-  targets: LogTarget[];
-  writeTimeoutMs?: number;
-}
-
-interface LogRecord {
+export interface LogRecord {
   args: RedactedLogArg[];
   level: LogLevel;
   message: string;
   timestamp: string;
 }
 
-interface LogSink {
+export interface LogSink {
   flush?: () => Promise<void>;
   write: (record: LogRecord) => Promise<void> | void;
-}
-
-interface OpenApiUtilRuntime {
-  Config: new (config: { accessKeyId: string; accessKeySecret: string; endpoint: string }) => unknown;
 }
 
 interface SerializedError {
@@ -47,17 +19,9 @@ interface SerializedError {
   stack?: string;
 }
 
-interface SlsClientRuntime {
-  putLogs(project: string, logstore: string, request: unknown): Promise<unknown>;
-}
-
-interface SlsRuntime {
-  Client: new (config: unknown) => SlsClientRuntime;
-  LogContent: new (input: { key: string; value: string }) => unknown;
-  LogGroup: new (input: { logItems: unknown[]; source: string; topic: string }) => unknown;
-  LogItem: new (input: { contents: unknown[]; time: number }) => unknown;
-  OpenApiUtil: OpenApiUtilRuntime;
-  PutLogsRequest: new (input: { body: unknown }) => unknown;
+interface LoggerSinkOptions {
+  maxPendingWrites?: number;
+  writeTimeoutMs?: number;
 }
 
 type RedactedLogArg = boolean | null | number | string | object | undefined;
@@ -86,29 +50,21 @@ const sensitiveKeyFragments = [
   'token',
 ];
 
-export function configureLogger(config: LoggerConfig) {
-  const nextSinks: LogSink[] = [];
+const consoleLogSink: LogSink = {
+  write(record) {
+    const prefix = `[${record.timestamp}] ${record.level.toUpperCase()}`;
+    const method = record.level === 'debug' ? console.debug : console[record.level];
 
-  maxPendingWrites = config.maxPendingWrites ?? 1000;
-  writeTimeoutMs = config.writeTimeoutMs ?? 5000;
+    method(prefix, ...record.args);
+  },
+};
 
-  if (config.targets.includes('console')) {
-    nextSinks.push(new ConsoleLogSink());
-  }
+sinks = [consoleLogSink];
 
-  if (config.targets.includes('local')) {
-    nextSinks.push(new LocalFileLogSink(config.localPath ?? './logs/backend.log'));
-  }
-
-  if (config.targets.includes('sls')) {
-    if (!config.sls) {
-      throw new Error('SLS logger configuration is required when LOG_TARGETS includes sls.');
-    }
-
-    nextSinks.push(new SlsLogSink(config.sls));
-  }
-
-  sinks = nextSinks.length > 0 ? nextSinks : [new ConsoleLogSink()];
+export function setLoggerSinks(nextSinks: LogSink[], options: LoggerSinkOptions = {}) {
+  maxPendingWrites = options.maxPendingWrites ?? 1000;
+  writeTimeoutMs = options.writeTimeoutMs ?? 5000;
+  sinks = nextSinks.length > 0 ? nextSinks : [consoleLogSink];
 }
 
 export async function flushLogger() {
@@ -123,6 +79,19 @@ export const logger = {
   warn: (...args: LogArg[]) => write('warn', args),
 };
 
+export function formatLogRecordAsJsonLine(record: LogRecord) {
+  return JSON.stringify({
+    args: record.args.map(serializeArg),
+    level: record.level,
+    message: record.message,
+    timestamp: record.timestamp,
+  });
+}
+
+export function formatLogRecordData(record: LogRecord) {
+  return record.args.slice(1).map(stringifyArg).filter(Boolean).join(' ');
+}
+
 function write(level: LogLevel, args: LogArg[]) {
   const redactedArgs = args.map((arg) => redactArg(arg));
   const record: LogRecord = {
@@ -134,80 +103,6 @@ function write(level: LogLevel, args: LogArg[]) {
 
   for (const sink of sinks) {
     trackWrite(sink.write(record));
-  }
-}
-
-class ConsoleLogSink implements LogSink {
-  write(record: LogRecord) {
-    const prefix = `[${record.timestamp}] ${record.level.toUpperCase()}`;
-    const method = record.level === 'debug' ? console.debug : console[record.level];
-
-    method(prefix, ...record.args);
-  }
-}
-
-sinks = [new ConsoleLogSink()];
-
-class LocalFileLogSink implements LogSink {
-  private readonly filePath: string;
-  private readonly ready: Promise<void>;
-
-  constructor(filePath: string) {
-    this.filePath = resolveApplicationPath(filePath, 'LOG_LOCAL_PATH');
-    this.ready = mkdir(dirname(this.filePath), { recursive: true }).then(() => undefined);
-  }
-
-  async write(record: LogRecord) {
-    await this.ready;
-    await appendFile(this.filePath, `${toJsonLine(record)}\n`, 'utf8');
-  }
-}
-
-class SlsLogSink implements LogSink {
-  private client: Promise<SlsClientRuntime> | undefined;
-  private runtime: Promise<SlsRuntime> | undefined;
-
-  constructor(private readonly config: SlsLoggerConfig) {}
-
-  async write(record: LogRecord) {
-    const runtime = await this.getRuntime();
-    const client = await this.getClient(runtime);
-
-    await client.putLogs(
-      this.config.project,
-      this.config.logstore,
-      new runtime.PutLogsRequest({
-        body: new runtime.LogGroup({
-          logItems: [
-            new runtime.LogItem({
-              contents: toSlsContents(record, runtime.LogContent),
-              time: Math.floor(Date.parse(record.timestamp) / 1000),
-            }),
-          ],
-          source: this.config.source,
-          topic: this.config.topic,
-        }),
-      }),
-    );
-  }
-
-  private async getRuntime() {
-    this.runtime ??= loadSlsRuntime();
-    return this.runtime;
-  }
-
-  private async getClient(runtime: SlsRuntime) {
-    this.client ??= Promise.resolve(
-      new runtime.Client(
-        new runtime.OpenApiUtil.Config({
-          accessKeyId: this.config.accessKeyId,
-          accessKeySecret: this.config.accessKeySecret,
-          endpoint: this.config.endpoint,
-        }),
-      ),
-    );
-
-    return this.client;
   }
 }
 
@@ -264,47 +159,6 @@ function formatMessage(args: RedactedLogArg[]) {
   }
 
   return args.map(stringifyArg).join(' ');
-}
-
-function toJsonLine(record: LogRecord) {
-  return JSON.stringify({
-    args: record.args.map(serializeArg),
-    level: record.level,
-    message: record.message,
-    timestamp: record.timestamp,
-  });
-}
-
-function toSlsContents(record: LogRecord, LogContent: SlsRuntime['LogContent']) {
-  const contents = [
-    new LogContent({ key: 'timestamp', value: record.timestamp }),
-    new LogContent({ key: 'level', value: record.level }),
-    new LogContent({ key: 'message', value: record.message }),
-  ];
-  const data = record.args.slice(1).map(stringifyArg).filter(Boolean).join(' ');
-
-  if (data) {
-    contents.push(new LogContent({ key: 'data', value: data }));
-  }
-
-  return contents;
-}
-
-async function loadSlsRuntime(): Promise<SlsRuntime> {
-  const [openApiModule, slsModule] = await Promise.all([
-    import('@alicloud/openapi-core'),
-    import('@alicloud/sls20201230'),
-  ]);
-  const typedSlsModule = slsModule as unknown as typeof import('@alicloud/sls20201230/dist/client');
-
-  return {
-    Client: typedSlsModule.default as unknown as SlsRuntime['Client'],
-    LogContent: typedSlsModule.LogContent as unknown as SlsRuntime['LogContent'],
-    LogGroup: typedSlsModule.LogGroup as unknown as SlsRuntime['LogGroup'],
-    LogItem: typedSlsModule.LogItem as unknown as SlsRuntime['LogItem'],
-    OpenApiUtil: openApiModule.$OpenApiUtil,
-    PutLogsRequest: typedSlsModule.PutLogsRequest as unknown as SlsRuntime['PutLogsRequest'],
-  };
 }
 
 function serializeArg(arg: RedactedLogArg): SerializedLogArg {

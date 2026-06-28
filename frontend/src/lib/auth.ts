@@ -1,3 +1,11 @@
+import {
+  type AuthenticationResponseJSON,
+  type PublicKeyCredentialCreationOptionsJSON,
+  type PublicKeyCredentialRequestOptionsJSON,
+  type RegistrationResponseJSON,
+  startAuthentication,
+  startRegistration,
+} from '@simplewebauthn/browser';
 import { isSafeRelativePath } from '@tilty/shared/paths';
 
 import { ApiError, apiRequest, type ApiRequestOptions } from './api';
@@ -10,11 +18,21 @@ const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 export interface AuthUser {
   username: string;
   displayName: string;
+  gender?: string;
+  birthday?: string;
+  bio?: string;
+  location?: string;
+  websiteUrl?: string;
   email: string;
   emailVerified: boolean;
   phoneNumber?: string;
   phoneVerified: boolean;
+  totpEnabled: boolean;
+  mfaAllowedMethods: MfaMethod[];
+  mfaRequiredForSso: boolean;
   avatarUrl?: string;
+  profileBannerUrl?: string;
+  profileBackgroundUrl?: string;
   roles: string[];
   permissions: string[];
 }
@@ -43,6 +61,7 @@ export interface AuthSnapshot {
 export type PhoneCountryCode = '+86' | '+852' | '+853';
 
 export interface AuthPublicConfig {
+  fileUploadMaxBytes: number;
   passwordRecoveryEnabled: boolean;
   phoneCountryCodes: PhoneCountryCode[];
   profileEmailVerificationEnabled: boolean;
@@ -62,6 +81,45 @@ interface LoginInput {
   identifier: string;
   password: string;
 }
+
+export type MfaMethod = 'email' | 'passkey' | 'sms' | 'totp';
+export type VerificationMethodName = MfaMethod | 'password';
+export type VerificationPurpose =
+  | 'change_password'
+  | 'login'
+  | 'manage_mfa'
+  | 'manage_passkey'
+  | 'manage_sso'
+  | 'manage_totp'
+  | 'system_settings'
+  | 'sso'
+  | 'update_contact'
+  | 'user_management';
+
+export interface VerificationMethod {
+  method: VerificationMethodName;
+  label: string;
+  maskedTarget?: string;
+}
+
+export interface VerificationRequired {
+  requiresVerification: true;
+  verificationToken: string;
+  purpose: VerificationPurpose;
+  defaultMethod: VerificationMethodName;
+  methods: VerificationMethod[];
+  expiresAt: string;
+  remainingAttempts: number;
+}
+
+export interface VerificationSatisfied {
+  verified: true;
+  sudoExpiresAt: string;
+}
+
+export type VerificationChallengeResult = VerificationRequired | VerificationSatisfied;
+
+export type LoginResult = AuthSession | VerificationRequired;
 
 interface BindSsoAccountInput {
   identifier: string;
@@ -84,6 +142,12 @@ interface ResetPasswordInput {
   confirmPassword: string;
 }
 
+interface ChangePasswordInput {
+  currentPassword: string;
+  password: string;
+  confirmPassword: string;
+}
+
 interface VerifyProfileEmailInput {
   emailVerificationCode: string;
 }
@@ -99,7 +163,26 @@ interface VerifyProfilePhoneInput {
 
 interface UpdateCurrentUserInput {
   displayName: string;
+  gender?: string | null;
+  birthday?: string | null;
+  bio?: string | null;
+  location?: string | null;
+  websiteUrl?: string | null;
   phoneNumber?: string | null;
+}
+
+interface TotpSetupEnableInput {
+  setupToken: string;
+  code: string;
+}
+
+interface TotpVerifyInput {
+  verificationToken: string;
+  method: VerificationMethodName;
+  code?: string;
+  password?: string;
+  recoveryCode?: string;
+  passkeyResponse?: AuthenticationResponseJSON;
 }
 
 export interface SsoPublicConfig {
@@ -130,22 +213,87 @@ export interface SendEmailVerificationInput {
   email: string;
 }
 
-export interface EmailVerificationSendResult {
+export interface VerificationCodeSendResult {
   cooldownSeconds: number;
   expiresInSeconds: number;
+  maskedTarget?: string;
+}
+
+export interface TotpStatus {
+  enabled: boolean;
+  recoveryCodesRemaining: number;
+}
+
+export interface TotpSetup {
+  setupToken: string;
+  secret: string;
+  otpauthUrl: string;
+  expiresAt: string;
+}
+
+export interface TotpEnableResult extends TotpStatus {
+  recoveryCodes: string[];
+}
+
+export interface TotpRecoveryCodesResult {
+  recoveryCodes: string[];
+}
+
+export interface AuthDeviceSession {
+  id: string;
+  deviceName: string;
+  deviceType: 'desktop' | 'mobile' | 'tablet';
+  browser: string;
+  os: string;
+  ipAddress: string;
+  lastActiveAt: string;
+  createdAt: string;
+  expiresAt: string;
+  isCurrent: boolean;
+}
+
+export interface MfaSettings {
+  availableMethods: MfaMethod[];
+  defaultMethod?: MfaMethod;
+  effectiveMethods: MfaMethod[];
+  mfaRequiredForSso: boolean;
+  passkeyCount: number;
+  twoStepCanDisable: boolean;
+  twoStepCanEnable: boolean;
+  twoStepEnabled: boolean;
+}
+
+export interface PasskeySummary {
+  id: string;
+  name: string;
+  deviceType: string;
+  backedUp: boolean;
+  transports: string[];
+  lastUsedAt?: string;
+  createdAt: string;
+}
+
+export interface PasskeyRegistrationOptionsResult {
+  registrationToken: string;
+  options: PublicKeyCredentialCreationOptionsJSON;
+  expiresAt: string;
 }
 
 type AuthListener = () => void;
 
-let snapshot: AuthSnapshot = {
-  isRefreshing: false,
-  session: null,
-  status: typeof window === 'undefined' ? 'anonymous' : 'restoring',
-};
-let restorePromise: Promise<AuthSession | null> | null = null;
-let refreshPromise: Promise<AuthSession> | null = null;
+interface AuthStoreRuntime {
+  listeners: Set<AuthListener>;
+  refreshPromise: Promise<AuthSession> | null;
+  restorePromise: Promise<AuthSession | null> | null;
+  snapshot: AuthSnapshot;
+  storageAvailable: boolean;
+}
 
-const listeners = new Set<AuthListener>();
+interface AuthStoreGlobal {
+  __tiltyScaffoldAuthStoreRuntime__?: AuthStoreRuntime;
+}
+
+const authStoreRuntime = getAuthStoreRuntime();
 
 export const authStore = {
   clear: clearStoredSession,
@@ -171,14 +319,16 @@ export async function register(input: RegisterInput) {
 }
 
 export async function login(input: LoginInput) {
-  const session = await apiRequest<AuthSession>('/api/auth/login', {
+  const result = await apiRequest<LoginResult>('/api/auth/login', {
     body: input,
     method: 'POST',
   });
 
-  storeSession(session);
+  if (!isVerificationRequired(result)) {
+    storeSession(result);
+  }
 
-  return session;
+  return result;
 }
 
 export async function logout() {
@@ -189,14 +339,14 @@ export async function logout() {
 }
 
 export function sendRegistrationEmailVerification(input: SendEmailVerificationInput) {
-  return apiRequest<EmailVerificationSendResult>('/api/auth/register/email-verification', {
+  return apiRequest<VerificationCodeSendResult>('/api/auth/register/email-verification', {
     body: input,
     method: 'POST',
   });
 }
 
 export function sendPasswordResetEmailVerification(input: SendEmailVerificationInput) {
-  return apiRequest<EmailVerificationSendResult>('/api/auth/password-reset/email-verification', {
+  return apiRequest<VerificationCodeSendResult>('/api/auth/password-reset/email-verification', {
     body: input,
     method: 'POST',
   });
@@ -206,6 +356,13 @@ export function resetPassword(input: ResetPasswordInput) {
   return apiRequest<{ reset: true }>('/api/auth/password-reset', {
     body: input,
     method: 'POST',
+  });
+}
+
+export function changePassword(input: ChangePasswordInput) {
+  return authenticatedApiRequest<{ changed: true }>('/api/auth/me/password', {
+    body: input,
+    method: 'PATCH',
   });
 }
 
@@ -235,61 +392,91 @@ export function fetchCurrentUser() {
   });
 }
 
-export async function updateCurrentUser(input: UpdateCurrentUserInput) {
-  const user = await authenticatedApiRequest<AuthUser>('/api/auth/me', {
+export async function refreshCurrentUser() {
+  const user = await fetchCurrentUser();
+
+  replaceStoredUser(user);
+
+  return user;
+}
+
+export function updateCurrentUser(input: UpdateCurrentUserInput) {
+  return authenticatedUserRequest('/api/auth/me', {
     body: input,
     method: 'PATCH',
   });
-
-  replaceStoredUser(user);
-
-  return user;
 }
 
-export async function uploadAvatar(file: File) {
+export function uploadAvatar(file: File) {
+  return uploadCurrentUserImage('/api/auth/avatar', 'avatar', file);
+}
+
+export function deleteAvatar() {
+  return authenticatedUserRequest('/api/auth/avatar', {
+    method: 'DELETE',
+  });
+}
+
+export function uploadProfileBanner(file: File) {
+  return uploadCurrentUserImage('/api/auth/profile-banner', 'profileBanner', file);
+}
+
+export function deleteProfileBanner() {
+  return authenticatedUserRequest('/api/auth/profile-banner', {
+    method: 'DELETE',
+  });
+}
+
+export function uploadProfileBackground(file: File) {
+  return uploadCurrentUserImage('/api/auth/profile-background', 'profileBackground', file);
+}
+
+export function deleteProfileBackground() {
+  return authenticatedUserRequest('/api/auth/profile-background', {
+    method: 'DELETE',
+  });
+}
+
+function uploadCurrentUserImage(path: string, fieldName: string, file: File) {
   const form = new FormData();
 
-  form.append('avatar', file);
+  form.append(fieldName, file);
 
-  const user = await authenticatedApiRequest<AuthUser>('/api/auth/avatar', {
+  return authenticatedUserRequest(path, {
     body: form,
     method: 'POST',
   });
-
-  replaceStoredUser(user);
-
-  return user;
 }
 
 export function sendProfileEmailVerification() {
-  return authenticatedApiRequest<EmailVerificationSendResult>('/api/auth/me/email-verification', {
+  return authenticatedApiRequest<VerificationCodeSendResult>('/api/auth/me/email-verification', {
     method: 'POST',
   });
 }
 
-export async function verifyProfileEmail(input: VerifyProfileEmailInput) {
-  const user = await authenticatedApiRequest<AuthUser>('/api/auth/me/email-verification/confirm', {
+export function verifyProfileEmail(input: VerifyProfileEmailInput) {
+  return authenticatedUserRequest('/api/auth/me/email-verification/confirm', {
     body: input,
     method: 'POST',
   });
-
-  replaceStoredUser(user);
-
-  return user;
 }
 
 export function sendProfilePhoneVerification(input: SendProfilePhoneVerificationInput) {
-  return authenticatedApiRequest<EmailVerificationSendResult>('/api/auth/me/phone-verification', {
+  return authenticatedApiRequest<VerificationCodeSendResult>('/api/auth/me/phone-verification', {
     body: input,
     method: 'POST',
   });
 }
 
-export async function verifyProfilePhone(input: VerifyProfilePhoneInput) {
-  const user = await authenticatedApiRequest<AuthUser>('/api/auth/me/phone-verification/confirm', {
+export function verifyProfilePhone(input: VerifyProfilePhoneInput) {
+  return authenticatedUserRequest('/api/auth/me/phone-verification/confirm', {
     body: input,
     method: 'POST',
   });
+}
+
+async function authenticatedUserRequest(path: string, options: ApiRequestOptions) {
+  const user = await authenticatedApiRequest<AuthUser>(path, options);
 
   replaceStoredUser(user);
 
@@ -350,19 +537,162 @@ export async function createSsoAccount(input: CreateSsoAccountInput) {
 }
 
 export async function bindSsoAccount(input: BindSsoAccountInput) {
-  const session = await apiRequest<AuthSession>('/api/auth/sso/bind', {
+  const result = await apiRequest<LoginResult>('/api/auth/sso/bind', {
     body: input,
     method: 'POST',
   });
 
-  storeSession(session);
+  if (isAuthSession(result)) {
+    storeSession(result);
+  }
 
-  return session;
+  return result;
 }
 
 export function fetchSsoIdentities() {
   return authenticatedApiRequest<{ identities: SsoIdentityPublic[] }>('/api/auth/sso/identities', {
     method: 'GET',
+  });
+}
+
+export function fetchTotpStatus() {
+  return authenticatedApiRequest<TotpStatus>('/api/auth/totp', {
+    method: 'GET',
+  });
+}
+
+export function createTotpSetup() {
+  return authenticatedApiRequest<TotpSetup>('/api/auth/totp/setup', {
+    method: 'POST',
+  });
+}
+
+export function enableTotp(input: TotpSetupEnableInput) {
+  return authenticatedApiRequest<TotpEnableResult>('/api/auth/totp/enable', {
+    body: input,
+    method: 'POST',
+  });
+}
+
+export function fetchMfaSettings() {
+  return authenticatedApiRequest<MfaSettings>('/api/auth/mfa', {
+    method: 'GET',
+  });
+}
+
+export function updateMfaSettings(input: { enabled?: boolean; requiredForSso?: boolean }) {
+  return authenticatedApiRequest<MfaSettings>('/api/auth/mfa', {
+    body: input,
+    method: 'PATCH',
+  });
+}
+
+export function createVerificationChallenge(purpose: Exclude<VerificationPurpose, 'login' | 'sso'>) {
+  return authenticatedApiRequest<VerificationChallengeResult>('/api/auth/verification/challenges', {
+    body: { purpose },
+    method: 'POST',
+  });
+}
+
+export function sendVerificationCode(input: { method: 'email' | 'sms'; verificationToken: string }) {
+  return apiRequest<VerificationCodeSendResult>('/api/auth/verification/code', {
+    body: input,
+    method: 'POST',
+  });
+}
+
+export function createVerificationPasskeyOptions(verificationToken: string) {
+  return apiRequest<PublicKeyCredentialRequestOptionsJSON>('/api/auth/verification/passkey/options', {
+    body: { verificationToken },
+    method: 'POST',
+  });
+}
+
+export async function verifyAuthenticationChallenge(input: TotpVerifyInput) {
+  const result = await apiRequest<AuthSession | { verified: true; sudoExpiresAt?: string }>(
+    '/api/auth/verification/confirm',
+    {
+      body: input,
+      method: 'POST',
+    },
+  );
+
+  if (isAuthSession(result)) {
+    storeSession(result);
+  }
+
+  return result;
+}
+
+export async function verifyWithPasskey(verificationToken: string) {
+  const options = await createVerificationPasskeyOptions(verificationToken);
+  const passkeyResponse = await startAuthentication({ optionsJSON: options });
+
+  return verifyAuthenticationChallenge({
+    verificationToken,
+    method: 'passkey',
+    passkeyResponse,
+  });
+}
+
+export function fetchPasskeys() {
+  return authenticatedApiRequest<{ passkeys: PasskeySummary[] }>('/api/auth/passkeys', {
+    method: 'GET',
+  });
+}
+
+export function createPasskeyRegistrationOptions() {
+  return authenticatedApiRequest<PasskeyRegistrationOptionsResult>('/api/auth/passkeys/registration-options', {
+    method: 'POST',
+  });
+}
+
+export async function completePasskeyRegistration(name: string, result: PasskeyRegistrationOptionsResult) {
+  const response: RegistrationResponseJSON = await startRegistration({ optionsJSON: result.options });
+
+  return authenticatedApiRequest<PasskeySummary>('/api/auth/passkeys', {
+    body: {
+      name,
+      registrationToken: result.registrationToken,
+      response,
+    },
+    method: 'POST',
+  });
+}
+
+export function deletePasskey(passkeyId: string) {
+  return authenticatedApiRequest<{ deleted: true }>(`/api/auth/passkeys/${passkeyId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function disableTotp() {
+  return authenticatedApiRequest<TotpStatus>('/api/auth/totp/disable', {
+    method: 'POST',
+  });
+}
+
+export function regenerateTotpRecoveryCodes() {
+  return authenticatedApiRequest<TotpRecoveryCodesResult>('/api/auth/totp/recovery-codes', {
+    method: 'POST',
+  });
+}
+
+export function fetchAuthDeviceSessions() {
+  return authenticatedApiRequest<{ sessions: AuthDeviceSession[] }>('/api/auth/devices', {
+    method: 'GET',
+  });
+}
+
+export function revokeAuthDeviceSession(sessionId: string) {
+  return authenticatedApiRequest<{ revoked: true }>(`/api/auth/devices/${sessionId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function revokeOtherAuthDeviceSessions() {
+  return authenticatedApiRequest<{ revoked: true }>('/api/auth/devices/others', {
+    method: 'DELETE',
   });
 }
 
@@ -411,20 +741,20 @@ export function resolveAssetUrl(url?: string) {
 }
 
 function getSnapshot() {
-  return snapshot;
+  return authStoreRuntime.snapshot;
 }
 
 function subscribe(listener: AuthListener) {
-  listeners.add(listener);
+  authStoreRuntime.listeners.add(listener);
 
   return () => {
-    listeners.delete(listener);
+    authStoreRuntime.listeners.delete(listener);
   };
 }
 
 async function restoreAuthSession() {
-  if (restorePromise) {
-    return restorePromise;
+  if (authStoreRuntime.restorePromise) {
+    return authStoreRuntime.restorePromise;
   }
 
   const currentSession = getStoredSession();
@@ -435,16 +765,16 @@ async function restoreAuthSession() {
     status: 'restoring',
   });
 
-  restorePromise = restoreAuthSessionOnce().finally(() => {
-    restorePromise = null;
+  authStoreRuntime.restorePromise = restoreAuthSessionOnce().finally(() => {
+    authStoreRuntime.restorePromise = null;
   });
 
-  return restorePromise;
+  return authStoreRuntime.restorePromise;
 }
 
 function refreshAuthSession() {
-  if (refreshPromise) {
-    return refreshPromise;
+  if (authStoreRuntime.refreshPromise) {
+    return authStoreRuntime.refreshPromise;
   }
 
   const current = getSnapshot();
@@ -455,7 +785,7 @@ function refreshAuthSession() {
     status: current.session ? 'authenticated' : 'restoring',
   });
 
-  refreshPromise = apiRequest<AuthSession>('/api/auth/refresh', {
+  authStoreRuntime.refreshPromise = apiRequest<AuthSession>('/api/auth/refresh', {
     method: 'POST',
   })
     .then((session) => {
@@ -476,7 +806,7 @@ function refreshAuthSession() {
       throw error;
     })
     .finally(() => {
-      refreshPromise = null;
+      authStoreRuntime.refreshPromise = null;
 
       if (getSnapshot().isRefreshing) {
         setSnapshot({
@@ -486,7 +816,7 @@ function refreshAuthSession() {
       }
     });
 
-  return refreshPromise;
+  return authStoreRuntime.refreshPromise;
 }
 
 async function ensureAuthenticatedSession() {
@@ -514,6 +844,15 @@ function getStoredSession() {
   const persistedSession = readPersistedSession();
 
   if (!persistedSession) {
+    if (
+      !authStoreRuntime.storageAvailable &&
+      current.status === 'authenticated' &&
+      current.session &&
+      isAuthSession(current.session)
+    ) {
+      return current.session;
+    }
+
     if (current.session) {
       setSnapshot({
         isRefreshing: false,
@@ -606,14 +945,32 @@ function replaceStoredUser(user: AuthUser) {
 }
 
 function setSnapshot(nextSnapshot: AuthSnapshot) {
-  snapshot = nextSnapshot;
+  authStoreRuntime.snapshot = nextSnapshot;
   emitSnapshotChanged();
 }
 
 function emitSnapshotChanged() {
-  for (const listener of listeners) {
+  for (const listener of authStoreRuntime.listeners) {
     listener();
   }
+}
+
+function getAuthStoreRuntime() {
+  const target = globalThis as typeof globalThis & AuthStoreGlobal;
+
+  target.__tiltyScaffoldAuthStoreRuntime__ ??= {
+    listeners: new Set<AuthListener>(),
+    refreshPromise: null,
+    restorePromise: null,
+    snapshot: {
+      isRefreshing: false,
+      session: null,
+      status: typeof window === 'undefined' ? 'anonymous' : 'restoring',
+    },
+    storageAvailable: true,
+  };
+
+  return target.__tiltyScaffoldAuthStoreRuntime__;
 }
 
 function isAllowedAbsoluteAssetUrl(value: string) {
@@ -635,7 +992,14 @@ function readPersistedSession() {
     return null;
   }
 
-  const value = window.localStorage.getItem(authSessionStorageKey);
+  let value: string | null;
+
+  try {
+    value = window.localStorage.getItem(authSessionStorageKey);
+  } catch {
+    authStoreRuntime.storageAvailable = false;
+    return null;
+  }
 
   if (!value) {
     return null;
@@ -661,7 +1025,13 @@ function writePersistedSession(session: PersistedAuthSession) {
     return;
   }
 
-  window.localStorage.setItem(authSessionStorageKey, JSON.stringify(toPersistedSession(session)));
+  try {
+    window.localStorage.setItem(authSessionStorageKey, JSON.stringify(toPersistedSession(session)));
+    authStoreRuntime.storageAvailable = true;
+  } catch {
+    authStoreRuntime.storageAvailable = false;
+    // Browser storage can be unavailable in restricted contexts.
+  }
 }
 
 function clearPersistedSession() {
@@ -669,7 +1039,13 @@ function clearPersistedSession() {
     return;
   }
 
-  window.localStorage.removeItem(authSessionStorageKey);
+  try {
+    window.localStorage.removeItem(authSessionStorageKey);
+    authStoreRuntime.storageAvailable = true;
+  } catch {
+    authStoreRuntime.storageAvailable = false;
+    // Browser storage can be unavailable in restricted contexts.
+  }
 }
 
 function parsePersistedSession(value: unknown): PersistedAuthSession | null {
@@ -749,9 +1125,20 @@ function isAuthUser(value: unknown): value is AuthUser {
     typeof user.emailVerified === 'boolean' &&
     (user.phoneNumber === undefined || typeof user.phoneNumber === 'string') &&
     typeof user.phoneVerified === 'boolean' &&
+    typeof user.totpEnabled === 'boolean' &&
+    isMfaMethodArray(user.mfaAllowedMethods) &&
+    typeof user.mfaRequiredForSso === 'boolean' &&
+    (user.avatarUrl === undefined || typeof user.avatarUrl === 'string') &&
+    (user.profileBannerUrl === undefined || typeof user.profileBannerUrl === 'string') &&
+    (user.profileBackgroundUrl === undefined || typeof user.profileBackgroundUrl === 'string') &&
     isStringArray(user.roles) &&
-    isStringArray(user.permissions) &&
-    (user.avatarUrl === undefined || typeof user.avatarUrl === 'string')
+    isStringArray(user.permissions)
+  );
+}
+
+export function isVerificationRequired(value: unknown): value is VerificationRequired {
+  return Boolean(
+    value && typeof value === 'object' && (value as { requiresVerification?: unknown }).requiresVerification === true,
   );
 }
 
@@ -783,4 +1170,11 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isMfaMethodArray(value: unknown): value is MfaMethod[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => item === 'email' || item === 'passkey' || item === 'sms' || item === 'totp')
+  );
 }

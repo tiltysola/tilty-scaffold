@@ -8,6 +8,8 @@ import {
   LayoutDashboardIcon,
   LogOutIcon,
   type LucideIcon,
+  SettingsIcon,
+  ShieldIcon,
   UserCircleIcon,
   UsersIcon,
 } from 'lucide-react';
@@ -26,6 +28,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/shadcn/components/ui/dropdown-menu';
+import { ScrollArea } from '@/shadcn/components/ui/scroll-area';
 import {
   Sidebar,
   SidebarContent,
@@ -38,6 +41,7 @@ import {
   SidebarProvider,
   useSidebar,
 } from '@/shadcn/components/ui/sidebar';
+import { cn } from '@/shadcn/lib/utils';
 
 import NavHeader from './NavHeader';
 import SideNav, { type SideNavProps } from './SideNav';
@@ -51,6 +55,8 @@ const navIcons: Record<NavigationIcon, LucideIcon> = {
   apiDocs: BracesIcon,
   dashboard: LayoutDashboardIcon,
   profile: UserCircleIcon,
+  security: ShieldIcon,
+  settings: SettingsIcon,
   users: UsersIcon,
 };
 
@@ -65,11 +71,13 @@ interface SidebarUserProfile {
 }
 
 const SidebarUser = ({
+  hasProfileBackground,
   onSignOut,
   onProfile,
   signingOut,
   user,
 }: {
+  hasProfileBackground: boolean;
   onSignOut: () => void;
   onProfile: () => void;
   signingOut: boolean;
@@ -87,11 +95,15 @@ const SidebarUser = ({
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              className={cn(
+                'data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground',
+                hasProfileBackground &&
+                  'hover:bg-sidebar-accent/40 active:bg-sidebar-accent/40 data-[state=open]:!bg-sidebar-accent/40 data-[state=open]:hover:!bg-sidebar-accent/40',
+              )}
             >
-              <Avatar className="h-8 w-8 rounded-lg after:hidden">
-                {avatarUrl ? <AvatarImage className="rounded-lg" src={avatarUrl} alt={user.name} /> : null}
-                <AvatarFallback className="rounded-lg">{fallback}</AvatarFallback>
+              <Avatar>
+                {avatarUrl ? <AvatarImage src={avatarUrl} alt={user.name} /> : null}
+                <AvatarFallback>{fallback}</AvatarFallback>
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">{user.name}</span>
@@ -100,17 +112,12 @@ const SidebarUser = ({
               <EllipsisVerticalIcon className="ml-auto size-4" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
-            side={isMobile ? 'bottom' : 'right'}
-            align="end"
-            sideOffset={4}
-          >
+          <DropdownMenuContent className="min-w-56" side={isMobile ? 'bottom' : 'right'} align="end" sideOffset={4}>
             <DropdownMenuLabel className="p-0 font-normal">
               <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                <Avatar className="h-8 w-8 rounded-lg after:hidden">
-                  {avatarUrl ? <AvatarImage className="rounded-lg" src={avatarUrl} alt={user.name} /> : null}
-                  <AvatarFallback className="rounded-lg">{fallback}</AvatarFallback>
+                <Avatar>
+                  {avatarUrl ? <AvatarImage src={avatarUrl} alt={user.name} /> : null}
+                  <AvatarFallback>{fallback}</AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium text-sidebar-accent-foreground">{user.name}</span>
@@ -143,6 +150,8 @@ const Index = ({ children }: AppSidebarProps) => {
     name: session.user.displayName,
     username: session.user.username,
   };
+  const profileBackgroundUrl = resolveAssetUrl(session.user.profileBackgroundUrl);
+  const hasProfileBackground = Boolean(profileBackgroundUrl);
   const navItems = createNavItems(session.user.permissions);
 
   const handleSignOut = () => {
@@ -166,34 +175,67 @@ const Index = ({ children }: AppSidebarProps) => {
   };
 
   return (
-    <SidebarProvider style={sidebarStyle}>
-      <Sidebar collapsible="offcanvas" variant="inset">
-        <SidebarHeader>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild className="data-[slot=sidebar-menu-button]:p-1.5!">
-                <Link to={routePath('dashboard')}>
-                  <CommandIcon className="size-5!" />
-                  <span className="text-base font-semibold">Tilty Scaffold</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarHeader>
-        <SidebarContent>
-          <SideNav groups={navItems.groups} />
-        </SidebarContent>
-        <SidebarFooter>
-          <SidebarUser onSignOut={handleSignOut} onProfile={handleProfile} signingOut={signingOut} user={sidebarUser} />
-        </SidebarFooter>
-      </Sidebar>
-      <SidebarInset>
-        <NavHeader />
-        <div className="flex flex-1 flex-col">
-          <div className="@container/main flex flex-1 flex-col gap-2">{children}</div>
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+    <div className="relative h-svh overflow-hidden bg-sidebar text-foreground">
+      {profileBackgroundUrl ? (
+        <>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none fixed inset-0 scale-[1.03] bg-cover bg-center bg-no-repeat opacity-80 blur-[2px]"
+            style={{ backgroundImage: `url(${JSON.stringify(profileBackgroundUrl)})` }}
+          />
+          <div aria-hidden="true" className="pointer-events-none fixed inset-0 bg-sidebar/25 backdrop-blur-md" />
+        </>
+      ) : null}
+      <SidebarProvider className="relative h-svh min-h-0 has-data-[variant=inset]:bg-transparent" style={sidebarStyle}>
+        <Sidebar
+          className={cn(
+            'md:group-data-[collapsible=offcanvas]:invisible md:group-data-[collapsible=offcanvas]:pointer-events-none',
+            hasProfileBackground && '[&_[data-slot=sidebar-inner]]:!bg-transparent',
+          )}
+          collapsible="offcanvas"
+          variant="inset"
+        >
+          <SidebarHeader>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <Link to={routePath('dashboard')}>
+                    <CommandIcon />
+                    <span className="text-base font-semibold">Tilty Scaffold</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarHeader>
+          <SidebarContent>
+            <SideNav groups={navItems.groups} isActiveItemSubtle={hasProfileBackground} />
+          </SidebarContent>
+          <SidebarFooter>
+            <SidebarUser
+              hasProfileBackground={hasProfileBackground}
+              onSignOut={handleSignOut}
+              onProfile={handleProfile}
+              signingOut={signingOut}
+              user={sidebarUser}
+            />
+          </SidebarFooter>
+        </Sidebar>
+        <SidebarInset
+          className={cn(
+            'min-h-0 overflow-hidden md:peer-data-[variant=inset]:mr-0! md:peer-data-[variant=inset]:transition-[margin] md:peer-data-[variant=inset]:duration-200 md:peer-data-[variant=inset]:ease-linear',
+            hasProfileBackground &&
+              'bg-background/25 shadow-lg ring-1 ring-border/25 backdrop-blur-xl supports-backdrop-filter:bg-background/20',
+          )}
+        >
+          <NavHeader />
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="flex min-h-full flex-col">
+              <div className="@container/main flex flex-1 flex-col gap-2">{children}</div>
+            </div>
+          </ScrollArea>
+        </SidebarInset>
+      </SidebarProvider>
+    </div>
   );
 };
 

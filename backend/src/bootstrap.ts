@@ -1,15 +1,18 @@
 import { createServer } from 'http';
 
 import { createApp, shouldSkipGlobalRateLimit } from './app';
+import { initModels } from './composition/models';
+import { createModules } from './composition/modules';
+import { createServices } from './composition/services';
 import { loadEnv } from './config/env';
-import { configureLogger, flushLogger, logger } from './core/logger';
+import { flushLogger, logger } from './core/logger';
 import { collectJobs, startScheduler, stopScheduler } from './core/scheduler';
 import { closeServer, frontendDistDirectory, listen, warnIfFrontendEntryFileMissing } from './core/server';
 import { createCacheStore } from './infra/cache';
 import { connectDatabase, createSequelize } from './infra/database';
 import { createFileStorage } from './infra/file-storage';
+import { configureLogger } from './infra/logger';
 import { assertDatabaseMigrationsApplied } from './infra/migrator';
-import { createModules, createServices, initModels } from './modules';
 
 export async function bootstrap() {
   const environmentConfig = loadEnv();
@@ -21,13 +24,17 @@ export async function bootstrap() {
   const sequelize = createSequelize(environmentConfig.database);
   const models = initModels(sequelize);
   const services = createServices(models, {
+    appDomain: environmentConfig.appDomain,
     authTokens: environmentConfig.authTokens,
     authTokenSecret: environmentConfig.authTokenSecret,
+    authVerification: environmentConfig.authVerification,
     cacheStore,
     fileStorage,
+    passkey: environmentConfig.passkey,
     ...(environmentConfig.email ? { email: environmentConfig.email } : {}),
     ...(environmentConfig.sms ? { sms: environmentConfig.sms } : {}),
     ...(environmentConfig.sso ? { sso: environmentConfig.sso } : {}),
+    totp: environmentConfig.totp,
   });
   const modules = createModules(services, {
     authCookies: environmentConfig.authCookies,

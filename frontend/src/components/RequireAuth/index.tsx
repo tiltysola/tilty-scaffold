@@ -2,24 +2,15 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 
 import { useAuth } from '@/hooks/useAuth';
 import { routePath } from '@/router';
-import { Spinner } from '@/shadcn/components/ui/spinner';
+
+import SessionRestoring from '@/components/SessionRestoring';
 
 const Index = () => {
   const location = useLocation();
   const auth = useAuth();
 
   if (auth.status === 'restoring') {
-    return (
-      <main
-        aria-busy="true"
-        className="fixed inset-0 z-50 flex min-h-svh items-center justify-center bg-background text-sm text-muted-foreground"
-      >
-        <div className="flex flex-col items-center gap-3 text-center">
-          <Spinner className="size-5" />
-          <span>Restoring session</span>
-        </div>
-      </main>
-    );
+    return <SessionRestoring />;
   }
 
   if (auth.status === 'anonymous') {

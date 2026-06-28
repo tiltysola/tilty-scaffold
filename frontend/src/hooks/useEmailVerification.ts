@@ -1,11 +1,11 @@
 import { useCallback, useState } from 'react';
 
 import { getApiErrorMessage } from '@/lib/api';
-import { type EmailVerificationSendResult, type SendEmailVerificationInput } from '@/lib/auth';
+import { type SendEmailVerificationInput, type VerificationCodeSendResult } from '@/lib/auth';
 
 import { useAsyncAction } from './useAsyncAction';
 
-type SendEmailVerification = (input: SendEmailVerificationInput) => Promise<EmailVerificationSendResult>;
+type SendEmailVerification = (input: SendEmailVerificationInput) => Promise<VerificationCodeSendResult>;
 type ErrorMessageResolver = (error: unknown, fallback: string) => string;
 
 interface UseEmailVerificationOptions {

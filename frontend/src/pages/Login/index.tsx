@@ -6,17 +6,18 @@ import { type z } from 'zod';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { useFormState } from '@/hooks/useFormState';
 import { ApiError } from '@/lib/api';
-import { fetchSsoConfig, getSsoStartUrl, login, type SsoPublicConfig } from '@/lib/auth';
+import { fetchSsoConfig, getSsoStartUrl, isVerificationRequired, login, type SsoPublicConfig } from '@/lib/auth';
 import { loginCredentialsSchema } from '@/lib/auth-validation';
 import { routePath } from '@/router';
 import { Button } from '@/shadcn/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/shadcn/components/ui/card';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
-import { isSafeRelativePath } from '@tilty/shared/paths';
 
+import { AuthCard } from '@/components/AuthCard';
 import FormMessage from '@/components/FormMessage';
 import SsoProviderIcon from '@/components/SsoProviderIcon';
+
+import { createVerificationParams, getRedirectPath } from './utils';
 
 type LoginFormState = z.input<typeof loginCredentialsSchema>;
 
@@ -38,16 +39,16 @@ const Index = () => {
     ssoConfig.enabled && ssoConfig.loginEnabled ? ssoConfig.providers.filter((provider) => provider.loginEnabled) : [];
 
   useEffect(() => {
-    let active = true;
+    let isActive = true;
 
     void fetchSsoConfig()
       .then((config) => {
-        if (active) {
+        if (isActive) {
           setSsoConfig(config);
         }
       })
       .catch((requestError: unknown) => {
-        if (!active) {
+        if (!isActive) {
           return;
         }
 
@@ -58,7 +59,7 @@ const Index = () => {
       });
 
     return () => {
-      active = false;
+      isActive = false;
     };
   }, [setError]);
 
@@ -76,74 +77,28 @@ const Index = () => {
     const session = await run(() => login(parsed.data), 'Login could not be completed.');
 
     if (session) {
+      if (isVerificationRequired(session)) {
+        navigate(
+          `${routePath('verifySignIn')}?${createVerificationParams(
+            session.verificationToken,
+            redirectPath,
+            session.defaultMethod,
+            session.methods,
+          )}`,
+          { replace: true },
+        );
+        return;
+      }
+
       navigate(redirectPath, { replace: true });
     }
   };
 
   return (
-    <main className="flex min-h-svh w-full items-center justify-center bg-muted px-4 py-10 text-foreground sm:px-6">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Log in</CardTitle>
-          <CardDescription>Log in with account credentials to access the dashboard.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {ssoLoginProviders.length > 0 ? (
-            <div className="mb-4 grid gap-4">
-              <div className="grid gap-2">
-                {ssoLoginProviders.map((provider) => (
-                  <Button
-                    disabled={submitting}
-                    key={provider.id}
-                    onClick={() => window.location.assign(getSsoStartUrl(redirectPath, provider.id))}
-                    type="button"
-                    variant="outline"
-                  >
-                    <SsoProviderIcon iconUrl={provider.iconUrl} name={provider.name} size="compact" />
-                    Log in with {provider.name}
-                  </Button>
-                ))}
-              </div>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <div className="h-px flex-1 bg-border" />
-                <span>Alternative</span>
-                <div className="h-px flex-1 bg-border" />
-              </div>
-            </div>
-          ) : null}
-          <form className="grid gap-4" onSubmit={handleSubmit}>
-            <div className="grid gap-2">
-              <Label htmlFor="identifier">Email or username</Label>
-              <Input
-                autoComplete="username"
-                disabled={submitting}
-                id="identifier"
-                name="identifier"
-                onChange={handleChange('identifier')}
-                placeholder="name@example.com or username"
-                value={form.identifier}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                autoComplete="current-password"
-                disabled={submitting}
-                id="password"
-                name="password"
-                onChange={handleChange('password')}
-                placeholder="Enter your password"
-                type="password"
-                value={form.password}
-              />
-            </div>
-            <FormMessage message={error} variant="error" />
-            <Button className="w-full" disabled={submitting} type="submit">
-              {submitting ? 'Logging in' : 'Log in'}
-            </Button>
-          </form>
-        </CardContent>
-        <CardFooter className="flex-col justify-center gap-2 text-sm text-muted-foreground">
+    <AuthCard
+      description="Log in with account credentials to access the dashboard."
+      footer={
+        <>
           <div className="flex gap-2">
             <span>Need an account?</span>
             <Link className="font-medium text-primary hover:underline" to={routePath('register')}>
@@ -153,28 +108,67 @@ const Index = () => {
           <Link className="font-medium text-primary hover:underline" to={routePath('forgotPassword')}>
             Password recovery
           </Link>
-        </CardFooter>
-      </Card>
-    </main>
+        </>
+      }
+      footerClassName="flex-col justify-center gap-2 text-sm text-muted-foreground"
+      title="Log in"
+    >
+      {ssoLoginProviders.length > 0 ? (
+        <div className="mb-4 grid gap-4">
+          <div className="grid gap-2">
+            {ssoLoginProviders.map((provider) => (
+              <Button
+                disabled={submitting}
+                key={provider.id}
+                onClick={() => window.location.assign(getSsoStartUrl(redirectPath, provider.id))}
+                type="button"
+                variant="outline"
+              >
+                <SsoProviderIcon iconUrl={provider.iconUrl} name={provider.name} size="compact" />
+                Log in with {provider.name}
+              </Button>
+            ))}
+          </div>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="h-px flex-1 bg-border" />
+            <span>Alternative</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+        </div>
+      ) : null}
+      <form className="grid gap-4" onSubmit={handleSubmit}>
+        <div className="grid gap-2">
+          <Label htmlFor="identifier">Email or username</Label>
+          <Input
+            autoComplete="username"
+            disabled={submitting}
+            id="identifier"
+            name="identifier"
+            onChange={handleChange('identifier')}
+            placeholder="name@example.com or username"
+            value={form.identifier}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="password">Password</Label>
+          <Input
+            autoComplete="current-password"
+            disabled={submitting}
+            id="password"
+            name="password"
+            onChange={handleChange('password')}
+            placeholder="Enter your password"
+            type="password"
+            value={form.password}
+          />
+        </div>
+        <FormMessage message={error} variant="error" />
+        <Button className="w-full" disabled={submitting} type="submit">
+          {submitting ? 'Logging in' : 'Log in'}
+        </Button>
+      </form>
+    </AuthCard>
   );
 };
-
-function getRedirectPath(state: unknown) {
-  if (!state || typeof state !== 'object') {
-    return routePath('dashboard');
-  }
-
-  const from = (state as { from?: unknown }).from;
-
-  return getSafeRedirectPath(from);
-}
-
-function getSafeRedirectPath(value: unknown) {
-  if (typeof value !== 'string' || !isSafeRelativePath(value)) {
-    return routePath('dashboard');
-  }
-
-  return value;
-}
 
 export default Index;

@@ -1,7 +1,8 @@
 import { type Middleware } from 'koa';
 
 import { type BackendModule } from '../../core/module';
-import { AuthController, type AuthCookieConfig } from './auth.controller';
+import { AuthController } from './auth.controller';
+import { type AuthCookieConfig } from './auth.http';
 import { type AuthService } from './auth.service';
 import { type SsoService } from './auth.sso';
 
@@ -86,9 +87,39 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
         handlers: rateLimitedHandlers(controller.updateMe),
       },
       {
+        method: 'patch',
+        path: '/me/password',
+        handlers: rateLimitedHandlers(controller.changePassword),
+      },
+      {
         method: 'post',
         path: '/avatar',
         handlers: rateLimitedHandlers(controller.avatar),
+      },
+      {
+        method: 'delete',
+        path: '/avatar',
+        handlers: rateLimitedHandlers(controller.deleteAvatar),
+      },
+      {
+        method: 'post',
+        path: '/profile-banner',
+        handlers: rateLimitedHandlers(controller.profileBanner),
+      },
+      {
+        method: 'delete',
+        path: '/profile-banner',
+        handlers: rateLimitedHandlers(controller.deleteProfileBanner),
+      },
+      {
+        method: 'post',
+        path: '/profile-background',
+        handlers: rateLimitedHandlers(controller.profileBackground),
+      },
+      {
+        method: 'delete',
+        path: '/profile-background',
+        handlers: rateLimitedHandlers(controller.deleteProfileBackground),
       },
       {
         method: 'post',
@@ -99,6 +130,96 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
         method: 'post',
         path: '/logout',
         handlers: [controller.logout],
+      },
+      {
+        method: 'get',
+        path: '/totp',
+        handlers: [controller.totpStatus],
+      },
+      {
+        method: 'post',
+        path: '/totp/setup',
+        handlers: rateLimitedHandlers(controller.totpSetup),
+      },
+      {
+        method: 'post',
+        path: '/totp/enable',
+        handlers: rateLimitedHandlers(controller.totpEnable),
+      },
+      {
+        method: 'post',
+        path: '/verification/challenges',
+        handlers: rateLimitedHandlers(controller.createVerificationChallenge),
+      },
+      {
+        method: 'post',
+        path: '/verification/code',
+        handlers: rateLimitedHandlers(controller.sendVerificationCode),
+      },
+      {
+        method: 'post',
+        path: '/verification/passkey/options',
+        handlers: rateLimitedHandlers(controller.verificationPasskeyOptions),
+      },
+      {
+        method: 'post',
+        path: '/verification/confirm',
+        handlers: rateLimitedHandlers(controller.verifyAuthenticationChallenge),
+      },
+      {
+        method: 'post',
+        path: '/totp/disable',
+        handlers: rateLimitedHandlers(controller.totpDisable),
+      },
+      {
+        method: 'post',
+        path: '/totp/recovery-codes',
+        handlers: rateLimitedHandlers(controller.totpRegenerateRecoveryCodes),
+      },
+      {
+        method: 'get',
+        path: '/mfa',
+        handlers: [controller.mfaSettings],
+      },
+      {
+        method: 'patch',
+        path: '/mfa',
+        handlers: rateLimitedHandlers(controller.updateMfaSettings),
+      },
+      {
+        method: 'get',
+        path: '/passkeys',
+        handlers: [controller.passkeys],
+      },
+      {
+        method: 'post',
+        path: '/passkeys/registration-options',
+        handlers: rateLimitedHandlers(controller.passkeyRegistrationOptions),
+      },
+      {
+        method: 'post',
+        path: '/passkeys',
+        handlers: rateLimitedHandlers(controller.passkeyRegistrationVerify),
+      },
+      {
+        method: 'delete',
+        path: '/passkeys/:passkeyId',
+        handlers: rateLimitedHandlers(controller.deletePasskey),
+      },
+      {
+        method: 'get',
+        path: '/devices',
+        handlers: [controller.deviceSessions],
+      },
+      {
+        method: 'delete',
+        path: '/devices/others',
+        handlers: rateLimitedHandlers(controller.revokeOtherDeviceSessions),
+      },
+      {
+        method: 'delete',
+        path: '/devices/:sessionId',
+        handlers: rateLimitedHandlers(controller.revokeDeviceSession),
       },
       {
         method: 'get',

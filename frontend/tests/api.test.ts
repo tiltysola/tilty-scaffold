@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError, apiRequest, getApiErrorMessage } from '../src/lib/api';
+import { createStorageBlockedTestWindow, createTestWindow } from './support/auth';
 
 describe('apiRequest', () => {
   afterEach(() => {
@@ -19,6 +20,7 @@ describe('apiRequest', () => {
       );
     });
 
+    vi.stubGlobal('window', createTestWindow());
     vi.stubGlobal('fetch', fetchMock);
 
     const data = await apiRequest<{ ok: boolean }>('/api/auth/login', {
@@ -36,6 +38,7 @@ describe('apiRequest', () => {
     expect(init?.credentials).toBe('include');
     expect(init?.signal).toBeInstanceOf(AbortSignal);
     expect(headers.get('Content-Type')).toBe('application/json');
+    expect(headers.get('X-Device-Id')).toMatch(/^[A-Za-z0-9._:-]{1,128}$/);
   });
 
   it('sends FormData requests without JSON content headers', async () => {
@@ -64,6 +67,29 @@ describe('apiRequest', () => {
 
     expect(init?.body).toBe(form);
     expect(headers.has('Content-Type')).toBe(false);
+  });
+
+  it('continues requests when browser storage is unavailable', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 200,
+          error: null,
+          data: { ok: true },
+        }),
+        { status: 200 },
+      );
+    });
+
+    vi.stubGlobal('window', createStorageBlockedTestWindow());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiRequest<{ ok: boolean }>('/api/auth/config')).resolves.toEqual({ ok: true });
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const headers = init?.headers as Headers;
+
+    expect(headers.has('X-Device-Id')).toBe(false);
   });
 
   it('rejects absolute and non-API request paths before fetch', async () => {

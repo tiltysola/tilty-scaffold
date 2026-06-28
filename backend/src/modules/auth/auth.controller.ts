@@ -4,7 +4,20 @@ import { AppError } from '../../core/errors';
 import { ok } from '../../core/http';
 import { readMultipartFile } from '../../infra/multipart';
 import {
+  type AuthCookieConfig,
+  clearAuthCookies,
+  getAuthRequestContext,
+  getAuthToken,
+  setAuthCookies,
+  setSensitiveAuthResponseHeaders,
+} from './auth.http';
+import {
+  authDeviceSessionIdSchema,
+  authPasskeyIdSchema,
+  changePasswordSchema,
   loginSchema,
+  mfaSettingsSchema,
+  passkeyRegistrationVerifySchema,
   registerSchema,
   resetPasswordSchema,
   sendEmailVerificationSchema,
@@ -13,29 +26,17 @@ import {
   ssoCreateAccountSchema,
   ssoSessionSchema,
   ssoStartQuerySchema,
+  totpSetupEnableSchema,
   updateCurrentUserSchema,
+  verificationChallengeCreateSchema,
+  verificationCodeSendSchema,
+  verificationConfirmSchema,
+  verificationTokenSchema,
   verifyProfileEmailSchema,
   verifyProfilePhoneSchema,
 } from './auth.schemas';
 import { type AuthService } from './auth.service';
 import { type SsoCallbackInput, type SsoService } from './auth.sso';
-
-type AuthCookieSameSite = 'lax' | 'none' | 'strict';
-type AuthCookieSecurePolicy = 'auto' | 'false' | 'true';
-
-export interface AuthCookieConfig {
-  accessTokenName: string;
-  refreshTokenName: string;
-  sameSite: AuthCookieSameSite;
-  secure: AuthCookieSecurePolicy;
-}
-
-export const defaultAuthCookieConfig: AuthCookieConfig = {
-  accessTokenName: 'tilty_scaffold_access_token',
-  refreshTokenName: 'tilty_scaffold_refresh_token',
-  sameSite: 'lax',
-  secure: 'auto',
-};
 
 export class AuthController {
   constructor(
@@ -46,12 +47,15 @@ export class AuthController {
   ) {}
 
   config: Middleware = async (ctx) => {
-    ctx.body = ok(this.authService.getPublicConfig());
+    ctx.body = ok({
+      fileUploadMaxBytes: this.avatarUploadMaxBytes,
+      ...this.authService.getPublicConfig(),
+    });
   };
 
   register: Middleware = async (ctx) => {
     const input = registerSchema.parse(ctx.request.body);
-    const session = await this.authService.register(input);
+    const session = await this.authService.register(input, getAuthRequestContext(ctx));
 
     setSensitiveAuthResponseHeaders(ctx);
     setAuthCookies(ctx, session, this.cookieConfig);
@@ -92,11 +96,16 @@ export class AuthController {
 
   login: Middleware = async (ctx) => {
     const input = loginSchema.parse(ctx.request.body);
-    const session = await this.authService.login(input);
+    const result = await this.authService.login(input, getAuthRequestContext(ctx));
 
     setSensitiveAuthResponseHeaders(ctx);
-    setAuthCookies(ctx, session, this.cookieConfig);
-    ctx.body = ok(toSessionResponse(session));
+    if (isVerificationRequiredResponse(result)) {
+      ctx.body = ok(result);
+      return;
+    }
+
+    setAuthCookies(ctx, result, this.cookieConfig);
+    ctx.body = ok(toSessionResponse(result));
   };
 
   resetPassword: Middleware = async (ctx) => {
@@ -142,6 +151,15 @@ export class AuthController {
     ctx.body = ok(user);
   };
 
+  changePassword: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const input = changePasswordSchema.parse(ctx.request.body);
+    const result = await this.authService.changeCurrentUserPassword(token, input);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(result);
+  };
+
   avatar: Middleware = async (ctx) => {
     const token = getAuthToken(ctx, this.cookieConfig);
     const file = await readMultipartFile(ctx.req, ctx.get('content-type'), ctx.get('content-length'), {
@@ -149,6 +167,54 @@ export class AuthController {
       maxBytes: this.avatarUploadMaxBytes,
     });
     const user = await this.authService.uploadAvatar(token, file);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(user);
+  };
+
+  deleteAvatar: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const user = await this.authService.deleteAvatar(token);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(user);
+  };
+
+  profileBanner: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const file = await readMultipartFile(ctx.req, ctx.get('content-type'), ctx.get('content-length'), {
+      fieldName: 'profileBanner',
+      maxBytes: this.avatarUploadMaxBytes,
+    });
+    const user = await this.authService.uploadProfileBanner(token, file);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(user);
+  };
+
+  deleteProfileBanner: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const user = await this.authService.deleteProfileBanner(token);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(user);
+  };
+
+  profileBackground: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const file = await readMultipartFile(ctx.req, ctx.get('content-type'), ctx.get('content-length'), {
+      fieldName: 'profileBackground',
+      maxBytes: this.avatarUploadMaxBytes,
+    });
+    const user = await this.authService.uploadProfileBackground(token, file);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(user);
+  };
+
+  deleteProfileBackground: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const user = await this.authService.deleteProfileBackground(token);
 
     setSensitiveAuthResponseHeaders(ctx);
     ctx.body = ok(user);
@@ -167,7 +233,7 @@ export class AuthController {
     let session: Awaited<ReturnType<AuthService['refreshSession']>>;
 
     try {
-      session = await this.authService.refreshSession(refreshToken);
+      session = await this.authService.refreshSession(refreshToken, getAuthRequestContext(ctx));
     } catch (error) {
       if (isAuthenticationFailure(error)) {
         clearAuthCookies(ctx, this.cookieConfig);
@@ -205,7 +271,7 @@ export class AuthController {
 
   ssoBindStart: Middleware = async (ctx) => {
     const token = getAuthToken(ctx, this.cookieConfig);
-    const { user } = await this.authService.authenticate(token);
+    const { user } = await this.authService.requireSsoBindingAccess(token);
     const query = ssoStartQuerySchema.parse(ctx.query);
     const loginUrl = await this.ssoService.createBindUrl(user.id, query.redirect, query.providerId);
 
@@ -213,19 +279,22 @@ export class AuthController {
   };
 
   ssoCallback: Middleware = async (ctx) => {
-    const redirectUrl = await this.ssoService.handleCallback({
-      code: getQueryStringValue(ctx.query.code),
-      error: getQueryStringValue(ctx.query.error),
-      errorDescription: getQueryStringValue(ctx.query.error_description),
-      state: getQueryStringValue(ctx.query.state),
-    } satisfies SsoCallbackInput);
+    const redirectUrl = await this.ssoService.handleCallback(
+      {
+        code: getQueryStringValue(ctx.query.code),
+        error: getQueryStringValue(ctx.query.error),
+        errorDescription: getQueryStringValue(ctx.query.error_description),
+        state: getQueryStringValue(ctx.query.state),
+      } satisfies SsoCallbackInput,
+      getAuthRequestContext(ctx),
+    );
 
     ctx.redirect(redirectUrl);
   };
 
   ssoSession: Middleware = async (ctx) => {
     const input = ssoSessionSchema.parse(ctx.request.body);
-    const session = await this.ssoService.exchangeHandoffToken(input.token);
+    const session = await this.ssoService.exchangeHandoffToken(input.token, getAuthRequestContext(ctx));
 
     setSensitiveAuthResponseHeaders(ctx);
     setAuthCookies(ctx, session, this.cookieConfig);
@@ -234,7 +303,7 @@ export class AuthController {
 
   ssoCreateAccount: Middleware = async (ctx) => {
     const input = ssoCreateAccountSchema.parse(ctx.request.body);
-    const session = await this.ssoService.createSsoAccount(input);
+    const session = await this.ssoService.createSsoAccount(input, getAuthRequestContext(ctx));
 
     setSensitiveAuthResponseHeaders(ctx);
     setAuthCookies(ctx, session, this.cookieConfig);
@@ -244,11 +313,16 @@ export class AuthController {
 
   ssoBindAccount: Middleware = async (ctx) => {
     const input = ssoBindAccountSchema.parse(ctx.request.body);
-    const session = await this.ssoService.bindSsoAccount(input);
+    const result = await this.ssoService.bindSsoAccount(input, getAuthRequestContext(ctx));
 
     setSensitiveAuthResponseHeaders(ctx);
-    setAuthCookies(ctx, session, this.cookieConfig);
-    ctx.body = ok(toSessionResponse(session));
+    if (isVerificationRequiredResponse(result)) {
+      ctx.body = ok(result);
+      return;
+    }
+
+    setAuthCookies(ctx, result, this.cookieConfig);
+    ctx.body = ok(toSessionResponse(result));
   };
 
   ssoIdentities: Middleware = async (ctx) => {
@@ -260,9 +334,151 @@ export class AuthController {
       identities: await this.ssoService.listUserIdentities(user.id),
     });
   };
+
+  totpStatus: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.getTotpStatus(token));
+  };
+
+  totpSetup: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.createTotpSetup(token));
+  };
+
+  totpEnable: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const input = totpSetupEnableSchema.parse(ctx.request.body);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.enableTotp(token, input));
+  };
+
+  totpDisable: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.disableTotp(token));
+  };
+
+  totpRegenerateRecoveryCodes: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.regenerateTotpRecoveryCodes(token));
+  };
+
+  mfaSettings: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.getMfaSettings(token));
+  };
+
+  updateMfaSettings: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const input = mfaSettingsSchema.parse(ctx.request.body);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.updateMfaSettings(token, input));
+  };
+
+  createVerificationChallenge: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const input = verificationChallengeCreateSchema.parse(ctx.request.body);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.createVerificationChallenge(token, input.purpose, getAuthRequestContext(ctx)));
+  };
+
+  sendVerificationCode: Middleware = async (ctx) => {
+    const input = verificationCodeSendSchema.parse(ctx.request.body);
+    const token = ctx.cookies.get(this.cookieConfig.accessTokenName);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.sendVerificationCode(token, input, getAuthRequestContext(ctx)));
+  };
+
+  verificationPasskeyOptions: Middleware = async (ctx) => {
+    const input = verificationTokenSchema.parse(ctx.request.body);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(
+      await this.authService.createPasskeyVerificationOptions(input.verificationToken, getAuthRequestContext(ctx)),
+    );
+  };
+
+  verifyAuthenticationChallenge: Middleware = async (ctx) => {
+    const input = verificationConfirmSchema.parse(ctx.request.body);
+    const result = await this.authService.verifyAuthenticationChallenge(input, getAuthRequestContext(ctx));
+
+    setSensitiveAuthResponseHeaders(ctx);
+    if ('accessToken' in result) {
+      setAuthCookies(ctx, result, this.cookieConfig);
+      ctx.body = ok(toSessionResponse(result));
+      return;
+    }
+
+    ctx.body = ok(result);
+  };
+
+  passkeys: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.listPasskeys(token));
+  };
+
+  passkeyRegistrationOptions: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.createPasskeyRegistrationOptions(token));
+  };
+
+  passkeyRegistrationVerify: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const input = passkeyRegistrationVerifySchema.parse(ctx.request.body);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.verifyPasskeyRegistration(token, input));
+  };
+
+  deletePasskey: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const { passkeyId } = authPasskeyIdSchema.parse(ctx.params);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.deletePasskey(token, passkeyId));
+  };
+
+  deviceSessions: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.listDeviceSessions(token));
+  };
+
+  revokeDeviceSession: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+    const { sessionId } = authDeviceSessionIdSchema.parse(ctx.params);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.revokeDeviceSession(token, sessionId));
+  };
+
+  revokeOtherDeviceSessions: Middleware = async (ctx) => {
+    const token = getAuthToken(ctx, this.cookieConfig);
+
+    setSensitiveAuthResponseHeaders(ctx);
+    ctx.body = ok(await this.authService.revokeOtherDeviceSessions(token));
+  };
 }
 
-type AuthenticatedSession = Awaited<ReturnType<AuthService['login']>>;
+type AuthenticatedSession = Awaited<ReturnType<AuthService['register']>>;
 
 function toSessionResponse(session: AuthenticatedSession) {
   return {
@@ -272,70 +488,14 @@ function toSessionResponse(session: AuthenticatedSession) {
   };
 }
 
-export function getAuthToken(ctx: Parameters<Middleware>[0], config: AuthCookieConfig) {
-  const cookieToken = ctx.cookies.get(config.accessTokenName);
-
-  if (!cookieToken) {
-    throw new AppError('AUTH_REQUIRED', 'Authentication is required.', 401);
-  }
-
-  return cookieToken;
-}
-
-function setAuthCookies(ctx: Parameters<Middleware>[0], session: AuthenticatedSession, config: AuthCookieConfig) {
-  setAuthCookie(ctx, config.accessTokenName, session.accessToken, session.accessTokenExpiresAt, config);
-  setAuthCookie(ctx, config.refreshTokenName, session.refreshToken, session.refreshTokenExpiresAt, config);
-}
-
-function setAuthCookie(
-  ctx: Parameters<Middleware>[0],
-  name: string,
-  token: string,
-  expiresAt: string,
-  config: AuthCookieConfig,
-) {
-  ctx.cookies.set(name, token, {
-    expires: new Date(expiresAt),
-    httpOnly: true,
-    overwrite: true,
-    path: '/',
-    sameSite: config.sameSite,
-    secure: isSecureRequest(ctx, config.secure),
-  });
-}
-
-function clearAuthCookies(ctx: Parameters<Middleware>[0], config: AuthCookieConfig) {
-  clearAuthCookie(ctx, config.accessTokenName, config);
-  clearAuthCookie(ctx, config.refreshTokenName, config);
-}
-
-function clearAuthCookie(ctx: Parameters<Middleware>[0], name: string, config: AuthCookieConfig) {
-  ctx.cookies.set(name, '', {
-    expires: new Date(0),
-    httpOnly: true,
-    maxAge: 0,
-    overwrite: true,
-    path: '/',
-    sameSite: config.sameSite,
-    secure: isSecureRequest(ctx, config.secure),
-  });
-}
-
-function setSensitiveAuthResponseHeaders(ctx: Parameters<Middleware>[0]) {
-  ctx.set('Cache-Control', 'no-store');
-  ctx.set('Pragma', 'no-cache');
-}
-
 function isAuthenticationFailure(error: unknown) {
   return error instanceof AppError && error.status === 401;
 }
 
-function isSecureRequest(ctx: Parameters<Middleware>[0], policy: AuthCookieSecurePolicy) {
-  if (policy !== 'auto') {
-    return policy === 'true';
-  }
-
-  return ctx.secure;
+function isVerificationRequiredResponse(value: unknown): value is { requiresVerification: true } {
+  return Boolean(
+    value && typeof value === 'object' && (value as { requiresVerification?: unknown }).requiresVerification === true,
+  );
 }
 
 function getQueryStringValue(value: unknown) {

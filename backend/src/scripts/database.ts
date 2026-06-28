@@ -1,8 +1,9 @@
+import { initModels } from '../composition/models';
 import { loadEnv } from '../config/env';
-import { configureLogger, flushLogger, logger } from '../core/logger';
+import { flushLogger, logger } from '../core/logger';
 import { createSequelize } from '../infra/database';
+import { configureLogger } from '../infra/logger';
 import { createMigrator } from '../infra/migrator';
-import { initModels } from '../modules';
 import { AccessControlService } from '../modules/access-control/access-control.service';
 
 type DatabaseCommand = 'down' | 'status' | 'up';

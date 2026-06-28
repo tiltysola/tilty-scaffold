@@ -21,6 +21,7 @@ export default defineConfig({
       '@tilty/shared/validation': path.resolve(sharedSourceRoot, 'validation.ts'),
       '@tilty/shared': path.resolve(sharedSourceRoot, 'index.ts'),
     },
+    dedupe: ['react', 'react-dom'],
   },
   plugins: [react(), tailwindcss()],
   build: {

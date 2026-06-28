@@ -2,8 +2,9 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 
 import { useAuth } from '@/hooks/useAuth';
 import { routePath } from '@/router';
-import { Spinner } from '@/shadcn/components/ui/spinner';
 import { hasPermission, type SystemPermissionKey } from '@tilty/shared/access-control';
+
+import SessionRestoring from '@/components/SessionRestoring';
 
 interface RequirePermissionProps {
   permission: SystemPermissionKey;
@@ -14,17 +15,7 @@ const Index = ({ permission }: RequirePermissionProps) => {
   const auth = useAuth();
 
   if (auth.status === 'restoring') {
-    return (
-      <main
-        aria-busy="true"
-        className="fixed inset-0 z-50 flex min-h-svh items-center justify-center bg-background text-sm text-muted-foreground"
-      >
-        <div className="flex flex-col items-center gap-3 text-center">
-          <Spinner className="size-5" />
-          <span>Restoring session</span>
-        </div>
-      </main>
-    );
+    return <SessionRestoring />;
   }
 
   if (auth.status === 'anonymous') {

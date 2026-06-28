@@ -1,12 +1,12 @@
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { initModels } from '../src/composition/models';
 import { loadConfigFileSource, loadEnv } from '../src/config/env';
 import { createSequelize } from '../src/infra/database';
 import { createMigrator } from '../src/infra/migrator';
-import { initModels } from '../src/modules';
 import { SmtpEmailSender } from '../src/modules/auth/auth.email';
 import { SetupService } from '../src/modules/setup/setup.service';
 
@@ -316,6 +316,39 @@ describe('setup service', () => {
     await expect(readFile('config.toml', 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('checks configuration file writability before mutating the database during setup completion', async () => {
+    const service = new SetupService('setup');
+    const environment = {
+      ...service.getDefaults().environment,
+      DATABASE_STORAGE: './data/preflight.sqlite',
+      SCHEDULER_ENABLED: 'false',
+    };
+
+    await writeFile('config.toml', 'SETUP_LOCKED = false\n', 'utf8');
+    await chmod('config.toml', 0o400);
+
+    try {
+      await expect(
+        service.complete({
+          administrator: {
+            username: 'root_user',
+            displayName: 'Root User',
+            email: 'root@example.com',
+            password: 'password123',
+            confirmPassword: 'password123',
+          },
+          environment,
+        }),
+      ).rejects.toMatchObject({
+        code: 'SETUP_CONFIG_WRITE_FAILED',
+        status: 500,
+      });
+      await expect(readFile('./data/preflight.sqlite')).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await chmod('config.toml', 0o600).catch(() => undefined);
+    }
+  });
+
   it('verifies sqlite database and memory cache connectivity', async () => {
     const service = new SetupService('setup');
     const environment = {
@@ -330,6 +363,49 @@ describe('setup service', () => {
     await expect(service.testCache({ environment })).resolves.toEqual({
       connected: true,
       store: 'memory',
+    });
+  });
+
+  it('rejects invalid database configuration during setup database testing', async () => {
+    const service = new SetupService('setup');
+    const baseEnvironment = service.getDefaults().environment;
+
+    await expect(
+      service.testDatabase({
+        environment: {
+          ...baseEnvironment,
+          DATABASE_DIALECT: 'postgres',
+          DATABASE_URL: 'postgres://app:password@localhost:5432/tilty',
+          DATABASE_POOL_MAX: '1',
+          DATABASE_POOL_MIN: '2',
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'SETUP_ENV_INVALID',
+      status: 400,
+    });
+    await expect(
+      service.testDatabase({
+        environment: {
+          ...baseEnvironment,
+          NODE_ENV: 'production',
+          DATABASE_SYNC: 'alter',
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'SETUP_ENV_INVALID',
+      status: 400,
+    });
+    await expect(
+      service.testDatabase({
+        environment: {
+          ...baseEnvironment,
+          SERVER_MULTI_INSTANCE_ENABLED: 'true',
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'SETUP_ENV_INVALID',
+      status: 400,
     });
   });
 

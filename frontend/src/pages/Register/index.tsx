@@ -17,10 +17,10 @@ import {
 } from '@/lib/auth-validation';
 import { routePath } from '@/router';
 import { Button } from '@/shadcn/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/shadcn/components/ui/card';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
 
+import { AuthCard } from '@/components/AuthCard';
 import FormMessage from '@/components/FormMessage';
 
 const registerSchema = createPasswordFormSchema({
@@ -55,21 +55,21 @@ const Index = () => {
   const submitting = submitAction.pending;
 
   useEffect(() => {
-    let active = true;
+    let isActive = true;
 
     const loadConfig = async () => {
       try {
         const config = await fetchAuthConfig();
 
-        if (active) {
+        if (isActive) {
           setEmailVerificationRequired(config.registrationEmailVerificationRequired);
         }
       } catch (requestError) {
-        if (active) {
+        if (isActive) {
           setConfigError(getApiErrorMessage(requestError, 'Registration configuration could not be loaded.'));
         }
       } finally {
-        if (active) {
+        if (isActive) {
           setConfigLoading(false);
         }
       }
@@ -78,7 +78,7 @@ const Index = () => {
     void loadConfig();
 
     return () => {
-      active = false;
+      isActive = false;
     };
   }, []);
 
@@ -132,121 +132,119 @@ const Index = () => {
   };
 
   return (
-    <main className="flex min-h-svh w-full items-center justify-center bg-muted px-4 py-10 text-foreground sm:px-6">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Account registration</CardTitle>
-          <CardDescription>Register an account to access the dashboard.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="grid gap-4" onSubmit={handleSubmit}>
-            <div className="grid gap-2">
-              <Label htmlFor="username">Username</Label>
-              <Input
-                autoComplete="username"
-                disabled={submitting}
-                id="username"
-                name="username"
-                onChange={handleChange('username')}
-                placeholder="alex_chen"
-                value={form.username}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="displayName">Display name</Label>
-              <Input
-                autoComplete="name"
-                disabled={submitting}
-                id="displayName"
-                name="displayName"
-                onChange={handleChange('displayName')}
-                placeholder="Alex Chen"
-                value={form.displayName}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
-              <div className="flex gap-2">
-                <Input
-                  autoComplete="email"
-                  disabled={submitting || sendingCode}
-                  id="email"
-                  name="email"
-                  onChange={handleChange('email')}
-                  placeholder="alex@example.com"
-                  type="email"
-                  value={form.email}
-                />
-                {emailVerificationRequired ? (
-                  <Button
-                    disabled={configLoading || submitting || sendingCode}
-                    onClick={handleSendEmailVerification}
-                    type="button"
-                    variant="outline"
-                  >
-                    {sendingCode ? 'Sending' : 'Send code'}
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-            {emailVerificationRequired ? (
-              <div className="grid gap-2">
-                <Label htmlFor="emailVerificationCode">Verification code</Label>
-                <Input
-                  autoComplete="one-time-code"
-                  disabled={submitting}
-                  id="emailVerificationCode"
-                  inputMode="numeric"
-                  maxLength={6}
-                  name="emailVerificationCode"
-                  onChange={handleChange('emailVerificationCode')}
-                  pattern="[0-9]{6}"
-                  placeholder="000000"
-                  value={form.emailVerificationCode}
-                />
-              </div>
-            ) : null}
-            <div className="grid gap-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                autoComplete="new-password"
-                disabled={submitting}
-                id="password"
-                name="password"
-                onChange={handleChange('password')}
-                placeholder="At least 8 characters"
-                type="password"
-                value={form.password}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="confirmPassword">Confirm password</Label>
-              <Input
-                autoComplete="new-password"
-                disabled={submitting}
-                id="confirmPassword"
-                name="confirmPassword"
-                onChange={handleChange('confirmPassword')}
-                placeholder="Repeat password"
-                type="password"
-                value={form.confirmPassword}
-              />
-            </div>
-            <FormMessage message={error} variant="error" />
-            <FormMessage message={notice} variant="notice" />
-            <Button className="w-full" disabled={configLoading || submitting} type="submit">
-              {submitting ? 'Creating account' : configLoading ? 'Loading' : 'Create account'}
-            </Button>
-          </form>
-        </CardContent>
-        <CardFooter className="justify-center gap-2 text-sm text-muted-foreground">
+    <AuthCard
+      description="Register an account to access the dashboard."
+      footer={
+        <>
           <span>Already have an account?</span>
           <Link className="font-medium text-primary hover:underline" to={routePath('login')}>
             Log in
           </Link>
-        </CardFooter>
-      </Card>
-    </main>
+        </>
+      }
+      footerClassName="justify-center gap-2 text-sm text-muted-foreground"
+      title="Account registration"
+    >
+      <form className="grid gap-4" onSubmit={handleSubmit}>
+        <div className="grid gap-2">
+          <Label htmlFor="username">Username</Label>
+          <Input
+            autoComplete="username"
+            disabled={submitting}
+            id="username"
+            name="username"
+            onChange={handleChange('username')}
+            placeholder="alex_chen"
+            value={form.username}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="displayName">Display name</Label>
+          <Input
+            autoComplete="name"
+            disabled={submitting}
+            id="displayName"
+            name="displayName"
+            onChange={handleChange('displayName')}
+            placeholder="Alex Chen"
+            value={form.displayName}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="email">Email</Label>
+          <div className="flex gap-2">
+            <Input
+              autoComplete="email"
+              disabled={submitting || sendingCode}
+              id="email"
+              name="email"
+              onChange={handleChange('email')}
+              placeholder="alex@example.com"
+              type="email"
+              value={form.email}
+            />
+            {emailVerificationRequired ? (
+              <Button
+                disabled={configLoading || submitting || sendingCode}
+                onClick={handleSendEmailVerification}
+                type="button"
+                variant="outline"
+              >
+                {sendingCode ? 'Sending' : 'Send code'}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        {emailVerificationRequired ? (
+          <div className="grid gap-2">
+            <Label htmlFor="emailVerificationCode">Verification code</Label>
+            <Input
+              autoComplete="one-time-code"
+              disabled={submitting}
+              id="emailVerificationCode"
+              inputMode="numeric"
+              maxLength={6}
+              name="emailVerificationCode"
+              onChange={handleChange('emailVerificationCode')}
+              pattern="[0-9]{6}"
+              placeholder="000000"
+              value={form.emailVerificationCode}
+            />
+          </div>
+        ) : null}
+        <div className="grid gap-2">
+          <Label htmlFor="password">Password</Label>
+          <Input
+            autoComplete="new-password"
+            disabled={submitting}
+            id="password"
+            name="password"
+            onChange={handleChange('password')}
+            placeholder="At least 8 characters"
+            type="password"
+            value={form.password}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="confirmPassword">Confirm password</Label>
+          <Input
+            autoComplete="new-password"
+            disabled={submitting}
+            id="confirmPassword"
+            name="confirmPassword"
+            onChange={handleChange('confirmPassword')}
+            placeholder="Repeat password"
+            type="password"
+            value={form.confirmPassword}
+          />
+        </div>
+        <FormMessage message={error} variant="error" />
+        <FormMessage message={notice} variant="notice" />
+        <Button className="w-full" disabled={configLoading || submitting} type="submit">
+          {submitting ? 'Creating account' : configLoading ? 'Loading' : 'Create account'}
+        </Button>
+      </form>
+    </AuthCard>
   );
 };
 

@@ -2,9 +2,10 @@ import { createServer } from 'http';
 import { z } from 'zod';
 
 import { createApp, shouldSkipGlobalRateLimit } from './app';
-import { configureLogger, flushLogger, logger } from './core/logger';
+import { flushLogger, logger } from './core/logger';
 import { closeServer, frontendDistDirectory, listen, warnIfFrontendEntryFileMissing } from './core/server';
 import { createCacheStore } from './infra/cache';
+import { configureLogger } from './infra/logger';
 import { createSetupOnlyModule } from './modules/setup';
 
 const defaultAppDomain = 'http://localhost:8011';
@@ -18,7 +19,7 @@ const setupRuntimeEnvSchema = z.object({
   LOG_REQUEST_ENABLED: z.enum(['true', 'false']).default('true'),
   LOG_TARGETS: z.enum(['console']).default('console'),
   LOG_WRITE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
-  SERVER_HOST: z.string().default('0.0.0.0'),
+  SERVER_HOST: z.string().default('127.0.0.1'),
   SERVER_PORT: z.coerce.number().int().positive().default(3000),
   SERVER_TRUST_PROXY: z.enum(['true', 'false']).default('false'),
 });
@@ -69,7 +70,7 @@ export async function bootstrapSetup() {
   process.once('SIGTERM', shutdown);
 }
 
-function loadSetupRuntimeEnv() {
+export function loadSetupRuntimeEnv() {
   return setupRuntimeEnvSchema.parse(process.env);
 }
 

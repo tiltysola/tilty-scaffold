@@ -2,14 +2,19 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { SystemPermission, SystemRole } from '@tilty/shared/access-control';
 
+import { initModels } from '../src/composition/models';
+import { createServices } from '../src/composition/services';
 import { type RouteDefinition } from '../src/core/module';
 import { createSequelize } from '../src/infra/database';
 import { createMigrator } from '../src/infra/migrator';
 import { errorMiddleware } from '../src/middleware/error';
-import { createServices, initModels } from '../src/modules';
-import { defaultAuthCookieConfig } from '../src/modules/auth/auth.controller';
+import { defaultAuthCookieConfig } from '../src/modules/auth/auth.http';
 import { createUsersModule } from '../src/modules/users';
-import { registerTestUser } from './support/auth';
+import {
+  registerRootWithUserManagementAccess,
+  registerTestUser,
+  registerUserWithUserManagementAccess,
+} from './support/auth';
 import { createTestContext, getTestRoute, runMiddlewares } from './support/http';
 
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
@@ -30,6 +35,7 @@ describe('access control', () => {
 
     routes = createUsersModule(services.user, services.accessControl, services.auth, {
       cookies: defaultAuthCookieConfig,
+      ssoService: services.sso,
     }).routes;
   });
 
@@ -52,7 +58,7 @@ describe('access control', () => {
   });
 
   it('enforces user list permissions on the server', async () => {
-    const rootSession = await registerTestUser(services.auth, 'Root User', 'root-list@example.com');
+    const rootSession = await registerRootWithUserManagementAccess(services, 'Root User', 'root-list@example.com');
     const regularSession = await registerTestUser(services.auth, 'Regular User', 'regular-list@example.com');
     const listRoute = getTestRoute(routes, 'get', '/');
 
@@ -89,8 +95,12 @@ describe('access control', () => {
   });
 
   it('updates user roles and prevents removing the final root', async () => {
-    const rootSession = await registerTestUser(services.auth, 'Root User', 'root-admin@example.com');
-    const regularSession = await registerTestUser(services.auth, 'Regular User', 'regular-admin@example.com');
+    const rootSession = await registerRootWithUserManagementAccess(services, 'Root User', 'root-admin@example.com');
+    const regularSession = await registerUserWithUserManagementAccess(
+      services,
+      'Regular User',
+      'regular-admin@example.com',
+    );
     const regularUser = await services.user.findByUsername('regular_user');
     const rootUser = await services.user.findByUsername('root_user');
     const updateRolesRoute = getTestRoute(routes, 'put', '/:id/roles');

@@ -46,7 +46,7 @@ interface VerificationRecord {
   nextSendAt: number;
 }
 
-type VerificationPurpose = 'password-reset' | 'profile-email' | 'registration';
+type VerificationPurpose = 'mfa' | 'password-reset' | 'profile-email' | 'registration';
 
 const defaultVerificationConfig = {
   codeCooldownMs: 60_000,
@@ -109,6 +109,14 @@ export class EmailVerificationService {
     ]);
   }
 
+  async sendMfaCode(email: string) {
+    return this.sendCode('mfa', email, 'Security verification code', (code) => [
+      `Your security verification code is ${code}.`,
+      `This code expires in ${Math.ceil(this.codeExpiresInMs / 60_000)} minutes.`,
+      'No action is required if this code was not requested by you.',
+    ]);
+  }
+
   async verifyRegistrationCode(email: string, code?: string) {
     if (!this.sender) {
       return;
@@ -131,6 +139,14 @@ export class EmailVerificationService {
     }
 
     await this.verifyCode('profile-email', email, code);
+  }
+
+  async verifyMfaCode(email: string, code?: string) {
+    if (!this.sender) {
+      throw new AppError('EMAIL_VERIFICATION_DISABLED', 'Email verification is disabled.', 404);
+    }
+
+    await this.verifyCode('mfa', email, code);
   }
 
   private async sendCode(

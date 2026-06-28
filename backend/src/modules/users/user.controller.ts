@@ -3,19 +3,36 @@ import { z } from 'zod';
 
 import { AppError } from '../../core/errors';
 import { ok } from '../../core/http';
+import { readMultipartFile } from '../../infra/multipart';
 import { type AccessControlService, type UserAccess } from '../access-control/access-control.service';
 import { hashPassword } from '../auth/auth.crypto';
 import {
+  authPasskeyIdSchema,
   displayNameSchema,
   emailSchema,
+  mfaSettingsSchema,
   optionalPhoneNumberSchema,
   passwordSchema,
+  profileBioSchema,
+  profileBirthdaySchema,
+  profileGenderSchema,
+  profileLocationSchema,
+  profileWebsiteUrlSchema,
   usernameSchema,
 } from '../auth/auth.schemas';
+import { type AuthService } from '../auth/auth.service';
+import { type SsoService } from '../auth/auth.sso';
 import { type UserModel } from './user.model';
 import { type UserService } from './user.service';
 
 const userIdSchema = z.uuid();
+const userIdParamsSchema = z.object({
+  id: userIdSchema,
+});
+const userSsoIdentityParamsSchema = z.object({
+  id: userIdSchema,
+  providerId: z.string().trim().min(1).max(64),
+});
 const defaultUserPageSize = 20;
 const maxUserPageSize = 100;
 const listUsersQuerySchema = z.object({
@@ -28,6 +45,11 @@ const updateUserRolesSchema = z.object({
 const updateUserSchema = z.object({
   username: usernameSchema.optional(),
   displayName: displayNameSchema.optional(),
+  gender: profileGenderSchema,
+  birthday: profileBirthdaySchema,
+  bio: profileBioSchema,
+  location: profileLocationSchema,
+  websiteUrl: profileWebsiteUrlSchema,
   email: emailSchema.optional(),
   emailVerified: z.boolean().optional(),
   phoneNumber: optionalPhoneNumberSchema,
@@ -44,6 +66,9 @@ export class UserController {
   constructor(
     private readonly userService: UserService,
     private readonly accessControl: AccessControlService,
+    private readonly authService: AuthService,
+    private readonly ssoService: SsoService,
+    private readonly avatarUploadMaxBytes: number,
   ) {}
 
   list: Middleware = async (ctx) => {
@@ -65,7 +90,7 @@ export class UserController {
   };
 
   updateRoles: Middleware = async (ctx) => {
-    const userId = userIdSchema.parse((ctx as { params?: Record<string, string> }).params?.id);
+    const userId = userIdParamsSchema.parse((ctx as { params?: Record<string, string> }).params).id;
     const input = updateUserRolesSchema.parse(ctx.request.body);
     const user = await this.userService.findManagedById(userId);
 
@@ -79,7 +104,7 @@ export class UserController {
   };
 
   update: Middleware = async (ctx) => {
-    const userId = userIdSchema.parse((ctx as { params?: Record<string, string> }).params?.id);
+    const userId = userIdParamsSchema.parse((ctx as { params?: Record<string, string> }).params).id;
     const input = updateUserSchema.parse(ctx.request.body);
     const user = await this.userService.findManagedById(userId);
 
@@ -117,8 +142,149 @@ export class UserController {
       return managedUser;
     });
 
+    if (credentials) {
+      await this.authService.revokeManagedUserSessions(updatedUser.id);
+    }
+
     ctx.body = ok(toUserListItem(updatedUser, access ?? (await this.accessControl.getUserAccess(updatedUser.id))));
   };
+
+  details: Middleware = async (ctx) => {
+    const user = await this.requireManagedUser(ctx);
+
+    ctx.body = ok(await this.toManagedUserDetails(user, getCurrentSessionIdForUser(ctx, user.id)));
+  };
+
+  updateMfa: Middleware = async (ctx) => {
+    const user = await this.requireManagedUser(ctx);
+    const input = mfaSettingsSchema.parse(ctx.request.body);
+
+    await this.authService.updateManagedMfaSettings(user, input);
+    ctx.body = ok(await this.authService.getManagedSecurityState(user));
+  };
+
+  disableTotp: Middleware = async (ctx) => {
+    const user = await this.requireManagedUser(ctx);
+
+    await this.authService.disableManagedTotp(user, getCurrentSessionIdForUser(ctx, user.id));
+    ctx.body = ok(await this.authService.getManagedSecurityState(user));
+  };
+
+  deletePasskey: Middleware = async (ctx) => {
+    const { id, passkeyId } = z
+      .object({
+        id: userIdSchema,
+        ...authPasskeyIdSchema.shape,
+      })
+      .parse((ctx as { params?: Record<string, string> }).params);
+    const user = await this.requireManagedUserById(id);
+
+    await this.authService.deleteManagedPasskey(user, passkeyId, getCurrentSessionIdForUser(ctx, user.id));
+    ctx.body = ok(await this.authService.getManagedSecurityState(user));
+  };
+
+  devices: Middleware = async (ctx) => {
+    const user = await this.requireManagedUser(ctx);
+
+    ctx.body = ok(await this.authService.listManagedDeviceSessions(user, getCurrentSessionIdForUser(ctx, user.id)));
+  };
+
+  ssoIdentities: Middleware = async (ctx) => {
+    const user = await this.requireManagedUser(ctx);
+
+    ctx.body = ok({
+      identities: await this.ssoService.listUserIdentities(user.id),
+    });
+  };
+
+  deleteSsoIdentity: Middleware = async (ctx) => {
+    const { id, providerId } = userSsoIdentityParamsSchema.parse((ctx as { params?: Record<string, string> }).params);
+    const user = await this.requireManagedUserById(id);
+
+    await this.userService.deleteSsoIdentity(user.id, providerId);
+    ctx.body = ok({
+      identities: await this.ssoService.listUserIdentities(user.id),
+    });
+  };
+
+  avatar: Middleware = async (ctx) => {
+    const user = await this.requireManagedUser(ctx);
+    const file = await readMultipartFile(ctx.req, ctx.get('content-type'), ctx.get('content-length'), {
+      fieldName: 'avatar',
+      maxBytes: this.avatarUploadMaxBytes,
+    });
+    const updatedUser = await this.authService.uploadManagedAvatar(user, file);
+
+    ctx.body = ok(await this.toManagedUserDetails(updatedUser, getCurrentSessionIdForUser(ctx, updatedUser.id)));
+  };
+
+  deleteAvatar: Middleware = async (ctx) => {
+    const user = await this.requireManagedUser(ctx);
+    const updatedUser = await this.authService.deleteManagedAvatar(user);
+
+    ctx.body = ok(await this.toManagedUserDetails(updatedUser, getCurrentSessionIdForUser(ctx, updatedUser.id)));
+  };
+
+  profileBanner: Middleware = async (ctx) => {
+    const user = await this.requireManagedUser(ctx);
+    const file = await readMultipartFile(ctx.req, ctx.get('content-type'), ctx.get('content-length'), {
+      fieldName: 'profileBanner',
+      maxBytes: this.avatarUploadMaxBytes,
+    });
+    const updatedUser = await this.authService.uploadManagedProfileBanner(user, file);
+
+    ctx.body = ok(await this.toManagedUserDetails(updatedUser, getCurrentSessionIdForUser(ctx, updatedUser.id)));
+  };
+
+  deleteProfileBanner: Middleware = async (ctx) => {
+    const user = await this.requireManagedUser(ctx);
+    const updatedUser = await this.authService.deleteManagedProfileBanner(user);
+
+    ctx.body = ok(await this.toManagedUserDetails(updatedUser, getCurrentSessionIdForUser(ctx, updatedUser.id)));
+  };
+
+  profileBackground: Middleware = async (ctx) => {
+    const user = await this.requireManagedUser(ctx);
+    const file = await readMultipartFile(ctx.req, ctx.get('content-type'), ctx.get('content-length'), {
+      fieldName: 'profileBackground',
+      maxBytes: this.avatarUploadMaxBytes,
+    });
+    const updatedUser = await this.authService.uploadManagedProfileBackground(user, file);
+
+    ctx.body = ok(await this.toManagedUserDetails(updatedUser, getCurrentSessionIdForUser(ctx, updatedUser.id)));
+  };
+
+  deleteProfileBackground: Middleware = async (ctx) => {
+    const user = await this.requireManagedUser(ctx);
+    const updatedUser = await this.authService.deleteManagedProfileBackground(user);
+
+    ctx.body = ok(await this.toManagedUserDetails(updatedUser, getCurrentSessionIdForUser(ctx, updatedUser.id)));
+  };
+
+  private async requireManagedUser(ctx: Parameters<Middleware>[0]) {
+    const userId = userIdParamsSchema.parse((ctx as { params?: Record<string, string> }).params).id;
+
+    return this.requireManagedUserById(userId);
+  }
+
+  private async requireManagedUserById(userId: string) {
+    const user = await this.userService.findManagedById(userId);
+
+    if (!user) {
+      throw new AppError('USER_NOT_FOUND', 'User was not found.', 404);
+    }
+
+    return user;
+  }
+
+  private async toManagedUserDetails(user: UserModel, currentSessionId?: string | undefined) {
+    return {
+      user: toUserListItem(user, await this.accessControl.getUserAccess(user.id)),
+      security: await this.authService.getManagedSecurityState(user),
+      devices: (await this.authService.listManagedDeviceSessions(user, currentSessionId)).sessions,
+      ssoIdentities: await this.ssoService.listUserIdentities(user.id),
+    };
+  }
 }
 
 function toUserListItem(user: UserModel, access: UserAccess = { roles: [], permissions: [] }) {
@@ -126,11 +292,18 @@ function toUserListItem(user: UserModel, access: UserAccess = { roles: [], permi
     id: user.id,
     username: user.username,
     displayName: user.displayName,
+    ...(user.gender ? { gender: user.gender } : {}),
+    ...(user.birthday ? { birthday: user.birthday } : {}),
+    ...(user.bio ? { bio: user.bio } : {}),
+    ...(user.location ? { location: user.location } : {}),
+    ...(user.websiteUrl ? { websiteUrl: user.websiteUrl } : {}),
     email: user.email,
     emailVerified: user.emailVerified,
     ...(user.phoneNumber ? { phoneNumber: user.phoneNumber } : {}),
     phoneVerified: user.phoneVerified,
     ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
+    ...(user.profileBannerUrl ? { profileBannerUrl: user.profileBannerUrl } : {}),
+    ...(user.profileBackgroundUrl ? { profileBackgroundUrl: user.profileBackgroundUrl } : {}),
     available: user.available,
     roles: access.roles,
     permissions: access.permissions,
@@ -141,4 +314,10 @@ function toUserListItem(user: UserModel, access: UserAccess = { roles: [], permi
 
 function toIsoString(value: Date) {
   return value.toISOString();
+}
+
+function getCurrentSessionIdForUser(ctx: Parameters<Middleware>[0], userId: string) {
+  const auth = ctx.state.auth as { sessionId?: string; user?: { id?: string } } | undefined;
+
+  return auth?.user?.id === userId ? auth.sessionId : undefined;
 }

@@ -65,7 +65,7 @@ interface AliyunSmsSenderPoolOptions {
   selectProfileIndex?: (profiles: AliyunSmsProfileConfig[]) => number;
 }
 
-type VerificationPurpose = 'profile-phone';
+type VerificationPurpose = 'mfa' | 'profile-phone';
 
 const smsProbeTimeoutMs = 10_000;
 const defaultVerificationConfig = {
@@ -116,12 +116,24 @@ export class SmsVerificationService {
     return this.sendCode('profile-phone', phoneNumber);
   }
 
+  async sendMfaCode(phoneNumber: string) {
+    return this.sendCode('mfa', phoneNumber);
+  }
+
   async verifyProfilePhoneVerificationCode(phoneNumber: string, code?: string) {
     if (!this.sender) {
       throw new AppError('SMS_VERIFICATION_DISABLED', 'SMS verification is disabled.', 404);
     }
 
     await this.verifyCode('profile-phone', phoneNumber, code);
+  }
+
+  async verifyMfaCode(phoneNumber: string, code?: string) {
+    if (!this.sender) {
+      throw new AppError('SMS_VERIFICATION_DISABLED', 'SMS verification is disabled.', 404);
+    }
+
+    await this.verifyCode('mfa', phoneNumber, code);
   }
 
   private async sendCode(purpose: VerificationPurpose, phoneNumber: string) {

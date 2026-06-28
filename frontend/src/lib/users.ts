@@ -1,4 +1,11 @@
-import { authenticatedApiRequest } from './auth';
+import {
+  type AuthDeviceSession,
+  authenticatedApiRequest,
+  type MfaSettings,
+  type PasskeySummary,
+  type SsoIdentityPublic,
+  type TotpStatus,
+} from './auth';
 
 export interface RoleSummary {
   id: string;
@@ -14,11 +21,18 @@ export interface UserListItem {
   id: string;
   username: string;
   displayName: string;
+  gender?: string;
+  birthday?: string;
+  bio?: string;
+  location?: string;
+  websiteUrl?: string;
   email: string;
   emailVerified: boolean;
   phoneNumber?: string;
   phoneVerified: boolean;
   avatarUrl?: string;
+  profileBannerUrl?: string;
+  profileBackgroundUrl?: string;
   available: boolean;
   roles: string[];
   permissions: string[];
@@ -39,6 +53,19 @@ export interface UserListResponse {
   users: UserListItem[];
 }
 
+export interface ManagedUserSecurity {
+  mfaSettings: MfaSettings;
+  passkeys: PasskeySummary[];
+  totpStatus: TotpStatus;
+}
+
+export interface ManagedUserDetails {
+  user: UserListItem;
+  security: ManagedUserSecurity;
+  devices: AuthDeviceSession[];
+  ssoIdentities: SsoIdentityPublic[];
+}
+
 interface FetchUsersOptions {
   page?: number;
   pageSize?: number;
@@ -47,6 +74,11 @@ interface FetchUsersOptions {
 export interface UpdateUserInput {
   username?: string;
   displayName?: string;
+  gender?: string | null;
+  birthday?: string | null;
+  bio?: string | null;
+  location?: string | null;
+  websiteUrl?: string | null;
   email?: string;
   emailVerified?: boolean;
   phoneNumber?: string | null;
@@ -79,11 +111,86 @@ export async function updateUser(userId: string, input: UpdateUserInput) {
   });
 }
 
+export async function fetchUserDetails(userId: string) {
+  return authenticatedApiRequest<ManagedUserDetails>(`/api/users/${userId}/details`, {
+    method: 'GET',
+  });
+}
+
 export async function updateUserRoles(userId: string, roleKeys: string[]) {
   return authenticatedApiRequest<UserListItem>(`/api/users/${userId}/roles`, {
     body: {
       roleKeys,
     },
     method: 'PUT',
+  });
+}
+
+export async function updateUserMfaSettings(userId: string, input: { enabled?: boolean; requiredForSso?: boolean }) {
+  return authenticatedApiRequest<ManagedUserSecurity>(`/api/users/${userId}/mfa`, {
+    body: input,
+    method: 'PATCH',
+  });
+}
+
+export async function disableUserTotp(userId: string) {
+  return authenticatedApiRequest<ManagedUserSecurity>(`/api/users/${userId}/totp/disable`, {
+    method: 'POST',
+  });
+}
+
+export async function deleteUserPasskey(userId: string, passkeyId: string) {
+  return authenticatedApiRequest<ManagedUserSecurity>(`/api/users/${userId}/passkeys/${passkeyId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function deleteUserSsoIdentity(userId: string, providerId: string) {
+  return authenticatedApiRequest<{ identities: SsoIdentityPublic[] }>(
+    `/api/users/${userId}/sso-identities/${providerId}`,
+    {
+      method: 'DELETE',
+    },
+  );
+}
+
+export function uploadUserAvatar(userId: string, file: File) {
+  return uploadUserImage(userId, 'avatar', 'avatar', file);
+}
+
+export function deleteUserAvatar(userId: string) {
+  return authenticatedApiRequest<ManagedUserDetails>(`/api/users/${userId}/avatar`, {
+    method: 'DELETE',
+  });
+}
+
+export function uploadUserProfileBanner(userId: string, file: File) {
+  return uploadUserImage(userId, 'profile-banner', 'profileBanner', file);
+}
+
+export function deleteUserProfileBanner(userId: string) {
+  return authenticatedApiRequest<ManagedUserDetails>(`/api/users/${userId}/profile-banner`, {
+    method: 'DELETE',
+  });
+}
+
+export function uploadUserProfileBackground(userId: string, file: File) {
+  return uploadUserImage(userId, 'profile-background', 'profileBackground', file);
+}
+
+export function deleteUserProfileBackground(userId: string) {
+  return authenticatedApiRequest<ManagedUserDetails>(`/api/users/${userId}/profile-background`, {
+    method: 'DELETE',
+  });
+}
+
+function uploadUserImage(userId: string, segment: string, fieldName: string, file: File) {
+  const form = new FormData();
+
+  form.append(fieldName, file);
+
+  return authenticatedApiRequest<ManagedUserDetails>(`/api/users/${userId}/${segment}`, {
+    body: form,
+    method: 'POST',
   });
 }

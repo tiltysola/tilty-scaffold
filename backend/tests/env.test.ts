@@ -45,6 +45,11 @@ describe('environment configuration', () => {
       accessTokenTtlSeconds: 900,
       refreshTokenTtlSeconds: 2_592_000,
     });
+    expect(env.authVerification).toEqual({
+      challengeTtlMs: 300_000,
+      maxChallengeAttempts: 5,
+      sudoTtlMs: 900_000,
+    });
     expect(env.authCookies).toEqual({
       accessTokenName: 'tilty_scaffold_access_token',
       refreshTokenName: 'tilty_scaffold_refresh_token',
@@ -62,6 +67,15 @@ describe('environment configuration', () => {
     });
     expect(env.fileUpload).toEqual({
       maxBytes: 2 * 1024 * 1024,
+    });
+    expect(env.passkey).toEqual({
+      rpName: 'Tilty Scaffold',
+      registrationTtlMs: 300_000,
+      operationTimeoutMs: 60_000,
+    });
+    expect(env.totp).toEqual({
+      issuer: 'Tilty Scaffold',
+      setupTtlMs: 600_000,
     });
     expect(env.corsOrigins).toEqual(['http://localhost:8011']);
     expect(env.logger).toEqual({
@@ -322,15 +336,23 @@ describe('environment configuration', () => {
     }
   });
 
-  it('loads configurable authentication token and cookie settings', () => {
+  it('loads configurable authentication settings', () => {
     const env = loadEnv({
-      AUTH_ACCESS_TOKEN_COOKIE_NAME: '__Host-tilty_access',
+      AUTH_TOKEN_SECRET: authTokenSecret,
       AUTH_ACCESS_TOKEN_TTL_SECONDS: '600',
+      AUTH_REFRESH_TOKEN_TTL_SECONDS: '1209600',
+      AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS: '180',
+      AUTH_VERIFICATION_MAX_ATTEMPTS: '3',
+      AUTH_VERIFICATION_SUDO_TTL_SECONDS: '600',
+      AUTH_PASSKEY_RP_NAME: 'Example App',
+      AUTH_PASSKEY_REGISTRATION_TTL_SECONDS: '240',
+      AUTH_PASSKEY_OPERATION_TIMEOUT_MS: '45000',
+      AUTH_TOTP_ISSUER: 'Example App',
+      AUTH_TOTP_SETUP_TTL_SECONDS: '480',
+      AUTH_ACCESS_TOKEN_COOKIE_NAME: '__Host-tilty_access',
+      AUTH_REFRESH_TOKEN_COOKIE_NAME: '__Host-tilty_refresh',
       AUTH_COOKIE_SAME_SITE: 'strict',
       AUTH_COOKIE_SECURE: 'true',
-      AUTH_REFRESH_TOKEN_COOKIE_NAME: '__Host-tilty_refresh',
-      AUTH_REFRESH_TOKEN_TTL_SECONDS: '1209600',
-      AUTH_TOKEN_SECRET: authTokenSecret,
       DATABASE_DIALECT: 'sqlite',
     } as NodeJS.ProcessEnv);
 
@@ -338,11 +360,25 @@ describe('environment configuration', () => {
       accessTokenTtlSeconds: 600,
       refreshTokenTtlSeconds: 1_209_600,
     });
+    expect(env.authVerification).toEqual({
+      challengeTtlMs: 180_000,
+      maxChallengeAttempts: 3,
+      sudoTtlMs: 600_000,
+    });
     expect(env.authCookies).toEqual({
       accessTokenName: '__Host-tilty_access',
       refreshTokenName: '__Host-tilty_refresh',
       sameSite: 'strict',
       secure: 'true',
+    });
+    expect(env.passkey).toEqual({
+      rpName: 'Example App',
+      registrationTtlMs: 240_000,
+      operationTimeoutMs: 45_000,
+    });
+    expect(env.totp).toEqual({
+      issuer: 'Example App',
+      setupTtlMs: 480_000,
     });
   });
 

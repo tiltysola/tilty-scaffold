@@ -1,4 +1,4 @@
-import { type Transaction, UniqueConstraintError } from 'sequelize';
+import { Op, type Transaction, UniqueConstraintError } from 'sequelize';
 
 import { AppError } from '../../core/errors';
 import { type SsoIdentityModel, type UserModel } from './user.model';
@@ -30,12 +30,22 @@ interface UpdateUserPasswordInput {
 
 interface UpdateUserProfileInput {
   displayName: string;
+  gender?: string | null | undefined;
+  birthday?: string | null | undefined;
+  bio?: string | null | undefined;
+  location?: string | null | undefined;
+  websiteUrl?: string | null | undefined;
   phoneNumber?: string | null | undefined;
 }
 
 interface UpdateManagedUserInput {
   username?: string | undefined;
   displayName?: string | undefined;
+  gender?: string | null | undefined;
+  birthday?: string | null | undefined;
+  bio?: string | null | undefined;
+  location?: string | null | undefined;
+  websiteUrl?: string | null | undefined;
   email?: string | undefined;
   emailVerified?: boolean | undefined;
   phoneNumber?: string | null | undefined;
@@ -112,6 +122,20 @@ export class UserService {
       : this.findByUsername(normalizedIdentifier);
   }
 
+  async listDistinctProfileGenders() {
+    const users = await this.userModel.findAll({
+      attributes: ['gender'],
+      group: ['gender'],
+      where: {
+        gender: {
+          [Op.ne]: null,
+        },
+      },
+    });
+
+    return users.map((user) => user.gender).filter(isPresentProfileText);
+  }
+
   async findBySsoIdentity(providerId: string, providerSubject: string) {
     const identity = await this.ssoIdentityModel.findOne({
       where: {
@@ -131,6 +155,23 @@ export class UserService {
         ['createdAt', 'ASC'],
       ],
     });
+  }
+
+  async deleteSsoIdentity(userId: string, providerId: string) {
+    const deleted = await this.ssoIdentityModel.destroy({
+      where: {
+        userId,
+        providerId,
+      },
+    });
+
+    if (deleted === 0) {
+      throw new AppError('USER_SSO_IDENTITY_NOT_FOUND', 'SSO identity was not found for this account.', 404);
+    }
+
+    return {
+      deleted: true,
+    } as const;
   }
 
   async listUsers(input: ListUsersInput) {
@@ -232,6 +273,73 @@ export class UserService {
   }
 
   async bindSsoIdentity(user: UserModel, input: BindSsoIdentityInput) {
+    await this.assertCanBindSsoIdentity(user, input);
+
+    const existingForUserProvider = await this.ssoIdentityModel.findOne({
+      where: {
+        userId: user.id,
+        providerId: input.providerId,
+      },
+    });
+
+    if (existingForUserProvider?.providerSubject === input.providerSubject) {
+      return user;
+    }
+
+    try {
+      return await this.userModel.sequelize!.transaction(async (transaction) => {
+        await this.ssoIdentityModel.create(
+          {
+            userId: user.id,
+            providerId: input.providerId,
+            providerSubject: input.providerSubject,
+            email: input.email,
+          },
+          { transaction },
+        );
+
+        return user;
+      });
+    } catch (error) {
+      if (error instanceof UniqueConstraintError) {
+        const existing = await this.ssoIdentityModel.findOne({
+          where: {
+            providerId: input.providerId,
+            providerSubject: input.providerSubject,
+          },
+        });
+
+        if (existing) {
+          if (existing.userId === user.id) {
+            return user;
+          }
+
+          throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
+        }
+
+        const existingForUserProvider = await this.ssoIdentityModel.findOne({
+          where: {
+            userId: user.id,
+            providerId: input.providerId,
+          },
+        });
+
+        if (existingForUserProvider) {
+          throw new AppError(
+            'USER_SSO_SUBJECT_EXISTS',
+            'The user is already associated with another SSO identity.',
+            409,
+          );
+        }
+
+        throw new AppError('SSO_BIND_CONFLICT', 'The SSO identity could not be associated with this account.', 409);
+      }
+
+      throw error;
+    }
+  }
+
+  async assertCanBindSsoIdentity(user: UserModel, input: BindSsoIdentityInput) {
     const existing = await this.ssoIdentityModel.findOne({
       where: {
         providerId: input.providerId,
@@ -252,32 +360,10 @@ export class UserService {
 
     if (existingForUserProvider) {
       if (existingForUserProvider.providerSubject === input.providerSubject) {
-        return user;
+        return;
       }
 
       throw new AppError('USER_SSO_SUBJECT_EXISTS', 'The user is already associated with another SSO identity.', 409);
-    }
-
-    try {
-      return await this.userModel.sequelize!.transaction(async (transaction) => {
-        await this.ssoIdentityModel.create(
-          {
-            userId: user.id,
-            providerId: input.providerId,
-            providerSubject: input.providerSubject,
-            email: input.email,
-          },
-          { transaction },
-        );
-
-        return user;
-      });
-    } catch (error) {
-      if (error instanceof UniqueConstraintError) {
-        throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
-      }
-
-      throw error;
     }
   }
 
@@ -331,6 +417,26 @@ export class UserService {
 
   async updateProfile(user: UserModel, input: UpdateUserProfileInput) {
     user.displayName = input.displayName;
+
+    if (Object.prototype.hasOwnProperty.call(input, 'gender')) {
+      user.gender = input.gender ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'birthday')) {
+      user.birthday = input.birthday ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'bio')) {
+      user.bio = input.bio ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'location')) {
+      user.location = input.location ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'websiteUrl')) {
+      user.websiteUrl = input.websiteUrl ?? null;
+    }
 
     if (input.phoneNumber !== undefined && input.phoneNumber !== user.phoneNumber) {
       if (input.phoneNumber) {
@@ -407,6 +513,26 @@ export class UserService {
 
     if (Object.prototype.hasOwnProperty.call(input, 'displayName')) {
       user.displayName = input.displayName ?? user.displayName;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'gender')) {
+      user.gender = input.gender ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'birthday')) {
+      user.birthday = input.birthday ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'bio')) {
+      user.bio = input.bio ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'location')) {
+      user.location = input.location ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'websiteUrl')) {
+      user.websiteUrl = input.websiteUrl ?? null;
     }
 
     if (emailProvided) {
@@ -494,6 +620,41 @@ export class UserService {
     return user.save();
   }
 
+  async clearAvatar(user: UserModel) {
+    user.avatarStorageKey = null;
+    user.avatarUrl = null;
+
+    return user.save();
+  }
+
+  async updateProfileBanner(user: UserModel, profileBannerUrl: string, profileBannerStorageKey: string) {
+    user.profileBannerUrl = profileBannerUrl;
+    user.profileBannerStorageKey = profileBannerStorageKey;
+
+    return user.save();
+  }
+
+  async clearProfileBanner(user: UserModel) {
+    user.profileBannerUrl = null;
+    user.profileBannerStorageKey = null;
+
+    return user.save();
+  }
+
+  async updateProfileBackground(user: UserModel, profileBackgroundUrl: string, profileBackgroundStorageKey: string) {
+    user.profileBackgroundUrl = profileBackgroundUrl;
+    user.profileBackgroundStorageKey = profileBackgroundStorageKey;
+
+    return user.save();
+  }
+
+  async clearProfileBackground(user: UserModel) {
+    user.profileBackgroundUrl = null;
+    user.profileBackgroundStorageKey = null;
+
+    return user.save();
+  }
+
   private async assertUniqueAccountIdentifiers(input: { username: string; email: string }) {
     if (await this.findByEmail(input.email)) {
       throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
@@ -519,4 +680,8 @@ export class UserService {
 
 function withTransaction(options: DatabaseWriteOptions) {
   return options.transaction ? { transaction: options.transaction } : {};
+}
+
+function isPresentProfileText(value: string | null): value is string {
+  return Boolean(value?.trim());
 }

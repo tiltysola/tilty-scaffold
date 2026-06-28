@@ -1,5 +1,7 @@
 import { routePath } from '@/router';
 
+import { getClientDeviceId } from './device';
+
 interface ApiSuccess<T> {
   code: number;
   error: null;
@@ -43,6 +45,12 @@ export async function apiRequest<T>(apiRequestPath: string, options: ApiRequestO
 
   if (body !== undefined && !isBodyInit(body) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
+  }
+
+  const deviceId = getClientDeviceId();
+
+  if (deviceId && !headers.has('X-Device-Id')) {
+    headers.set('X-Device-Id', deviceId);
   }
 
   let response: Response;

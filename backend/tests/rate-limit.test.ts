@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { shouldSkipGlobalRateLimit } from '../src/app';
-import { MemoryCacheStore } from '../src/infra/cache';
 import { rateLimitMiddleware } from '../src/middleware/rate-limit';
 import { createAuthModule } from '../src/modules/auth';
-import { defaultAuthCookieConfig } from '../src/modules/auth/auth.controller';
-import { type AuthService, defaultAuthTokenConfig } from '../src/modules/auth/auth.service';
-import { SsoService } from '../src/modules/auth/auth.sso';
+import { defaultAuthCookieConfig } from '../src/modules/auth/auth.http';
+import { type AuthService } from '../src/modules/auth/auth.service';
+import { type SsoService } from '../src/modules/auth/auth.sso';
 import { createTestContext, getTestRoute, runMiddleware, runMiddlewares } from './support/http';
 
 describe('rate limit middleware', () => {
@@ -21,14 +20,7 @@ describe('rate limit middleware', () => {
         max: 1,
         windowMs: 60_000,
       }),
-      ssoService: new SsoService(
-        {} as never,
-        {} as never,
-        'test-auth-token-secret-minimum-32-characters',
-        undefined,
-        new MemoryCacheStore(),
-        defaultAuthTokenConfig,
-      ),
+      ssoService: {} as SsoService,
     }).routes;
 
     await runMiddlewares(

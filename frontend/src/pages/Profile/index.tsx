@@ -1,25 +1,32 @@
-import { type ChangeEvent, type FormEventHandler, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type SubmitEventHandler, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import {
-  ChevronDownIcon,
-  EllipsisVerticalIcon,
+  CalendarDaysIcon,
+  FileTextIcon,
+  ImageIcon,
   ImageUpIcon,
-  KeyRoundIcon,
   LinkIcon,
   MailIcon,
-  PencilIcon,
+  MapPinIcon,
   PhoneIcon,
-  SaveIcon,
-  ShieldIcon,
+  UserCogIcon,
+  UserPenIcon,
+  UserRoundIcon,
+  WallpaperIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { useAuthenticatedSession } from '@/hooks/useAuth';
+import { useImageTextTone } from '@/hooks/useImageTextTone';
 import { getApiErrorMessage } from '@/lib/api';
 import {
   type AuthUser,
+  createVerificationChallenge,
+  deleteAvatar,
+  deleteProfileBackground,
+  deleteProfileBanner,
   fetchAuthConfig,
   fetchSsoConfig,
   fetchSsoIdentities,
@@ -30,56 +37,60 @@ import {
   resolveAssetUrl,
   sendProfileEmailVerification,
   sendProfilePhoneVerification,
+  sendVerificationCode,
   type SsoIdentityPublic,
   type SsoPublicConfig,
-  type SsoPublicProvider,
   updateCurrentUser,
   uploadAvatar,
+  uploadProfileBackground,
+  uploadProfileBanner,
+  type VerificationRequired,
+  verifyAuthenticationChallenge,
   verifyProfileEmail,
   verifyProfilePhone,
+  verifyWithPasskey,
 } from '@/lib/auth';
-import { displayNameSchema, phoneNumberSchema, verificationCodeSchema } from '@/lib/auth-validation';
 import {
-  formatPhoneCountryCode,
-  getPhoneCountryCode,
-  getPhoneLocalNumber,
-  getPhonePlaceholder,
-  supportedPhoneCountryCodes,
-} from '@/lib/phone';
+  displayNameSchema,
+  phoneNumberSchema,
+  profileBioSchema,
+  profileBirthdaySchema,
+  profileGenderSchema,
+  profileLocationSchema,
+  profileWebsiteUrlSchema,
+  verificationCodeSchema,
+} from '@/lib/auth-validation';
+import { getPhoneCountryCode, getPhoneLocalNumber, supportedPhoneCountryCodes } from '@/lib/phone';
+import {
+  getVerificationCodeDelivery,
+  maskEmailAddress,
+  maskPhoneNumber,
+  type VerificationCodeDelivery,
+} from '@/lib/verification';
 import { Avatar, AvatarFallback, AvatarImage } from '@/shadcn/components/ui/avatar';
-import { Badge } from '@/shadcn/components/ui/badge';
-import { Button } from '@/shadcn/components/ui/button';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/shadcn/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/shadcn/components/ui/dropdown-menu';
-import { Input } from '@/shadcn/components/ui/input';
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemSeparator,
-  ItemTitle,
-} from '@/shadcn/components/ui/item';
-import { Label } from '@/shadcn/components/ui/label';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/shadcn/components/ui/tooltip';
+import { ItemSeparator } from '@/shadcn/components/ui/item';
+import { cn } from '@/shadcn/lib/utils';
 
-import FormMessage from '@/components/FormMessage';
-import SsoProviderIcon from '@/components/SsoProviderIcon';
+import { IdentityVerificationDialog, type IdentityVerificationSubmitInput } from '@/components/IdentityVerification';
+import ImageCropDialog from '@/components/ImageCropDialog';
+import { ImagePreviewMedia, ImagePreviewTrigger } from '@/components/ImagePreviewDialog';
+import { ProfileItem, ProfileSection } from '@/components/ProfileCardList';
+
+import { EditProfileDetailsDialog, type ProfileDetailsDraft } from './components/EditProfileDetailsDialog';
+import { EmailVerificationDialog } from './components/EmailVerificationDialog';
+import { PhoneVerificationDialog } from './components/PhoneVerificationDialog';
+import { ProfileHeader } from './components/ProfileHeader';
+import { SsoProviderList } from './components/SsoProviderList';
+import { createProfileImageObjectUrl, formatRoleAccessSummary, getHashParams, syncPhoneDraft } from './utils';
+
+interface PendingVerification {
+  challenge: VerificationRequired;
+  onVerified: () => Promise<void>;
+}
+
+type ProfilePreviewTarget = 'avatar' | 'profileBanner' | 'profileBackground';
+
+const defaultProfileImageMaxBytes = 2 * 1024 * 1024;
 
 const Index = () => {
   const { user } = useAuthenticatedSession();
@@ -89,7 +100,7 @@ const Index = () => {
 
 const ProfileContent = ({ user }: { user: AuthUser }) => {
   const initialPhoneCountryCode = getPhoneCountryCode(user.phoneNumber, supportedPhoneCountryCodes);
-  const [displayNameDraft, setDisplayNameDraft] = useState(user.displayName);
+  const [profileDetailsDraft, setProfileDetailsDraft] = useState(() => createProfileDetailsDraft(user));
   const [phoneCountryCodes, setPhoneCountryCodes] = useState<PhoneCountryCode[]>([]);
   const [phoneCountryCodeDraft, setPhoneCountryCodeDraft] = useState<PhoneCountryCode>(
     initialPhoneCountryCode ?? '+86',
@@ -98,7 +109,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     getPhoneLocalNumber(user.phoneNumber, initialPhoneCountryCode),
   );
   const [phoneVerificationCodeDraft, setPhoneVerificationCodeDraft] = useState('');
-  const [phoneVerificationNotice, setPhoneVerificationNotice] = useState<string | null>(null);
+  const [phoneVerificationNotice, setPhoneVerificationNotice] = useState<VerificationCodeDelivery | null>(null);
   const [profileEmailVerificationEnabled, setProfileEmailVerificationEnabled] = useState(false);
   const [ssoConfig, setSsoConfig] = useState<SsoPublicConfig>({
     enabled: false,
@@ -106,13 +117,31 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     providers: [],
   });
   const [ssoIdentities, setSsoIdentities] = useState<SsoIdentityPublic[]>([]);
-  const [editingDisplayName, setEditingDisplayName] = useState(false);
+  const [editingProfileDetails, setEditingProfileDetails] = useState(false);
   const [editingPhoneNumber, setEditingPhoneNumber] = useState(false);
   const [verifyingEmail, setVerifyingEmail] = useState(false);
   const [emailVerificationCodeDraft, setEmailVerificationCodeDraft] = useState('');
-  const [emailVerificationNotice, setEmailVerificationNotice] = useState<string | null>(null);
+  const [emailVerificationNotice, setEmailVerificationNotice] = useState<VerificationCodeDelivery | null>(null);
+  const [pendingVerification, setPendingVerification] = useState<PendingVerification | null>(null);
+  const [profileImageMaxBytes, setProfileImageMaxBytes] = useState(defaultProfileImageMaxBytes);
+  const [avatarCropDialogOpen, setAvatarCropDialogOpen] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [deletingAvatar, setDeletingAvatar] = useState(false);
+  const [avatarCropImageUrl, setAvatarCropImageUrl] = useState<string | null>(null);
+  const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
+  const [profileBannerCropDialogOpen, setProfileBannerCropDialogOpen] = useState(false);
+  const [uploadingProfileBanner, setUploadingProfileBanner] = useState(false);
+  const [deletingProfileBanner, setDeletingProfileBanner] = useState(false);
+  const [profileBannerCropImageUrl, setProfileBannerCropImageUrl] = useState<string | null>(null);
+  const [profileBannerUploadError, setProfileBannerUploadError] = useState<string | null>(null);
+  const [profileBackgroundCropDialogOpen, setProfileBackgroundCropDialogOpen] = useState(false);
+  const [uploadingProfileBackground, setUploadingProfileBackground] = useState(false);
+  const [deletingProfileBackground, setDeletingProfileBackground] = useState(false);
+  const [profileBackgroundCropImageUrl, setProfileBackgroundCropImageUrl] = useState<string | null>(null);
+  const [profileBackgroundUploadError, setProfileBackgroundUploadError] = useState<string | null>(null);
+  const [profilePreviewTarget, setProfilePreviewTarget] = useState<ProfilePreviewTarget | null>(null);
+  const profileHeaderRef = useRef<HTMLElement>(null);
+  const profileHeaderTextRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const profileAction = useAsyncAction();
@@ -120,7 +149,14 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
   const emailVerificationConfirmAction = useAsyncAction();
   const phoneVerificationSendAction = useAsyncAction();
   const phoneVerificationConfirmAction = useAsyncAction();
+  const securityVerificationAction = useAsyncAction();
   const avatarUrl = resolveAssetUrl(user.avatarUrl);
+  const profileBannerUrl = resolveAssetUrl(user.profileBannerUrl);
+  const profileBackgroundUrl = resolveAssetUrl(user.profileBackgroundUrl);
+  const profileHeaderTextTone = useImageTextTone(profileBannerUrl ?? null, {
+    containerRef: profileHeaderRef,
+    targetRef: profileHeaderTextRef,
+  });
   const fallback = getUserInitials(user.displayName);
   const userHandle = getUserHandle(user.username);
   const savingProfile = profileAction.pending;
@@ -129,7 +165,8 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
   const sendingPhoneVerification = phoneVerificationSendAction.pending;
   const confirmingPhoneVerification = phoneVerificationConfirmAction.pending;
   const phoneVerificationPending = sendingPhoneVerification || confirmingPhoneVerification;
-  const displayNameChanged = displayNameDraft.trim() !== user.displayName;
+  const savedProfileDetails = useMemo(() => createProfileDetailsDraft(user), [user]);
+  const profileDetailsChanged = hasProfileDetailsChanged(profileDetailsDraft, savedProfileDetails);
   const phoneNumberDraft = useMemo(
     () => `${phoneCountryCodeDraft}${phoneLocalNumberDraft.trim()}`,
     [phoneCountryCodeDraft, phoneLocalNumberDraft],
@@ -139,9 +176,38 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
   const phoneBindingEnabled = phoneCountryCodes.length > 0;
   const phoneNumberChanged = phoneBindingEnabled && phoneNumberDraft !== (user.phoneNumber ?? '');
   const phoneVerificationRequired = phoneBindingEnabled && (phoneNumberChanged || !user.phoneVerified);
+  const avatarBusy = uploadingAvatar || deletingAvatar;
+  const profileBannerBusy = uploadingProfileBanner || deletingProfileBanner;
+  const profileBackgroundBusy = uploadingProfileBackground || deletingProfileBackground;
+  const profileHeaderTitleClassName = cn(
+    'truncate text-lg font-semibold',
+    profileBannerUrl && profileHeaderTextTone === 'light'
+      ? 'text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.65)]'
+      : undefined,
+    profileBannerUrl && profileHeaderTextTone === 'dark' ? 'text-zinc-950' : undefined,
+  );
+  const profileHeaderDescriptionClassName = cn(
+    'truncate text-sm text-muted-foreground',
+    profileBannerUrl && profileHeaderTextTone === 'light'
+      ? 'text-white/85 drop-shadow-[0_1px_2px_rgba(0,0,0,0.65)]'
+      : undefined,
+    profileBannerUrl && profileHeaderTextTone === 'dark' ? 'text-zinc-800' : undefined,
+  );
+  const profileHeaderActionClassName = cn(
+    profileBannerUrl && profileHeaderTextTone === 'light'
+      ? 'text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.65)] hover:bg-white/15 hover:text-white'
+      : undefined,
+    profileBannerUrl && profileHeaderTextTone === 'dark'
+      ? 'text-zinc-950 hover:bg-black/10 hover:text-zinc-950'
+      : undefined,
+  );
   const bindableSsoProviders = ssoConfig.enabled
     ? ssoConfig.providers.filter((provider) => provider.bindingEnabled)
     : [];
+  const syncProfileState = (updatedUser: AuthUser) => {
+    setProfileDetailsDraft(createProfileDetailsDraft(updatedUser));
+    syncPhoneDraft(updatedUser.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
+  };
 
   useEffect(() => {
     const params = getHashParams(location.hash);
@@ -155,20 +221,21 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     void fetchSsoIdentities()
       .then((result) => setSsoIdentities(result.identities))
       .catch((error: unknown) => {
-        toast.error(getApiErrorMessage(error, 'SSO identities could not be refreshed.'));
+        toast.error(getApiErrorMessage(error, 'SSO identities could not be loaded.'));
       });
   }, [location.hash, location.pathname, navigate]);
 
   useEffect(() => {
-    let active = true;
+    let isActive = true;
 
     void fetchAuthConfig()
       .then((config) => {
-        if (!active) {
+        if (!isActive) {
           return;
         }
 
         setPhoneCountryCodes(config.phoneCountryCodes);
+        setProfileImageMaxBytes(config.fileUploadMaxBytes);
         setProfileEmailVerificationEnabled(config.profileEmailVerificationEnabled);
         const currentCountryCode = getPhoneCountryCode(
           user.phoneNumber,
@@ -178,22 +245,22 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
         setPhoneLocalNumberDraft(getPhoneLocalNumber(user.phoneNumber, currentCountryCode));
       })
       .catch((error: unknown) => {
-        if (active) {
+        if (isActive) {
           toast.error(getApiErrorMessage(error, 'Profile configuration could not be loaded.'));
         }
       });
 
     return () => {
-      active = false;
+      isActive = false;
     };
   }, [user.phoneNumber]);
 
   useEffect(() => {
-    let active = true;
+    let isActive = true;
 
     void Promise.all([fetchSsoConfig(), fetchSsoIdentities()])
       .then(([config, identityResult]) => {
-        if (!active) {
+        if (!isActive) {
           return;
         }
 
@@ -201,63 +268,275 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
         setSsoIdentities(identityResult.identities);
       })
       .catch((error: unknown) => {
-        if (active) {
+        if (isActive) {
           toast.error(getApiErrorMessage(error, 'SSO configuration could not be loaded.'));
         }
       });
 
     return () => {
-      active = false;
+      isActive = false;
     };
   }, []);
 
-  const handleAvatarSelect = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0];
+  useEffect(() => {
+    return () => {
+      if (avatarCropImageUrl) {
+        URL.revokeObjectURL(avatarCropImageUrl);
+      }
+    };
+  }, [avatarCropImageUrl]);
 
-    event.currentTarget.value = '';
+  useEffect(() => {
+    return () => {
+      if (profileBannerCropImageUrl) {
+        URL.revokeObjectURL(profileBannerCropImageUrl);
+      }
+    };
+  }, [profileBannerCropImageUrl]);
 
-    if (!file) {
+  useEffect(() => {
+    return () => {
+      if (profileBackgroundCropImageUrl) {
+        URL.revokeObjectURL(profileBackgroundCropImageUrl);
+      }
+    };
+  }, [profileBackgroundCropImageUrl]);
+
+  const handleOpenAvatarCropDialog = () => {
+    setAvatarUploadError(null);
+    setAvatarCropDialogOpen(true);
+  };
+
+  const handleAvatarSelect = (file: File) => {
+    const imageUrl = createProfileImageObjectUrl(file, setAvatarUploadError);
+
+    if (!imageUrl) {
+      setAvatarCropImageUrl(null);
       return;
     }
 
+    setAvatarCropImageUrl(imageUrl);
+  };
+
+  const resetAvatarCropDialog = () => {
+    setAvatarCropImageUrl(null);
+    setAvatarUploadError(null);
+  };
+
+  const handleAvatarCropOpenChange = (open: boolean) => {
+    if (open) {
+      setAvatarCropDialogOpen(true);
+      return;
+    }
+
+    if (avatarBusy) {
+      return;
+    }
+
+    setAvatarCropDialogOpen(false);
+    resetAvatarCropDialog();
+  };
+
+  const handleAvatarCropSubmit = async (file: File) => {
     setUploadingAvatar(true);
+    setAvatarUploadError(null);
 
     try {
       const updatedUser = await uploadAvatar(file);
 
-      setDisplayNameDraft(updatedUser.displayName);
-      syncPhoneDraft(updatedUser.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
+      syncProfileState(updatedUser);
+      setAvatarCropDialogOpen(false);
+      resetAvatarCropDialog();
       toast.success('Avatar updated.');
     } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Avatar could not be uploaded.'));
+      const message = getApiErrorMessage(error, 'Avatar could not be uploaded.');
+
+      setAvatarUploadError(message);
+      toast.error(message);
     } finally {
       setUploadingAvatar(false);
     }
   };
 
-  const handleProfileSubmit: FormEventHandler<HTMLFormElement> = async (event) => {
-    event.preventDefault();
-    profileAction.clearError();
+  const handleDeleteAvatar = async () => {
+    setDeletingAvatar(true);
 
-    const parsed = displayNameSchema.safeParse(displayNameDraft);
+    try {
+      const updatedUser = await deleteAvatar();
 
-    if (!parsed.success) {
-      profileAction.setError(parsed.error.issues[0]?.message ?? 'Display name is invalid.');
+      syncProfileState(updatedUser);
+      setAvatarCropDialogOpen(false);
+      resetAvatarCropDialog();
+      toast.success('Avatar removed.');
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Avatar could not be removed.'));
+    } finally {
+      setDeletingAvatar(false);
+    }
+  };
+
+  const handleOpenProfileBannerCropDialog = () => {
+    setProfileBannerUploadError(null);
+    setProfileBannerCropDialogOpen(true);
+  };
+
+  const handleProfileBannerSelect = (file: File) => {
+    const imageUrl = createProfileImageObjectUrl(file, setProfileBannerUploadError);
+
+    if (!imageUrl) {
+      setProfileBannerCropImageUrl(null);
       return;
     }
 
-    const updatedUser = await profileAction.run(
-      () =>
-        updateCurrentUser({
-          displayName: parsed.data,
-        }),
-      'Profile could not be updated.',
-    );
+    setProfileBannerCropImageUrl(imageUrl);
+  };
+
+  const resetProfileBannerCropDialog = () => {
+    setProfileBannerCropImageUrl(null);
+    setProfileBannerUploadError(null);
+  };
+
+  const handleProfileBannerCropOpenChange = (open: boolean) => {
+    if (open) {
+      setProfileBannerCropDialogOpen(true);
+      return;
+    }
+
+    if (profileBannerBusy) {
+      return;
+    }
+
+    setProfileBannerCropDialogOpen(false);
+    resetProfileBannerCropDialog();
+  };
+
+  const handleProfileBannerCropSubmit = async (file: File) => {
+    setUploadingProfileBanner(true);
+    setProfileBannerUploadError(null);
+
+    try {
+      const updatedUser = await uploadProfileBanner(file);
+
+      syncProfileState(updatedUser);
+      setProfileBannerCropDialogOpen(false);
+      resetProfileBannerCropDialog();
+      toast.success('Profile banner updated.');
+    } catch (error) {
+      const message = getApiErrorMessage(error, 'Profile banner could not be uploaded.');
+
+      setProfileBannerUploadError(message);
+      toast.error(message);
+    } finally {
+      setUploadingProfileBanner(false);
+    }
+  };
+
+  const handleDeleteProfileBanner = async () => {
+    setDeletingProfileBanner(true);
+
+    try {
+      const updatedUser = await deleteProfileBanner();
+
+      syncProfileState(updatedUser);
+      setProfileBannerCropDialogOpen(false);
+      resetProfileBannerCropDialog();
+      toast.success('Profile banner removed.');
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Profile banner could not be removed.'));
+    } finally {
+      setDeletingProfileBanner(false);
+    }
+  };
+
+  const handleOpenProfileBackgroundCropDialog = () => {
+    setProfileBackgroundUploadError(null);
+    setProfileBackgroundCropDialogOpen(true);
+  };
+
+  const handleProfileBackgroundSelect = (file: File) => {
+    const imageUrl = createProfileImageObjectUrl(file, setProfileBackgroundUploadError);
+
+    if (!imageUrl) {
+      setProfileBackgroundCropImageUrl(null);
+      return;
+    }
+
+    setProfileBackgroundCropImageUrl(imageUrl);
+  };
+
+  const resetProfileBackgroundCropDialog = () => {
+    setProfileBackgroundCropImageUrl(null);
+    setProfileBackgroundUploadError(null);
+  };
+
+  const handleProfileBackgroundCropOpenChange = (open: boolean) => {
+    if (open) {
+      setProfileBackgroundCropDialogOpen(true);
+      return;
+    }
+
+    if (profileBackgroundBusy) {
+      return;
+    }
+
+    setProfileBackgroundCropDialogOpen(false);
+    resetProfileBackgroundCropDialog();
+  };
+
+  const handleProfileBackgroundCropSubmit = async (file: File) => {
+    setUploadingProfileBackground(true);
+    setProfileBackgroundUploadError(null);
+
+    try {
+      const updatedUser = await uploadProfileBackground(file);
+
+      syncProfileState(updatedUser);
+      setProfileBackgroundCropDialogOpen(false);
+      resetProfileBackgroundCropDialog();
+      toast.success('Profile background updated.');
+    } catch (error) {
+      const message = getApiErrorMessage(error, 'Profile background could not be uploaded.');
+
+      setProfileBackgroundUploadError(message);
+      toast.error(message);
+    } finally {
+      setUploadingProfileBackground(false);
+    }
+  };
+
+  const handleDeleteProfileBackground = async () => {
+    setDeletingProfileBackground(true);
+
+    try {
+      const updatedUser = await deleteProfileBackground();
+
+      syncProfileState(updatedUser);
+      setProfileBackgroundCropDialogOpen(false);
+      resetProfileBackgroundCropDialog();
+      toast.success('Profile background removed.');
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Profile background could not be removed.'));
+    } finally {
+      setDeletingProfileBackground(false);
+    }
+  };
+
+  const handleProfileSubmit: SubmitEventHandler<HTMLFormElement> = async (event) => {
+    event.preventDefault();
+    profileAction.clearError();
+
+    const parsed = parseProfileDetailsDraft(profileDetailsDraft);
+
+    if (!parsed.success) {
+      profileAction.setError(parsed.error);
+      return;
+    }
+
+    const updatedUser = await profileAction.run(() => updateCurrentUser(parsed.data), 'Profile could not be updated.');
 
     if (updatedUser) {
-      setDisplayNameDraft(updatedUser.displayName);
-      syncPhoneDraft(updatedUser.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
-      setEditingDisplayName(false);
+      syncProfileState(updatedUser);
+      setEditingProfileDetails(false);
       toast.success('Profile updated.');
     }
   };
@@ -272,15 +551,13 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     );
 
     if (result) {
-      const expiresInMinutes = Math.ceil(result.expiresInSeconds / 60);
-
-      setEmailVerificationNotice(`Verification code sent. It expires in ${expiresInMinutes} minutes.`);
+      setEmailVerificationNotice(getVerificationCodeDelivery('email', maskEmailAddress(user.email)));
     }
 
     return result;
   };
 
-  const handleStartEmailVerification = () => {
+  const handleStartEmailVerification = async () => {
     if (!emailVerificationAvailable) {
       return;
     }
@@ -289,8 +566,10 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     setEmailVerificationNotice(null);
     emailVerificationSendAction.clearError();
     emailVerificationConfirmAction.clearError();
-    setVerifyingEmail(true);
-    void requestProfileEmailVerificationCode();
+    await startContactVerification(async () => {
+      setVerifyingEmail(true);
+      await requestProfileEmailVerificationCode();
+    });
   };
 
   const handleEmailVerificationOpenChange = (open: boolean) => {
@@ -304,7 +583,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     }
   };
 
-  const handleEmailVerificationSubmit: FormEventHandler<HTMLFormElement> = async (event) => {
+  const handleEmailVerificationSubmit: SubmitEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
     emailVerificationConfirmAction.clearError();
 
@@ -324,8 +603,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     );
 
     if (updatedUser) {
-      setDisplayNameDraft(updatedUser.displayName);
-      syncPhoneDraft(updatedUser.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
+      syncProfileState(updatedUser);
       setVerifyingEmail(false);
       setEmailVerificationNotice(null);
       toast.success('Email verified.');
@@ -355,6 +633,56 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     };
   };
 
+  const startContactVerification = async (onVerified: () => Promise<void>) => {
+    securityVerificationAction.clearError();
+
+    const challenge = await securityVerificationAction.run(
+      () => createVerificationChallenge('update_contact'),
+      'Security verification could not be started.',
+    );
+
+    if (!challenge) {
+      return;
+    }
+
+    if ('verified' in challenge) {
+      await onVerified();
+      return;
+    }
+
+    setPendingVerification({
+      challenge,
+      onVerified,
+    });
+  };
+
+  const startSsoBindVerification = async (providerId: string) => {
+    securityVerificationAction.clearError();
+
+    const challenge = await securityVerificationAction.run(
+      () => createVerificationChallenge('manage_sso'),
+      'Security verification could not be started.',
+    );
+
+    if (!challenge) {
+      return;
+    }
+
+    const onVerified = async () => {
+      window.location.assign(getSsoBindStartUrl(providerId, '/profile'));
+    };
+
+    if ('verified' in challenge) {
+      await onVerified();
+      return;
+    }
+
+    setPendingVerification({
+      challenge,
+      onVerified,
+    });
+  };
+
   const requestProfilePhoneVerificationCode = async () => {
     setPhoneVerificationNotice(null);
     phoneVerificationSendAction.clearError();
@@ -367,22 +695,24 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       return;
     }
 
+    await sendProfilePhoneVerificationCode(parsed.phoneNumber);
+  };
+
+  const sendProfilePhoneVerificationCode = async (phoneNumber: string) => {
     const result = await phoneVerificationSendAction.run(
       () =>
         sendProfilePhoneVerification({
-          phoneNumber: parsed.phoneNumber,
+          phoneNumber,
         }),
       'Verification code could not be sent.',
     );
 
     if (result) {
-      const expiresInMinutes = Math.ceil(result.expiresInSeconds / 60);
-
-      setPhoneVerificationNotice(`Verification code sent. It expires in ${expiresInMinutes} minutes.`);
+      setPhoneVerificationNotice(getVerificationCodeDelivery('sms', maskPhoneNumber(phoneNumber)));
     }
   };
 
-  const handlePhoneNumberSubmit: FormEventHandler<HTMLFormElement> = async (event) => {
+  const handlePhoneNumberSubmit: SubmitEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
     phoneVerificationConfirmAction.clearError();
 
@@ -400,18 +730,21 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       return;
     }
 
+    await confirmProfilePhoneVerification(parsed.phoneNumber, parsedCode.data);
+  };
+
+  const confirmProfilePhoneVerification = async (phoneNumber: string, phoneVerificationCode: string) => {
     const updatedUser = await phoneVerificationConfirmAction.run(
       () =>
         verifyProfilePhone({
-          phoneNumber: parsed.phoneNumber,
-          phoneVerificationCode: parsedCode.data,
+          phoneNumber,
+          phoneVerificationCode,
         }),
       'Phone number could not be verified.',
     );
 
     if (updatedUser) {
-      setDisplayNameDraft(updatedUser.displayName);
-      syncPhoneDraft(updatedUser.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
+      syncProfileState(updatedUser);
       setPhoneVerificationCodeDraft('');
       setPhoneVerificationNotice(null);
       setEditingPhoneNumber(false);
@@ -419,19 +752,64 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     }
   };
 
-  const handleEditDisplayName = () => {
-    setDisplayNameDraft(user.displayName);
-    profileAction.clearError();
-    setEditingDisplayName(true);
+  const handleSendSecurityVerificationCode = async (method: 'email' | 'sms') => {
+    if (!pendingVerification) {
+      return null;
+    }
+
+    const verificationToken = pendingVerification.challenge.verificationToken;
+
+    return securityVerificationAction.run(
+      () =>
+        sendVerificationCode({
+          method,
+          verificationToken,
+        }),
+      'Verification code could not be sent.',
+    );
   };
 
-  const handleEditPhoneNumber = () => {
+  const handleConfirmSecurityVerification = async (input: IdentityVerificationSubmitInput) => {
+    if (!pendingVerification) {
+      return;
+    }
+
+    const verified =
+      input.method === 'passkey'
+        ? await securityVerificationAction.run(
+            () => verifyWithPasskey(pendingVerification.challenge.verificationToken),
+            'Passkey verification could not be completed.',
+          )
+        : await securityVerificationAction.run(
+            () =>
+              verifyAuthenticationChallenge({
+                verificationToken: pendingVerification.challenge.verificationToken,
+                ...input,
+              }),
+            'Verification could not be completed.',
+          );
+
+    if (!verified) {
+      return;
+    }
+
+    await pendingVerification.onVerified();
+    setPendingVerification(null);
+  };
+
+  const handleEditProfileDetails = () => {
+    setProfileDetailsDraft(createProfileDetailsDraft(user));
+    profileAction.clearError();
+    setEditingProfileDetails(true);
+  };
+
+  const handleEditPhoneNumber = async () => {
     syncPhoneDraft(user.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
     setPhoneVerificationCodeDraft('');
     setPhoneVerificationNotice(null);
     phoneVerificationSendAction.clearError();
     phoneVerificationConfirmAction.clearError();
-    setEditingPhoneNumber(true);
+    await startContactVerification(async () => setEditingPhoneNumber(true));
   };
 
   const handlePhoneNumberOpenChange = (open: boolean) => {
@@ -446,458 +824,481 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
   };
 
   const handleBindSsoProvider = (providerId: string) => {
-    window.location.assign(getSsoBindStartUrl(providerId, '/profile'));
+    void startSsoBindVerification(providerId);
   };
 
   return (
-    <div className="grid min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
-      <ItemGroup className="mx-auto w-full max-w-[800px] self-start gap-0! overflow-hidden rounded-lg border bg-card has-data-[size=sm]:gap-0! has-data-[size=xs]:gap-0!">
-        <Item className="rounded-none px-4 py-4">
-          <input
-            ref={fileInputRef}
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            className="hidden"
-            onChange={handleAvatarSelect}
-            type="file"
-          />
-          <ItemMedia className="size-12 rounded-lg" variant="image">
-            <Avatar className="h-full w-full rounded-lg after:hidden">
-              {avatarUrl ? <AvatarImage className="rounded-lg" src={avatarUrl} alt={user.displayName} /> : null}
-              <AvatarFallback className="rounded-lg">{fallback}</AvatarFallback>
-            </Avatar>
-          </ItemMedia>
-          <ItemContent className="gap-0 text-sm leading-tight">
-            <ItemTitle>{user.displayName}</ItemTitle>
-            <ItemDescription className="text-xs">{userHandle}</ItemDescription>
-          </ItemContent>
-          <ItemActions>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="icon-sm" type="button" variant="ghost">
-                  <EllipsisVerticalIcon />
-                  <span className="sr-only">Open profile actions</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-44">
-                <DropdownMenuItem
-                  disabled={uploadingAvatar}
-                  onSelect={(event: Event) => {
-                    event.preventDefault();
-                    fileInputRef.current?.click();
-                  }}
-                >
-                  <ImageUpIcon />
-                  {uploadingAvatar ? 'Uploading' : 'Change avatar'}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={handleEditDisplayName}>
-                  <PencilIcon />
-                  Edit display name
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </ItemActions>
-        </Item>
+    <div className="grid gap-6 p-4 lg:p-6">
+      <div className="grid gap-1">
+        <h1 className="text-2xl font-semibold tracking-normal">Profile</h1>
+        <p className="max-w-3xl text-sm text-muted-foreground">Account details, verification, and sign-in methods.</p>
+      </div>
 
-        <ItemSeparator className="!my-0" />
-
-        <ProfileItem
-          actionDisabled={!emailVerificationAvailable}
-          actionIcon={<MailIcon />}
-          actionLabel={emailNeedsVerification ? 'Verify' : undefined}
-          actionTooltip={
-            emailNeedsVerification && !profileEmailVerificationEnabled
-              ? 'Email verification is unavailable because SMTP email is not configured.'
-              : undefined
-          }
-          description={user.email}
-          icon={<MailIcon className="size-4" />}
-          onAction={emailNeedsVerification ? handleStartEmailVerification : undefined}
-          status={user.emailVerified ? 'Verified' : 'Unverified'}
-          statusVariant={user.emailVerified ? 'secondary' : 'outline'}
-          title="Email"
+      <div className="grid gap-8">
+        <ProfileHeader
+          actionClassName={profileHeaderActionClassName}
+          avatarAlt={user.displayName}
+          avatarBusy={avatarBusy}
+          avatarUrl={avatarUrl}
+          bannerBusy={profileBannerBusy}
+          bannerUrl={profileBannerUrl}
+          descriptionClassName={profileHeaderDescriptionClassName}
+          fallback={fallback}
+          onChangeAvatar={handleOpenAvatarCropDialog}
+          onChangeBanner={handleOpenProfileBannerCropDialog}
+          onEditProfileDetails={handleEditProfileDetails}
+          sectionRef={profileHeaderRef}
+          textRef={profileHeaderTextRef}
+          title={user.displayName}
+          titleClassName={profileHeaderTitleClassName}
+          uploadingAvatar={uploadingAvatar}
+          uploadingBanner={uploadingProfileBanner}
+          userHandle={userHandle}
         />
 
-        <ItemSeparator className="!my-0" />
+        <div className="grid gap-8">
+          <ProfileSection
+            actionIcon={<UserPenIcon />}
+            actionLabel="Edit"
+            description="Display name, bio, and public profile metadata."
+            onAction={handleEditProfileDetails}
+            title="Profile details"
+          >
+            <ProfileItem
+              description={user.displayName}
+              icon={<UserPenIcon className="size-4" />}
+              title="Display name"
+            />
 
-        <ProfileItem
-          actionLabel={user.phoneNumber ? 'Change' : 'Bind'}
-          actionDisabled={!phoneBindingEnabled}
-          actionIcon={<PhoneIcon />}
-          actionTooltip={
-            phoneBindingEnabled ? undefined : 'Phone binding is unavailable because SMS verification is not configured.'
-          }
-          description={user.phoneNumber ?? 'Not bound'}
-          icon={<PhoneIcon className="size-4" />}
-          onAction={handleEditPhoneNumber}
-          status={user.phoneNumber ? (user.phoneVerified ? 'Verified' : 'Unverified') : undefined}
-          statusVariant={user.phoneVerified ? 'secondary' : 'outline'}
-          title="Phone"
-        />
-
-        {bindableSsoProviders.length > 0 ? (
-          <>
             <ItemSeparator className="!my-0" />
-            <SsoProvidersItem
-              identities={ssoIdentities}
-              onBind={handleBindSsoProvider}
-              providers={bindableSsoProviders}
+
+            <ProfileItem
+              description={formatProfileDetail(user.bio)}
+              icon={<FileTextIcon className="size-4" />}
+              title="Bio"
             />
-          </>
-        ) : null}
 
-        <ItemSeparator className="!my-0" />
+            <ItemSeparator className="!my-0" />
 
-        <ProfileItem
-          description={formatRoleAccessSummary(user.roles, user.permissions)}
-          icon={<ShieldIcon className="size-4" />}
-          title="Roles"
-        />
-      </ItemGroup>
-      <Dialog open={editingDisplayName} onOpenChange={setEditingDisplayName}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit display name</DialogTitle>
-            <DialogDescription>Update the display name shown across the application.</DialogDescription>
-          </DialogHeader>
-          <form className="grid gap-4" onSubmit={handleProfileSubmit}>
-            <div className="grid gap-2">
-              <Label htmlFor="displayName">Display name</Label>
-              <Input
-                autoComplete="name"
-                disabled={savingProfile}
-                id="displayName"
-                name="displayName"
-                onChange={(event) => setDisplayNameDraft(event.target.value)}
-                value={displayNameDraft}
+            <ProfileItem
+              description={formatProfileDetail(user.gender)}
+              icon={<UserRoundIcon className="size-4" />}
+              title="Gender"
+            />
+
+            <ItemSeparator className="!my-0" />
+
+            <ProfileItem
+              description={formatProfileDetail(user.birthday)}
+              icon={<CalendarDaysIcon className="size-4" />}
+              title="Birthday"
+            />
+
+            <ItemSeparator className="!my-0" />
+
+            <ProfileItem
+              description={formatProfileLocation(user.location)}
+              icon={<MapPinIcon className="size-4" />}
+              title="Location"
+            />
+
+            <ItemSeparator className="!my-0" />
+
+            <ProfileItem
+              description={formatProfileDetail(user.websiteUrl)}
+              icon={<LinkIcon className="size-4" />}
+              title="Homepage"
+            />
+          </ProfileSection>
+
+          <ProfileSection title="Personalization" description="Profile visuals.">
+            <ProfileItem
+              actionDisabled={avatarBusy}
+              actionIcon={<ImageUpIcon />}
+              actionLabel="Change"
+              description="Shown on your profile and account menus."
+              media={
+                <ImagePreviewTrigger
+                  imageAlt={`${user.displayName} avatar`}
+                  imageUrl={avatarUrl}
+                  onOpenChange={(open) => setProfilePreviewTarget(open ? 'avatar' : null)}
+                  open={profilePreviewTarget === 'avatar'}
+                  title="Avatar preview"
+                >
+                  <Avatar className="size-full">
+                    <AvatarImage alt={user.displayName} src={avatarUrl} />
+                    <AvatarFallback>{fallback}</AvatarFallback>
+                  </Avatar>
+                </ImagePreviewTrigger>
+              }
+              mediaClassName="size-10 rounded-full"
+              mediaVariant="default"
+              onAction={handleOpenAvatarCropDialog}
+              status={avatarUrl ? 'Custom' : 'Default'}
+              statusVariant={avatarUrl ? 'secondary' : 'outline'}
+              title="Avatar"
+            />
+
+            <ItemSeparator className="!my-0" />
+
+            <ProfileItem
+              actionDisabled={profileBannerBusy}
+              actionIcon={<ImageUpIcon />}
+              actionLabel="Change"
+              description="Displayed across the top of your profile."
+              media={
+                <ImagePreviewTrigger
+                  imageAlt={`${user.displayName} profile banner`}
+                  imageUrl={profileBannerUrl}
+                  onOpenChange={(open) => setProfilePreviewTarget(open ? 'profileBanner' : null)}
+                  open={profilePreviewTarget === 'profileBanner'}
+                  title="Profile banner preview"
+                >
+                  <ImagePreviewMedia fallbackIcon={<ImageIcon className="size-4" />} imageUrl={profileBannerUrl} />
+                </ImagePreviewTrigger>
+              }
+              mediaClassName="size-10 rounded-full"
+              mediaVariant="default"
+              onAction={handleOpenProfileBannerCropDialog}
+              status={profileBannerUrl ? 'Custom' : 'Default'}
+              statusVariant={profileBannerUrl ? 'secondary' : 'outline'}
+              title="Profile banner"
+            />
+
+            <ItemSeparator className="!my-0" />
+
+            <ProfileItem
+              actionDisabled={profileBackgroundBusy}
+              actionIcon={<ImageUpIcon />}
+              actionLabel="Change"
+              description="Used as the app background while you are signed in."
+              media={
+                <ImagePreviewTrigger
+                  imageAlt={`${user.displayName} profile background`}
+                  imageUrl={profileBackgroundUrl}
+                  onOpenChange={(open) => setProfilePreviewTarget(open ? 'profileBackground' : null)}
+                  open={profilePreviewTarget === 'profileBackground'}
+                  title="Profile background preview"
+                >
+                  <ImagePreviewMedia
+                    fallbackIcon={<WallpaperIcon className="size-4" />}
+                    imageUrl={profileBackgroundUrl}
+                  />
+                </ImagePreviewTrigger>
+              }
+              mediaClassName="size-10 rounded-full"
+              mediaVariant="default"
+              onAction={handleOpenProfileBackgroundCropDialog}
+              status={profileBackgroundUrl ? 'Custom' : 'Default'}
+              statusVariant={profileBackgroundUrl ? 'secondary' : 'outline'}
+              title="Profile background"
+            />
+          </ProfileSection>
+
+          <ProfileSection title="Contact" description="Recovery and verification contact methods.">
+            <ProfileItem
+              actionDisabled={!emailVerificationAvailable}
+              actionIcon={<MailIcon />}
+              actionLabel={emailNeedsVerification ? 'Verify' : undefined}
+              actionTooltip={
+                emailNeedsVerification && !profileEmailVerificationEnabled
+                  ? 'Email verification is unavailable because SMTP email is not configured.'
+                  : undefined
+              }
+              description={user.email}
+              icon={<MailIcon className="size-4" />}
+              onAction={emailNeedsVerification ? handleStartEmailVerification : undefined}
+              status={user.emailVerified ? 'Verified' : 'Unverified'}
+              statusVariant={user.emailVerified ? 'secondary' : 'outline'}
+              title="Email"
+            />
+
+            <ItemSeparator className="!my-0" />
+
+            <ProfileItem
+              actionLabel={user.phoneNumber ? 'Change' : 'Bind'}
+              actionDisabled={!phoneBindingEnabled}
+              actionIcon={<PhoneIcon />}
+              actionTooltip={
+                phoneBindingEnabled
+                  ? undefined
+                  : 'Phone binding is unavailable because SMS verification is not configured.'
+              }
+              description={user.phoneNumber ?? 'Not bound'}
+              icon={<PhoneIcon className="size-4" />}
+              onAction={handleEditPhoneNumber}
+              status={user.phoneNumber ? (user.phoneVerified ? 'Verified' : 'Unverified') : undefined}
+              statusVariant={user.phoneVerified ? 'secondary' : 'outline'}
+              title="Phone"
+            />
+          </ProfileSection>
+
+          {bindableSsoProviders.length > 0 ? (
+            <ProfileSection title="Sign-in methods" description="Linked external sign-in providers.">
+              <SsoProviderList
+                identities={ssoIdentities}
+                onBind={handleBindSsoProvider}
+                providers={bindableSsoProviders}
               />
-            </div>
-            <FormMessage message={profileAction.error} variant="error" />
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button disabled={savingProfile} type="button" variant="outline">
-                  Cancel
-                </Button>
-              </DialogClose>
-              <Button disabled={savingProfile || !displayNameChanged} type="submit">
-                <SaveIcon />
-                {savingProfile ? 'Saving' : 'Save changes'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={verifyingEmail} onOpenChange={handleEmailVerificationOpenChange}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Verify email</DialogTitle>
-            <DialogDescription>Enter the verification code sent to {user.email}.</DialogDescription>
-          </DialogHeader>
-          <form className="grid gap-4" onSubmit={handleEmailVerificationSubmit}>
-            <div className="grid gap-2">
-              <Label htmlFor="emailVerificationCode">Verification code</Label>
-              <div className="flex gap-2">
-                <Input
-                  autoComplete="one-time-code"
-                  disabled={confirmingEmailVerification}
-                  id="emailVerificationCode"
-                  inputMode="numeric"
-                  maxLength={6}
-                  name="emailVerificationCode"
-                  onChange={(event) => setEmailVerificationCodeDraft(event.target.value)}
-                  value={emailVerificationCodeDraft}
-                />
-                <Button
-                  className="shrink-0"
-                  disabled={sendingEmailVerification || confirmingEmailVerification}
-                  onClick={requestProfileEmailVerificationCode}
-                  type="button"
-                  variant="outline"
-                >
-                  <MailIcon />
-                  {sendingEmailVerification ? 'Sending' : 'Send code'}
-                </Button>
-              </div>
-            </div>
-            <FormMessage message={emailVerificationNotice} variant="notice" />
-            <FormMessage
-              message={emailVerificationSendAction.error ?? emailVerificationConfirmAction.error}
-              variant="error"
+            </ProfileSection>
+          ) : null}
+
+          <ProfileSection title="Access" description="Assigned roles and permissions.">
+            <ProfileItem
+              description={formatRoleAccessSummary(user.roles, user.permissions)}
+              icon={<UserCogIcon className="size-4" />}
+              title="Roles"
             />
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button
-                  disabled={sendingEmailVerification || confirmingEmailVerification}
-                  type="button"
-                  variant="outline"
-                >
-                  Cancel
-                </Button>
-              </DialogClose>
-              <Button disabled={sendingEmailVerification || confirmingEmailVerification} type="submit">
-                <SaveIcon />
-                {confirmingEmailVerification ? 'Verifying' : 'Verify email'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={editingPhoneNumber} onOpenChange={handlePhoneNumberOpenChange}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{user.phoneNumber ? 'Change phone' : 'Bind phone'}</DialogTitle>
-            <DialogDescription>Verify the phone number associated with this account.</DialogDescription>
-          </DialogHeader>
-          <form className="grid gap-4" onSubmit={handlePhoneNumberSubmit}>
-            <div className="grid gap-2">
-              <Label htmlFor="phoneLocalNumber">Phone number</Label>
-              <div className="flex gap-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild disabled={phoneVerificationPending || !phoneBindingEnabled}>
-                    <Button
-                      className="w-24 shrink-0 justify-between"
-                      id="phoneCountryCode"
-                      type="button"
-                      variant="outline"
-                    >
-                      {phoneCountryCodeDraft}
-                      <ChevronDownIcon />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="z-[60] min-w-56">
-                    {phoneCountryCodes.map((countryCode) => (
-                      <DropdownMenuItem key={countryCode} onSelect={() => setPhoneCountryCodeDraft(countryCode)}>
-                        {formatPhoneCountryCode(countryCode)}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Input
-                  autoComplete="tel-national"
-                  disabled={phoneVerificationPending || !phoneBindingEnabled}
-                  id="phoneLocalNumber"
-                  name="phoneLocalNumber"
-                  onChange={(event) => setPhoneLocalNumberDraft(event.target.value)}
-                  placeholder={getPhonePlaceholder(phoneCountryCodeDraft)}
-                  value={phoneLocalNumberDraft}
-                />
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="phoneVerificationCode">Verification code</Label>
-              <div className="flex gap-2">
-                <Input
-                  autoComplete="one-time-code"
-                  disabled={phoneVerificationPending || !phoneBindingEnabled}
-                  id="phoneVerificationCode"
-                  inputMode="numeric"
-                  maxLength={6}
-                  name="phoneVerificationCode"
-                  onChange={(event) => setPhoneVerificationCodeDraft(event.target.value)}
-                  value={phoneVerificationCodeDraft}
-                />
-                <Button
-                  className="shrink-0"
-                  disabled={phoneVerificationPending || !phoneBindingEnabled}
-                  onClick={requestProfilePhoneVerificationCode}
-                  type="button"
-                  variant="outline"
-                >
-                  <PhoneIcon />
-                  {sendingPhoneVerification ? 'Sending' : 'Send code'}
-                </Button>
-              </div>
-            </div>
-            <FormMessage message={phoneVerificationNotice} variant="notice" />
-            <FormMessage
-              message={phoneVerificationSendAction.error ?? phoneVerificationConfirmAction.error}
-              variant="error"
-            />
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button disabled={phoneVerificationPending} type="button" variant="outline">
-                  Cancel
-                </Button>
-              </DialogClose>
-              <Button
-                disabled={
-                  phoneVerificationPending ||
-                  !phoneVerificationRequired ||
-                  phoneVerificationCodeDraft.trim().length === 0
-                }
-                type="submit"
-              >
-                <SaveIcon />
-                {confirmingPhoneVerification ? 'Verifying' : 'Verify phone'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+          </ProfileSection>
+        </div>
+      </div>
+      <ImageCropDialog
+        aspect={1}
+        cropShape="round"
+        description="Crop the avatar before uploading."
+        error={avatarUploadError}
+        imageSelectLabel="Select avatar"
+        imageUrl={avatarCropImageUrl}
+        loading={uploadingAvatar}
+        maxFileBytes={profileImageMaxBytes}
+        onImageSelect={handleAvatarSelect}
+        onOpenChange={handleAvatarCropOpenChange}
+        onRemove={avatarUrl ? handleDeleteAvatar : undefined}
+        onSubmit={handleAvatarCropSubmit}
+        open={avatarCropDialogOpen}
+        output={{
+          fileName: 'avatar.png',
+          height: 512,
+          width: 512,
+        }}
+        removeLabel="Remove"
+        removeLoading={deletingAvatar}
+        showGrid={false}
+        submitLabel="Upload"
+        title="Upload avatar"
+      />
+      <ImageCropDialog
+        aspect={4}
+        description="Crop and adjust the profile banner image."
+        error={profileBannerUploadError}
+        imageSelectLabel="Select profile banner"
+        imageUrl={profileBannerCropImageUrl}
+        loading={uploadingProfileBanner}
+        maxFileBytes={profileImageMaxBytes}
+        onImageSelect={handleProfileBannerSelect}
+        onOpenChange={handleProfileBannerCropOpenChange}
+        onRemove={profileBannerUrl ? handleDeleteProfileBanner : undefined}
+        onSubmit={handleProfileBannerCropSubmit}
+        open={profileBannerCropDialogOpen}
+        output={{
+          contentType: 'image/webp',
+          fileName: 'profile-banner.webp',
+          height: 400,
+          width: 1600,
+        }}
+        removeLabel="Remove"
+        removeLoading={deletingProfileBanner}
+        showAdjustments
+        submitLabel="Upload"
+        title="Upload profile banner"
+      />
+      <ImageCropDialog
+        aspect={16 / 9}
+        description="Crop and adjust the profile background image."
+        error={profileBackgroundUploadError}
+        imageSelectLabel="Select profile background"
+        imageUrl={profileBackgroundCropImageUrl}
+        loading={uploadingProfileBackground}
+        maxFileBytes={profileImageMaxBytes}
+        onImageSelect={handleProfileBackgroundSelect}
+        onOpenChange={handleProfileBackgroundCropOpenChange}
+        onRemove={profileBackgroundUrl ? handleDeleteProfileBackground : undefined}
+        onSubmit={handleProfileBackgroundCropSubmit}
+        open={profileBackgroundCropDialogOpen}
+        output={{
+          contentType: 'image/webp',
+          fileName: 'profile-background.webp',
+          height: 1080,
+          width: 1920,
+        }}
+        removeLabel="Remove"
+        removeLoading={deletingProfileBackground}
+        showAdjustments
+        submitLabel="Upload"
+        title="Upload profile background"
+      />
+      {pendingVerification ? (
+        <IdentityVerificationDialog
+          allowRecoveryCode
+          defaultMethod={pendingVerification.challenge.defaultMethod}
+          error={securityVerificationAction.error}
+          methods={pendingVerification.challenge.methods}
+          onClearError={securityVerificationAction.clearError}
+          onOpenChange={(open: boolean) => (!open ? setPendingVerification(null) : undefined)}
+          onSendCode={handleSendSecurityVerificationCode}
+          onSubmit={handleConfirmSecurityVerification}
+          open={Boolean(pendingVerification)}
+          pending={securityVerificationAction.pending}
+          sendPending={securityVerificationAction.pending}
+        />
+      ) : null}
+      <EditProfileDetailsDialog
+        changed={profileDetailsChanged}
+        disabled={savingProfile}
+        error={profileAction.error}
+        onOpenChange={setEditingProfileDetails}
+        onProfileDetailsChange={setProfileDetailsDraft}
+        onSubmit={handleProfileSubmit}
+        open={editingProfileDetails}
+        profileDetails={profileDetailsDraft}
+      />
+      <EmailVerificationDialog
+        code={emailVerificationCodeDraft}
+        confirming={confirmingEmailVerification}
+        delivery={emailVerificationNotice}
+        email={user.email}
+        error={emailVerificationSendAction.error ?? emailVerificationConfirmAction.error}
+        onCodeChange={setEmailVerificationCodeDraft}
+        onOpenChange={handleEmailVerificationOpenChange}
+        onSendCode={requestProfileEmailVerificationCode}
+        onSubmit={handleEmailVerificationSubmit}
+        open={verifyingEmail}
+        sending={sendingEmailVerification}
+      />
+      <PhoneVerificationDialog
+        bindingEnabled={phoneBindingEnabled}
+        code={phoneVerificationCodeDraft}
+        confirming={confirmingPhoneVerification}
+        countryCode={phoneCountryCodeDraft}
+        countryCodes={phoneCountryCodes}
+        delivery={phoneVerificationNotice}
+        error={phoneVerificationSendAction.error ?? phoneVerificationConfirmAction.error}
+        hasPhoneNumber={Boolean(user.phoneNumber)}
+        localNumber={phoneLocalNumberDraft}
+        onCodeChange={setPhoneVerificationCodeDraft}
+        onCountryCodeChange={(countryCode) => {
+          setPhoneCountryCodeDraft(countryCode);
+          setPhoneVerificationCodeDraft('');
+          setPhoneVerificationNotice(null);
+        }}
+        onLocalNumberChange={(value) => {
+          setPhoneLocalNumberDraft(value);
+          setPhoneVerificationCodeDraft('');
+          setPhoneVerificationNotice(null);
+        }}
+        onOpenChange={handlePhoneNumberOpenChange}
+        onSendCode={requestProfilePhoneVerificationCode}
+        onSubmit={handlePhoneNumberSubmit}
+        open={editingPhoneNumber}
+        pending={phoneVerificationPending}
+        required={phoneVerificationRequired}
+        sending={sendingPhoneVerification}
+      />
     </div>
   );
 };
 
-function ProfileItem({
-  actionDisabled,
-  actionIcon,
-  actionLabel,
-  actionTooltip,
-  description,
-  icon,
-  onAction,
-  status,
-  statusVariant,
-  title,
-}: {
-  actionDisabled?: boolean;
-  actionIcon?: ReactNode;
-  actionLabel?: string;
-  actionTooltip?: string;
-  description: ReactNode;
-  icon: ReactNode;
-  onAction?: () => void;
-  status?: string;
-  statusVariant?: 'destructive' | 'outline' | 'secondary';
-  title: string;
-}) {
+function createProfileDetailsDraft(user: AuthUser): ProfileDetailsDraft {
+  return {
+    displayName: user.displayName,
+    gender: user.gender ?? '',
+    birthday: user.birthday ?? '',
+    bio: user.bio ?? '',
+    location: user.location ?? '',
+    websiteUrl: user.websiteUrl ?? '',
+  };
+}
+
+function hasProfileDetailsChanged(left: ProfileDetailsDraft, right: ProfileDetailsDraft) {
   return (
-    <Item className="rounded-none px-4 py-4">
-      <ItemContent>
-        <ItemTitle className="flex flex-wrap items-center gap-2">
-          <span className="text-muted-foreground">{icon}</span>
-          {title}
-          {status ? <Badge variant={statusVariant}>{status}</Badge> : null}
-        </ItemTitle>
-        <ItemDescription className="break-words">{description}</ItemDescription>
-      </ItemContent>
-      {onAction && actionLabel ? (
-        <ItemActions>
-          <ActionButton
-            disabled={actionDisabled}
-            icon={actionIcon}
-            label={actionLabel}
-            onClick={onAction}
-            tooltip={actionTooltip}
-          />
-        </ItemActions>
-      ) : null}
-    </Item>
+    left.displayName !== right.displayName ||
+    left.gender !== right.gender ||
+    left.birthday !== right.birthday ||
+    left.bio !== right.bio ||
+    left.location !== right.location ||
+    left.websiteUrl !== right.websiteUrl
   );
 }
 
-function ActionButton({
-  disabled,
-  icon,
-  label,
-  onClick,
-  tooltip,
-}: {
-  disabled?: boolean;
-  icon?: ReactNode;
-  label: string;
-  onClick: () => void;
-  tooltip?: string;
-}) {
-  const button = (
-    <Button disabled={disabled} onClick={onClick} size="sm" type="button" variant="outline">
-      {icon}
-      {label}
-    </Button>
-  );
+function parseProfileDetailsDraft(draft: ProfileDetailsDraft) {
+  const displayName = displayNameSchema.safeParse(draft.displayName);
 
-  if (!tooltip) {
-    return button;
+  if (!displayName.success) {
+    return {
+      success: false,
+      error: displayName.error.issues[0]?.message ?? 'Display name is invalid.',
+    } as const;
   }
 
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex" tabIndex={0}>
-          {button}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{tooltip}</TooltipContent>
-    </Tooltip>
-  );
+  const gender = profileGenderSchema.safeParse(draft.gender);
+
+  if (!gender.success) {
+    return {
+      success: false,
+      error: gender.error.issues[0]?.message ?? 'Gender is invalid.',
+    } as const;
+  }
+
+  const birthday = profileBirthdaySchema.safeParse(draft.birthday);
+
+  if (!birthday.success) {
+    return {
+      success: false,
+      error: birthday.error.issues[0]?.message ?? 'Birthday is invalid.',
+    } as const;
+  }
+
+  const bio = profileBioSchema.safeParse(draft.bio);
+
+  if (!bio.success) {
+    return {
+      success: false,
+      error: bio.error.issues[0]?.message ?? 'Bio is invalid.',
+    } as const;
+  }
+
+  const location = profileLocationSchema.safeParse(draft.location);
+
+  if (!location.success) {
+    return {
+      success: false,
+      error: location.error.issues[0]?.message ?? 'Location is invalid.',
+    } as const;
+  }
+
+  const websiteUrl = profileWebsiteUrlSchema.safeParse(draft.websiteUrl);
+
+  if (!websiteUrl.success) {
+    return {
+      success: false,
+      error: websiteUrl.error.issues[0]?.message ?? 'Homepage is invalid.',
+    } as const;
+  }
+
+  return {
+    success: true,
+    data: {
+      displayName: displayName.data,
+      gender: gender.data,
+      birthday: birthday.data,
+      bio: bio.data,
+      location: location.data,
+      websiteUrl: websiteUrl.data,
+    },
+  } as const;
 }
 
-function SsoProvidersItem({
-  identities,
-  onBind,
-  providers,
-}: {
-  identities: SsoIdentityPublic[];
-  onBind: (providerId: string) => void;
-  providers: SsoPublicProvider[];
-}) {
-  return (
-    <Item className="rounded-none px-4 py-4">
-      <ItemContent className="gap-3">
-        <ItemTitle className="flex items-center gap-2">
-          <KeyRoundIcon className="size-4 text-muted-foreground" />
-          SSO providers
-        </ItemTitle>
-        <div className="grid gap-2">
-          {providers.map((provider) => {
-            const identity = identities.find((candidate) => candidate.providerId === provider.id);
-
-            return (
-              <div className="flex min-w-0 items-center justify-between gap-3" key={provider.id}>
-                <div className="flex min-w-0 items-center gap-3">
-                  <SsoProviderIcon iconUrl={provider.iconUrl} name={provider.name} />
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">{provider.name}</div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {identity
-                        ? `Bound as ${identity.email}`
-                        : provider.protocol === 'oidc'
-                          ? 'OpenID Connect'
-                          : 'OAuth 2.0'}
-                    </div>
-                  </div>
-                </div>
-                <Button
-                  disabled={Boolean(identity)}
-                  onClick={() => onBind(provider.id)}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  <LinkIcon />
-                  {identity ? 'Bound' : 'Bind'}
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      </ItemContent>
-    </Item>
-  );
+function formatProfileDetail(value: string | undefined) {
+  return value?.trim() || 'Not set';
 }
 
-function formatRoleAccessSummary(roles: string[] | undefined, permissions: string[] | undefined) {
-  const roleList = roles?.length ? roles.join(', ') : 'No roles';
+function formatProfileLocation(value: string | undefined) {
+  const locationLevels = value
+    ?.split(',')
+    .map((level) => level.trim())
+    .filter(Boolean);
 
-  return permissions?.length ? `${roleList} (${permissions.join(', ')})` : roleList;
-}
-
-function getHashParams(hash: string) {
-  return new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
-}
-
-function syncPhoneDraft(
-  phoneNumber: string | undefined,
-  phoneCountryCodes: PhoneCountryCode[],
-  setPhoneCountryCode: (countryCode: PhoneCountryCode) => void,
-  setPhoneLocalNumber: (phoneNumber: string) => void,
-) {
-  const countryCode =
-    getPhoneCountryCode(phoneNumber, phoneCountryCodes.length ? phoneCountryCodes : supportedPhoneCountryCodes) ??
-    phoneCountryCodes[0] ??
-    '+86';
-
-  setPhoneCountryCode(countryCode);
-  setPhoneLocalNumber(getPhoneLocalNumber(phoneNumber, countryCode));
+  return locationLevels?.length ? [...locationLevels].reverse().join(', ') : 'Not set';
 }
 
 export default Index;

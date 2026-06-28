@@ -1,15 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { initModels } from '../src/composition/models';
+import { createServices } from '../src/composition/services';
 import { createSequelize } from '../src/infra/database';
 import { createMigrator } from '../src/infra/migrator';
-import { createServices, initModels } from '../src/modules';
 import { AccessControlService } from '../src/modules/access-control/access-control.service';
 import { verifySsoBindToken, verifySsoHandoffToken, verifySsoStateToken } from '../src/modules/auth/auth.crypto';
-import { type SsoConfig } from '../src/modules/auth/auth.sso';
+import { type SsoProviderConfig, type SsoServiceConfig } from '../src/modules/auth/auth.sso';
+import { createTotpCode } from './support/totp';
 
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
 const issuerUrl = 'https://identity.example.com';
-const ssoConfig: SsoConfig = {
+const ssoProviderConfig: SsoProviderConfig = {
+  id: 'identity-example-com',
+  name: 'SSO',
+  protocol: 'oidc',
+  loginEnabled: true,
+  bindingEnabled: true,
   clientId: 'test-client',
   clientSecret: 'test-secret',
   frontendCallbackUrl: 'http://localhost:8011/login',
@@ -17,6 +24,9 @@ const ssoConfig: SsoConfig = {
   redirectUri: 'http://localhost:3000/api/auth/sso/callback',
   requestTimeoutMs: 10_000,
   scopes: ['openid', 'profile', 'email'],
+};
+const ssoConfig: SsoServiceConfig = {
+  profiles: [ssoProviderConfig],
 };
 
 describe('OIDC SSO service', () => {
@@ -56,7 +66,7 @@ describe('OIDC SSO service', () => {
       loginEnabled: true,
       providers: [
         {
-          id: 'identity.example.com',
+          id: 'identity-example-com',
           name: 'SSO',
           protocol: 'oidc',
           loginEnabled: true,
@@ -225,8 +235,8 @@ describe('OIDC SSO service', () => {
     const stateToken = loginUrl.searchParams.get('state');
 
     expect(loginUrl.origin + loginUrl.pathname).toBe(`${issuerUrl}/oauth2/authorize`);
-    expect(loginUrl.searchParams.get('client_id')).toBe(ssoConfig.clientId);
-    expect(loginUrl.searchParams.get('redirect_uri')).toBe(ssoConfig.redirectUri);
+    expect(loginUrl.searchParams.get('client_id')).toBe(ssoProviderConfig.clientId);
+    expect(loginUrl.searchParams.get('redirect_uri')).toBe(ssoProviderConfig.redirectUri);
     expect(loginUrl.searchParams.get('scope')).toBe('openid profile email');
     expect(loginUrl.searchParams.get('response_type')).toBe('code');
     expect(stateToken).toEqual(expect.any(String));
@@ -241,7 +251,7 @@ describe('OIDC SSO service', () => {
     })
       .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
       .setIssuer(issuerUrl)
-      .setAudience(ssoConfig.clientId)
+      .setAudience(ssoProviderConfig.clientId)
       .setSubject('provider-user')
       .setIssuedAt()
       .setExpirationTime('5m')
@@ -256,7 +266,7 @@ describe('OIDC SSO service', () => {
     const callbackParams = getCallbackParams(callbackUrl);
     const bindToken = callbackParams.get('sso_bind_token');
 
-    expect(callbackUrl.origin + callbackUrl.pathname).toBe(ssoConfig.frontendCallbackUrl);
+    expect(callbackUrl.origin + callbackUrl.pathname).toBe(ssoProviderConfig.frontendCallbackUrl);
     expect(callbackUrl.searchParams.get('sso_bind_token')).toBeNull();
     expect(callbackParams.get('redirect')).toBe('/reports');
     expect(callbackParams.get('sso_email')).toBe('sso@example.com');
@@ -268,7 +278,7 @@ describe('OIDC SSO service', () => {
     const bind = await verifySsoBindToken(bindToken!, authTokenSecret);
 
     expect(bind).toMatchObject({
-      providerId: 'identity.example.com',
+      providerId: 'identity-example-com',
       providerSubject: 'provider-user',
       username: 'sso',
       displayName: 'Provider User',
@@ -342,7 +352,7 @@ describe('OIDC SSO service', () => {
 
     const identity = await models.ssoIdentity.findOne({
       where: {
-        providerId: 'identity.example.com',
+        providerId: 'identity-example-com',
         providerSubject: 'provider-user',
       },
     });
@@ -367,7 +377,7 @@ describe('OIDC SSO service', () => {
     })
       .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
       .setIssuer(issuerUrl)
-      .setAudience(ssoConfig.clientId)
+      .setAudience(ssoProviderConfig.clientId)
       .setSubject('provider-user')
       .setIssuedAt()
       .setExpirationTime('5m')
@@ -440,7 +450,7 @@ describe('OIDC SSO service', () => {
     });
     await models.ssoIdentity.create({
       userId: user.id,
-      providerId: 'identity.example.com',
+      providerId: 'identity-example-com',
       providerSubject: 'secondary-provider-subject',
       email: user.email,
     });
@@ -500,11 +510,11 @@ describe('OIDC SSO service', () => {
     })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuer(issuerUrl)
-      .setAudience(ssoConfig.clientId)
+      .setAudience(ssoProviderConfig.clientId)
       .setSubject('provider-user')
       .setIssuedAt()
       .setExpirationTime('5m')
-      .sign(Buffer.from(ssoConfig.clientSecret, 'utf8'));
+      .sign(Buffer.from(ssoProviderConfig.clientSecret, 'utf8'));
 
     const callbackUrl = new URL(
       await services.sso.handleCallback({
@@ -568,11 +578,11 @@ describe('OIDC SSO service', () => {
     })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuer(issuerUrl)
-      .setAudience(ssoConfig.clientId)
+      .setAudience(ssoProviderConfig.clientId)
       .setSubject('provider-user')
       .setIssuedAt()
       .setExpirationTime('5m')
-      .sign(Buffer.from(ssoConfig.clientSecret, 'utf8'));
+      .sign(Buffer.from(ssoProviderConfig.clientSecret, 'utf8'));
 
     await expect(
       services.sso.handleCallback({
@@ -627,11 +637,11 @@ describe('OIDC SSO service', () => {
     })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuer(issuerUrl)
-      .setAudience(ssoConfig.clientId)
+      .setAudience(ssoProviderConfig.clientId)
       .setSubject('unverified-provider-user')
       .setIssuedAt()
       .setExpirationTime('5m')
-      .sign(Buffer.from(ssoConfig.clientSecret, 'utf8'));
+      .sign(Buffer.from(ssoProviderConfig.clientSecret, 'utf8'));
 
     await expect(
       services.sso.handleCallback({
@@ -686,11 +696,11 @@ describe('OIDC SSO service', () => {
     })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuer(issuerUrl)
-      .setAudience(ssoConfig.clientId)
+      .setAudience(ssoProviderConfig.clientId)
       .setSubject('invalid-email-provider-user')
       .setIssuedAt()
       .setExpirationTime('5m')
-      .sign(Buffer.from(ssoConfig.clientSecret, 'utf8'));
+      .sign(Buffer.from(ssoProviderConfig.clientSecret, 'utf8'));
 
     await expect(
       services.sso.handleCallback({
@@ -743,11 +753,11 @@ describe('OIDC SSO service', () => {
     })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuer(issuerUrl)
-      .setAudience(ssoConfig.clientId)
+      .setAudience(ssoProviderConfig.clientId)
       .setSubject('missing-nonce-provider-user')
       .setIssuedAt()
       .setExpirationTime('5m')
-      .sign(Buffer.from(ssoConfig.clientSecret, 'utf8'));
+      .sign(Buffer.from(ssoProviderConfig.clientSecret, 'utf8'));
 
     await expect(
       services.sso.handleCallback({
@@ -787,7 +797,7 @@ describe('OIDC SSO service', () => {
 
     await models.ssoIdentity.create({
       userId: occupiedUser!.id,
-      providerId: 'identity.example.com',
+      providerId: 'identity-example-com',
       providerSubject: 'other-provider-user',
       email: occupiedUser!.email,
     });
@@ -850,12 +860,96 @@ describe('OIDC SSO service', () => {
       ? await models.ssoIdentity.findOne({
           where: {
             userId: user.id,
-            providerId: 'identity.example.com',
+            providerId: 'identity-example-com',
           },
         })
       : null;
 
     expect(identity?.providerSubject).toBe('existing-provider-user');
+  });
+
+  it('returns a unified verification challenge after binding an existing account that requires MFA', async () => {
+    const services = createServices(models, {
+      authTokenSecret,
+      sso: ssoConfig,
+    });
+
+    await services.auth.register({
+      username: 'existing_mfa_user',
+      displayName: 'Existing MFA User',
+      email: 'existing-mfa@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+
+    const user = await models.user.findOne({
+      where: { email: 'existing-mfa@example.com' },
+    });
+    const setup = await services.totp.createSetup(user!);
+
+    await services.totp.enable(user!, setup.setupToken, createTotpCode(setup.secret));
+
+    const bindToken = await createHsSsoBindToken(services, {
+      email: 'provider-existing-mfa@example.com',
+      name: 'Provider MFA User',
+      subject: 'existing-mfa-provider-user',
+    });
+    const context = {
+      ipAddress: '203.0.113.50',
+      userAgent: 'Mozilla/5.0 SSO MFA Bind Test',
+    };
+    const result = await services.sso.bindSsoAccount(
+      {
+        identifier: 'existing_mfa_user',
+        password: 'password123',
+        token: bindToken,
+      },
+      context,
+    );
+
+    expect(result).toMatchObject({
+      requiresVerification: true,
+      defaultMethod: 'totp',
+      purpose: 'sso',
+    });
+
+    if (!('requiresVerification' in result)) {
+      throw new Error('SSO bind should require unified verification.');
+    }
+
+    await expect(
+      models.ssoIdentity.findOne({
+        where: {
+          providerId: 'identity-example-com',
+          providerSubject: 'existing-mfa-provider-user',
+        },
+      }),
+    ).resolves.toBeNull();
+
+    const session = await services.auth.verifyAuthenticationChallenge(
+      {
+        verificationToken: result.verificationToken,
+        method: 'totp',
+        code: createTotpCode(setup.secret),
+      },
+      context,
+    );
+
+    expect(session).toMatchObject({
+      user: {
+        username: 'existing_mfa_user',
+        email: 'existing-mfa@example.com',
+      },
+    });
+
+    const identity = await models.ssoIdentity.findOne({
+      where: {
+        providerId: 'identity-example-com',
+        providerSubject: 'existing-mfa-provider-user',
+      },
+    });
+
+    expect(identity?.userId).toBe(user!.id);
   });
 
   it('keeps the SSO bind token usable when account creation hits an existing username', async () => {
@@ -1026,11 +1120,11 @@ async function handleHsSsoCallback(
   })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuer(issuerUrl)
-    .setAudience(ssoConfig.clientId)
+    .setAudience(ssoProviderConfig.clientId)
     .setSubject(input.subject)
     .setIssuedAt()
     .setExpirationTime('5m')
-    .sign(Buffer.from(ssoConfig.clientSecret, 'utf8'));
+    .sign(Buffer.from(ssoProviderConfig.clientSecret, 'utf8'));
 
   return services.sso.handleCallback({
     code: 'authorization-code',

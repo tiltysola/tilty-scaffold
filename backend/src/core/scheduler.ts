@@ -1,7 +1,6 @@
 import { randomUUID } from 'crypto';
 import schedule from 'node-schedule';
 
-import { type CacheStore } from '../infra/cache';
 import { logger } from './logger';
 import { type BackendModule, type JobDefinition } from './module';
 
@@ -14,8 +13,14 @@ interface SchedulerOptions {
 }
 
 interface SchedulerLockOptions {
-  cacheStore: CacheStore;
+  cacheStore: SchedulerLockStore;
   ttlMs: number;
+}
+
+interface SchedulerLockStore {
+  acquireLock(key: string, owner: string, ttlMs: number): Promise<boolean>;
+  releaseLock(key: string, owner: string): Promise<boolean>;
+  renewLock(key: string, owner: string, ttlMs: number): Promise<boolean>;
 }
 
 interface AcquiredSchedulerLock {
@@ -99,26 +104,26 @@ async function acquireJobLock(job: JobDefinition, options: SchedulerLockOptions)
 
 function startLockRenewal(job: JobDefinition, lock: AcquiredSchedulerLock, options: SchedulerLockOptions) {
   const renewIntervalMs = Math.max(Math.floor(options.ttlMs / 3), 1);
-  let active = true;
+  let isActive = true;
   const timer = setInterval(() => {
     void options.cacheStore
       .renewLock(lock.key, lock.owner, options.ttlMs)
       .then((renewed) => {
-        if (active && !renewed) {
+        if (isActive && !renewed) {
           logger.warn(`Scheduler lock for job ${job.name} was lost before the job completed.`);
-          active = false;
+          isActive = false;
           clearInterval(timer);
         }
       })
       .catch((error: unknown) => {
-        if (active) {
+        if (isActive) {
           logger.error(`Scheduler lock for job ${job.name} could not be renewed.`, error as Error);
         }
       });
   }, renewIntervalMs);
 
   return () => {
-    active = false;
+    isActive = false;
     clearInterval(timer);
   };
 }

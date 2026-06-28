@@ -1,6 +1,6 @@
 {
   "name": "tilty-scaffold",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "workspaces": [
     "frontend",
@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "postinstall": "npm --prefix shared run build",
-    "dev": "npm run dev:backend & npm run dev:frontend & wait",
+    "dev": "node scripts/dev.mjs",
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:backend": "npm --prefix backend run dev",
     "build": "npm run build:shared && npm run build:backend && npm run build:frontend",

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   authStore,
+  changePassword,
+  createVerificationChallenge,
   fetchAuthConfig,
   logout,
   register,
@@ -11,6 +13,7 @@ import {
   sendProfilePhoneVerification,
   sendRegistrationEmailVerification,
   updateCurrentUser,
+  updateMfaSettings,
   verifyProfileEmail,
   verifyProfilePhone,
 } from '../src/lib/auth';
@@ -34,6 +37,7 @@ describe('auth API client', () => {
       'fetch',
       vi.fn(async () => {
         return createApiSuccessResponse({
+          fileUploadMaxBytes: 2 * 1024 * 1024,
           passwordRecoveryEnabled: true,
           phoneCountryCodes: ['+86'],
           profileEmailVerificationEnabled: true,
@@ -43,6 +47,7 @@ describe('auth API client', () => {
     );
 
     await expect(fetchAuthConfig()).resolves.toEqual({
+      fileUploadMaxBytes: 2 * 1024 * 1024,
       passwordRecoveryEnabled: true,
       phoneCountryCodes: ['+86'],
       profileEmailVerificationEnabled: true,
@@ -230,11 +235,21 @@ describe('auth API client', () => {
     const updatedUser = {
       ...session.user,
       displayName: 'Updated User',
+      gender: 'Custom',
+      birthday: '2008-05-23',
+      bio: 'Frontend is waking up.',
+      location: 'Chaoyang, Beijing',
+      websiteUrl: 'https://www.tiltysola.com/',
     };
     const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
       expect(init?.body).toBe(
         JSON.stringify({
           displayName: 'Updated User',
+          gender: 'Custom',
+          birthday: '2008-05-23',
+          bio: 'Frontend is waking up.',
+          location: 'Chaoyang, Beijing',
+          websiteUrl: 'https://www.tiltysola.com/',
           phoneNumber: '+8613800138000',
         }),
       );
@@ -250,6 +265,11 @@ describe('auth API client', () => {
     await expect(
       updateCurrentUser({
         displayName: 'Updated User',
+        gender: 'Custom',
+        birthday: '2008-05-23',
+        bio: 'Frontend is waking up.',
+        location: 'Chaoyang, Beijing',
+        websiteUrl: 'https://www.tiltysola.com/',
         phoneNumber: '+8613800138000',
       }),
     ).resolves.toEqual(updatedUser);
@@ -258,6 +278,110 @@ describe('auth API client', () => {
       ...session,
       user: updatedUser,
     });
+  });
+
+  it('changes passwords with the authenticated session', async () => {
+    const window = createTestWindow();
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
+    const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
+      expect(init?.body).toBe(
+        JSON.stringify({
+          currentPassword: 'password123',
+          password: 'newpassword123',
+          confirmPassword: 'newpassword123',
+        }),
+      );
+      expect(init?.method).toBe('PATCH');
+
+      return createApiSuccessResponse({
+        changed: true,
+      });
+    });
+
+    vi.stubGlobal('window', window);
+    await seedAuthSession(session);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      changePassword({
+        currentPassword: 'password123',
+        password: 'newpassword123',
+        confirmPassword: 'newpassword123',
+      }),
+    ).resolves.toEqual({
+      changed: true,
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me/password');
+    expect(getCurrentAuthSession()).toEqual(session);
+  });
+
+  it('creates password change verification challenges', async () => {
+    const window = createTestWindow();
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
+    const challenge = {
+      requiresVerification: true,
+      verificationToken: '11111111-1111-4111-8111-111111111111',
+      purpose: 'change_password',
+      defaultMethod: 'email',
+      methods: [
+        {
+          method: 'email',
+          label: 'Email',
+          maskedTarget: '***@example.com',
+        },
+      ],
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      remainingAttempts: 5,
+    };
+    const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
+      expect(init?.body).toBe(
+        JSON.stringify({
+          purpose: 'change_password',
+        }),
+      );
+      expect(init?.method).toBe('POST');
+
+      return createApiSuccessResponse(challenge);
+    });
+
+    vi.stubGlobal('window', window);
+    await seedAuthSession(session);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createVerificationChallenge('change_password')).resolves.toEqual(challenge);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/verification/challenges');
+  });
+
+  it('updates MFA settings with the two-step verification switch', async () => {
+    const window = createTestWindow();
+    const session = createSession(new Date(Date.now() + 60_000).toISOString());
+    const settings = {
+      availableMethods: ['sms', 'email'],
+      defaultMethod: 'sms',
+      effectiveMethods: ['sms', 'email'],
+      mfaRequiredForSso: true,
+      passkeyCount: 0,
+      twoStepCanDisable: true,
+      twoStepCanEnable: true,
+      twoStepEnabled: true,
+    };
+    const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
+      expect(init?.body).toBe(
+        JSON.stringify({
+          enabled: true,
+        }),
+      );
+      expect(init?.method).toBe('PATCH');
+
+      return createApiSuccessResponse(settings);
+    });
+
+    vi.stubGlobal('window', window);
+    await seedAuthSession(session);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(updateMfaSettings({ enabled: true })).resolves.toEqual(settings);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/mfa');
   });
 
   it('verifies the profile email and stores returned user metadata', async () => {

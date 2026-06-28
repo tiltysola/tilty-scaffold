@@ -1,0 +1,30 @@
+:root {
+  --app-font-primary: 'Inter';
+  --app-font-display: 'Fontdiner Swanky';
+  --app-font-family:
+    var(--app-font-primary), BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', STXihei, 'Segoe UI',
+    'Helvetica Neue', Helvetica, 'Hiragino Sans GB', Arial, sans-serif;
+}
+
+:root.font-noto-sans-sc {
+  --app-font-primary: 'Noto Sans SC';
+}
+
+:root.font-noto-sans-jp {
+  --app-font-primary: 'Noto Sans JP';
+}
+
+html,
+body,
+.font-heading,
+.font-sans {
+  font-family: var(--app-font-family);
+}
+
+button,
+input,
+optgroup,
+select,
+textarea {
+  font-family: inherit;
+}

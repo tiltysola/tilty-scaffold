@@ -1,6 +1,6 @@
 {
   "name": "@tilty/shared",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "type": "commonjs",
   "exports": {
@@ -40,16 +40,16 @@
     "build": "npm run clean && npm run build:esm && node scripts/prepare-esm.cjs && npm run build:cjs && node scripts/write-cjs-package.cjs",
     "build:cjs": "tsc -p tsconfig.cjs.json",
     "build:esm": "tsc -p tsconfig.esm.json",
-    "clean": "rm -rf dist",
+    "clean": "node ../scripts/clean.mjs dist",
     "format": "prettier --write . --ignore-unknown",
     "format:check": "prettier --check . --ignore-unknown",
     "fix": "npm run format",
     "typecheck": "tsc --noEmit"
   },
-  "devDependencies": {
-    "typescript": "^6.0.3"
-  },
   "dependencies": {
     "libphonenumber-js": "^1.13.7"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
   }
 }
