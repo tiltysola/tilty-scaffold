@@ -1,24 +1,23 @@
-import { type ReactNode, useState } from 'react';
+import { useIntl } from 'react-intl';
 
-import { CheckIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react';
+import { PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react';
 
 import { Button } from '@/shadcn/components/ui/button';
+import { Sheet } from '@/shadcn/components/ui/sheet';
 import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from '@/shadcn/components/ui/sheet';
+  SetupSmsPhoneCountryCode,
+  type SetupSmsPhoneCountryCodeValue,
+  setupSmsPhoneCountryCodeValues,
+} from '@tilty/shared/setup';
 
 import { ConfirmActionDialog } from '@/components/ConfirmActionDialog';
 
 import { ConfigurationTextInput, SelectControl } from './FormControls';
-import { isProfileObject, parseProfileArray } from './utils';
+import { SetupProfileSection, SetupProfileSheet } from './ProfileSheetControls';
+import { useProfileListEditor } from './useProfileListEditor';
+import { isProfileObject, parseProfileArray, toMessagePathPart } from './utils';
 
-type SmsProfileCountryCode = '+86' | '+852' | '+853';
+type SmsProfileCountryCode = SetupSmsPhoneCountryCodeValue;
 type SmsProfileType = 'MKT' | 'NOTIFY' | 'OTP';
 
 interface SmsProfileDraft {
@@ -36,21 +35,19 @@ interface SmsProfileDraft {
   type?: SmsProfileType;
 }
 
-const smsCountryCodeOptions: Array<{ label: string; value: SmsProfileCountryCode }> = [
-  { label: 'China Mainland (+86)', value: '+86' },
-  { label: 'Hong Kong, China (+852)', value: '+852' },
-  { label: 'Macao, China (+853)', value: '+853' },
-];
+const smsCountryCodeOptions: Array<{ value: SmsProfileCountryCode }> = setupSmsPhoneCountryCodeValues.map((value) => ({
+  value,
+}));
 
-const smsProfileTypeOptions: Array<{ label: string; value: SmsProfileType }> = [
-  { label: 'OTP', value: 'OTP' },
-  { label: 'Notification', value: 'NOTIFY' },
-  { label: 'Marketing', value: 'MKT' },
+const smsProfileTypeOptions: Array<{ value: SmsProfileType }> = [
+  { value: 'OTP' },
+  { value: 'NOTIFY' },
+  { value: 'MKT' },
 ];
 
 const defaultSmsProfiles: Record<SmsProfileCountryCode, SmsProfileDraft> = {
-  '+86': {
-    phoneCountryCode: '+86',
+  [SetupSmsPhoneCountryCode.ChinaMainland]: {
+    phoneCountryCode: SetupSmsPhoneCountryCode.ChinaMainland,
     apiVersion: '2017-05-25',
     operation: 'SendSms',
     regionId: 'cn-hangzhou',
@@ -60,27 +57,25 @@ const defaultSmsProfiles: Record<SmsProfileCountryCode, SmsProfileDraft> = {
     signName: '',
     templateCode: '',
   },
-  '+852': {
-    phoneCountryCode: '+852',
+  [SetupSmsPhoneCountryCode.HongKong]: {
+    phoneCountryCode: SetupSmsPhoneCountryCode.HongKong,
     apiVersion: '2018-05-01',
     operation: 'SendMessageToGlobe',
     regionId: 'ap-southeast-1',
     endpoint: 'dysmsapi.ap-southeast-1.aliyuncs.com',
     accessKeyId: '',
     accessKeySecret: '',
-    messageTemplate: 'Your verification code is ${code}.',
     senderId: '',
     type: 'OTP',
   },
-  '+853': {
-    phoneCountryCode: '+853',
+  [SetupSmsPhoneCountryCode.Macao]: {
+    phoneCountryCode: SetupSmsPhoneCountryCode.Macao,
     apiVersion: '2018-05-01',
     operation: 'SendMessageToGlobe',
     regionId: 'ap-southeast-1',
     endpoint: 'dysmsapi.ap-southeast-1.aliyuncs.com',
     accessKeyId: '',
     accessKeySecret: '',
-    messageTemplate: 'Your verification code is ${code}.',
     senderId: '',
     type: 'OTP',
   },
@@ -89,22 +84,18 @@ const defaultSmsProfiles: Record<SmsProfileCountryCode, SmsProfileDraft> = {
 const domesticSmsProfileFields = [
   {
     key: 'signName',
-    label: 'Sign Name',
   },
   {
     key: 'templateCode',
-    label: 'Template Code',
   },
 ] as const;
 
 const internationalSmsProfileFields = [
   {
     key: 'senderId',
-    label: 'Sender ID',
   },
   {
     key: 'messageTemplate',
-    label: 'Message Template',
   },
 ] as const;
 
@@ -117,23 +108,20 @@ export function SmsProfilesField({
   onValueChange: (value: string) => void;
   value: string;
 }) {
-  const [activeProfileIndex, setActiveProfileIndex] = useState<number | null>(null);
+  const intl = useIntl();
   const profiles = parseProfileArray(value, isSmsProfileDraft).map((profile) => ({
-    ...getDefaultSmsProfile(profile.phoneCountryCode),
+    ...getDefaultSmsProfile(profile.phoneCountryCode, intl),
     ...profile,
   }));
-  const activeProfile = activeProfileIndex === null ? null : profiles[activeProfileIndex];
+  const { activeProfile, activeProfileIndex, closeProfile, openProfile, removeProfile, updateProfile, updateProfiles } =
+    useProfileListEditor({
+      normalizeForStorage: normalizeSmsProfileForStorage,
+      onValueChange,
+      profiles,
+    });
   const unusedCountryCode = smsCountryCodeOptions.find(
     (option) => !profiles.some((profile) => profile.phoneCountryCode === option.value),
   )?.value;
-  const updateProfiles = (nextProfiles: SmsProfileDraft[]) => {
-    onValueChange(JSON.stringify(nextProfiles.map(normalizeSmsProfileForStorage)));
-  };
-  const updateProfile = (index: number, field: keyof SmsProfileDraft, fieldValue: string) => {
-    updateProfiles(
-      profiles.map((profile, profileIndex) => (profileIndex === index ? { ...profile, [field]: fieldValue } : profile)),
-    );
-  };
   const updateCountryCode = (index: number, countryCode: SmsProfileCountryCode) => {
     const current = profiles[index];
 
@@ -141,7 +129,7 @@ export function SmsProfilesField({
       profiles.map((profile, profileIndex) =>
         profileIndex === index
           ? {
-              ...getDefaultSmsProfile(countryCode),
+              ...getDefaultSmsProfile(countryCode, intl),
               accessKeyId: current?.accessKeyId ?? '',
               accessKeySecret: current?.accessKeySecret ?? '',
             }
@@ -151,17 +139,8 @@ export function SmsProfilesField({
   };
   const addProfile = () => {
     if (unusedCountryCode) {
-      updateProfiles([...profiles, getDefaultSmsProfile(unusedCountryCode)]);
-      setActiveProfileIndex(profiles.length);
-    }
-  };
-  const removeProfile = (index: number) => {
-    updateProfiles(profiles.filter((_, profileIndex) => profileIndex !== index));
-
-    if (activeProfileIndex === index) {
-      setActiveProfileIndex(null);
-    } else if (activeProfileIndex !== null && activeProfileIndex > index) {
-      setActiveProfileIndex(activeProfileIndex - 1);
+      updateProfiles([...profiles, getDefaultSmsProfile(unusedCountryCode, intl)]);
+      openProfile(profiles.length);
     }
   };
 
@@ -169,7 +148,7 @@ export function SmsProfilesField({
     <div className="grid gap-4">
       {profiles.length === 0 ? (
         <div className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
-          No SMS country code profiles are configured.
+          {intl.formatMessage({ id: 'setup.sms.profiles.empty' })}
         </div>
       ) : null}
       {profiles.map((profile, index) => (
@@ -180,31 +159,25 @@ export function SmsProfilesField({
           <div className="grid min-w-0 gap-2">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <div className="min-w-0 truncate text-sm font-medium">
-                {getSmsCountryCodeLabel(profile.phoneCountryCode)}
+                {getSmsCountryCodeLabel(profile.phoneCountryCode, intl)}
               </div>
             </div>
             <div className="truncate text-xs text-muted-foreground">{profile.endpoint}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1 self-start">
-            <Button
-              disabled={disabled}
-              onClick={() => setActiveProfileIndex(index)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
+            <Button disabled={disabled} onClick={() => openProfile(index)} size="sm" type="button" variant="outline">
               <PencilIcon />
-              Edit
+              {intl.formatMessage({ id: 'common.edit' })}
             </Button>
             <ConfirmActionDialog
-              confirmLabel="Remove"
-              description="This SMS country code profile will be removed from the current configuration form. Save changes to apply it."
+              confirmLabel={intl.formatMessage({ id: 'common.remove' })}
+              description={intl.formatMessage({ id: 'setup.sms.profiles.remove.description' })}
               onConfirm={() => removeProfile(index)}
-              title="Remove SMS profile?"
+              title={intl.formatMessage({ id: 'setup.remove.sms.profile.title' })}
             >
               <Button disabled={disabled} size="icon-sm" type="button" variant="destructive">
                 <Trash2Icon />
-                <span className="sr-only">Remove SMS profile</span>
+                <span className="sr-only">{intl.formatMessage({ id: 'setup.remove.sms.profile' })}</span>
               </Button>
             </ConfirmActionDialog>
           </div>
@@ -213,14 +186,14 @@ export function SmsProfilesField({
       <div>
         <Button disabled={disabled || !unusedCountryCode} onClick={addProfile} type="button" variant="outline">
           <PlusIcon />
-          Add SMS profile
+          {intl.formatMessage({ id: 'setup.sms.profiles.add' })}
         </Button>
       </div>
       <Sheet
         open={Boolean(activeProfile)}
         onOpenChange={(open: boolean) => {
           if (!open) {
-            setActiveProfileIndex(null);
+            closeProfile();
           }
         }}
       >
@@ -254,130 +227,111 @@ function SmsProfileSheetContent({
   profiles: SmsProfileDraft[];
   profile: SmsProfileDraft;
 }) {
-  return (
-    <SheetContent className="w-full overflow-hidden p-0 sm:max-w-2xl lg:max-w-3xl">
-      <SheetHeader className="border-b pr-12">
-        <SheetTitle>{getSmsCountryCodeLabel(profile.phoneCountryCode)}</SheetTitle>
-        <SheetDescription>{profile.endpoint}</SheetDescription>
-      </SheetHeader>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4">
-        <div className="grid gap-6 py-1 pb-4">
-          <SmsProfileSection title="Basic">
-            <div className="grid gap-4">
-              <SelectControl
-                disabled={disabled}
-                id={`setup-sms-profile-${index}-country`}
-                label="Country Code"
-                onValueChange={(fieldValue) => onCountryCodeChange(index, fieldValue as SmsProfileCountryCode)}
-                options={smsCountryCodeOptions.map((option) => ({
-                  ...option,
-                  disabled:
-                    option.value !== profile.phoneCountryCode &&
-                    profiles.some((smsProfile) => smsProfile.phoneCountryCode === option.value),
-                }))}
-                value={profile.phoneCountryCode}
-              />
-              <ConfigurationTextInput
-                disabled={disabled}
-                id={`setup-sms-profile-${index}-access-key-id`}
-                label="Access Key ID"
-                onChange={(fieldValue) => onFieldChange(index, 'accessKeyId', fieldValue)}
-                value={profile.accessKeyId}
-              />
-              <ConfigurationTextInput
-                disabled={disabled}
-                id={`setup-sms-profile-${index}-access-key-secret`}
-                label="Access Key Secret"
-                onChange={(fieldValue) => onFieldChange(index, 'accessKeySecret', fieldValue)}
-                placeholder="access-key-secret"
-                type="password"
-                value={profile.accessKeySecret}
-              />
-            </div>
-          </SmsProfileSection>
-          <SmsProfileSection title="Message">
-            <div className="grid gap-4">
-              {profile.phoneCountryCode === '+86'
-                ? domesticSmsProfileFields.map((field) => (
-                    <ConfigurationTextInput
-                      disabled={disabled}
-                      id={`setup-sms-profile-${index}-${field.key}`}
-                      key={field.key}
-                      label={field.label}
-                      onChange={(fieldValue) => onFieldChange(index, field.key, fieldValue)}
-                      value={profile[field.key] ?? ''}
-                    />
-                  ))
-                : internationalSmsProfileFields.map((field) => (
-                    <ConfigurationTextInput
-                      disabled={disabled}
-                      id={`setup-sms-profile-${index}-${field.key}`}
-                      key={field.key}
-                      label={field.label}
-                      onChange={(fieldValue) => onFieldChange(index, field.key, fieldValue)}
-                      value={profile[field.key] ?? ''}
-                    />
-                  ))}
-              {profile.phoneCountryCode === '+86' ? null : (
-                <SelectControl
-                  disabled={disabled}
-                  id={`setup-sms-profile-${index}-type`}
-                  label="Message Type"
-                  onValueChange={(fieldValue) => onFieldChange(index, 'type', fieldValue)}
-                  options={smsProfileTypeOptions}
-                  value={profile.type ?? 'OTP'}
-                />
-              )}
-            </div>
-          </SmsProfileSection>
-          <SmsProfileSection title="Aliyun API">
-            <div className="grid gap-4">
-              <ConfigurationTextInput
-                disabled
-                id={`setup-sms-profile-${index}-api-version`}
-                label="API Version"
-                value={profile.apiVersion}
-              />
-              <ConfigurationTextInput
-                disabled
-                id={`setup-sms-profile-${index}-operation`}
-                label="Operation"
-                value={profile.operation}
-              />
-              <ConfigurationTextInput
-                disabled
-                id={`setup-sms-profile-${index}-region`}
-                label="Region ID"
-                value={profile.regionId}
-              />
-              <ConfigurationTextInput
-                disabled
-                id={`setup-sms-profile-${index}-endpoint`}
-                label="Endpoint"
-                value={profile.endpoint}
-              />
-            </div>
-          </SmsProfileSection>
-        </div>
-      </div>
-      <SheetFooter className="border-t">
-        <SheetClose asChild>
-          <Button type="button">
-            <CheckIcon />
-            Done
-          </Button>
-        </SheetClose>
-      </SheetFooter>
-    </SheetContent>
-  );
-}
+  const intl = useIntl();
 
-function SmsProfileSection({ children, title }: { children: ReactNode; title: string }) {
   return (
-    <section className="grid gap-3">
-      <h4 className="text-sm font-semibold text-foreground">{title}</h4>
-      {children}
-    </section>
+    <SetupProfileSheet description={profile.endpoint} title={getSmsCountryCodeLabel(profile.phoneCountryCode, intl)}>
+      <SetupProfileSection title={intl.formatMessage({ id: 'setup.section.basic' })}>
+        <div className="grid gap-4">
+          <SelectControl
+            disabled={disabled}
+            id={`setup-sms-profile-${index}-country`}
+            label={intl.formatMessage({ id: 'setup.sms.profile.phone.country.code.label' })}
+            onValueChange={(fieldValue) => onCountryCodeChange(index, fieldValue as SmsProfileCountryCode)}
+            options={smsCountryCodeOptions.map((option) => ({
+              disabled:
+                option.value !== profile.phoneCountryCode &&
+                profiles.some((smsProfile) => smsProfile.phoneCountryCode === option.value),
+              label: getSmsCountryCodeLabel(option.value, intl),
+              value: option.value,
+            }))}
+            value={profile.phoneCountryCode}
+          />
+          <ConfigurationTextInput
+            disabled={disabled}
+            id={`setup-sms-profile-${index}-access-key-id`}
+            label={intl.formatMessage({ id: 'setup.sms.profile.access.key.id.label' })}
+            onChange={(fieldValue) => onFieldChange(index, 'accessKeyId', fieldValue)}
+            value={profile.accessKeyId}
+          />
+          <ConfigurationTextInput
+            disabled={disabled}
+            id={`setup-sms-profile-${index}-access-key-secret`}
+            label={intl.formatMessage({ id: 'setup.sms.profile.access.key.secret.label' })}
+            onChange={(fieldValue) => onFieldChange(index, 'accessKeySecret', fieldValue)}
+            placeholder={intl.formatMessage({ id: 'setup.sms.profile.access.key.secret.placeholder' })}
+            type="password"
+            value={profile.accessKeySecret}
+          />
+        </div>
+      </SetupProfileSection>
+      <SetupProfileSection title={intl.formatMessage({ id: 'setup.section.message' })}>
+        <div className="grid gap-4">
+          {profile.phoneCountryCode === SetupSmsPhoneCountryCode.ChinaMainland
+            ? domesticSmsProfileFields.map((field) => (
+                <ConfigurationTextInput
+                  disabled={disabled}
+                  id={`setup-sms-profile-${index}-${field.key}`}
+                  key={field.key}
+                  label={intl.formatMessage({ id: `setup.sms.profile.${toMessagePathPart(field.key)}.label` })}
+                  onChange={(fieldValue) => onFieldChange(index, field.key, fieldValue)}
+                  value={profile[field.key] ?? ''}
+                />
+              ))
+            : internationalSmsProfileFields.map((field) => (
+                <ConfigurationTextInput
+                  disabled={disabled}
+                  id={`setup-sms-profile-${index}-${field.key}`}
+                  key={field.key}
+                  label={intl.formatMessage({ id: `setup.sms.profile.${toMessagePathPart(field.key)}.label` })}
+                  onChange={(fieldValue) => onFieldChange(index, field.key, fieldValue)}
+                  value={profile[field.key] ?? ''}
+                />
+              ))}
+          {profile.phoneCountryCode === SetupSmsPhoneCountryCode.ChinaMainland ? null : (
+            <SelectControl
+              disabled={disabled}
+              id={`setup-sms-profile-${index}-type`}
+              label={intl.formatMessage({ id: 'setup.sms.profile.type.label' })}
+              onValueChange={(fieldValue) => onFieldChange(index, 'type', fieldValue)}
+              options={smsProfileTypeOptions.map((option) => ({
+                label: intl.formatMessage({ id: `setup.sms.profile.type.${toMessagePathPart(option.value)}` }),
+                value: option.value,
+              }))}
+              value={profile.type ?? 'OTP'}
+            />
+          )}
+        </div>
+      </SetupProfileSection>
+      <SetupProfileSection title={intl.formatMessage({ id: 'setup.section.aliyun.api' })}>
+        <div className="grid gap-4">
+          <ConfigurationTextInput
+            disabled
+            id={`setup-sms-profile-${index}-api-version`}
+            label={intl.formatMessage({ id: 'setup.sms.profile.api.version.label' })}
+            value={profile.apiVersion}
+          />
+          <ConfigurationTextInput
+            disabled
+            id={`setup-sms-profile-${index}-operation`}
+            label={intl.formatMessage({ id: 'setup.sms.profile.operation.label' })}
+            value={profile.operation}
+          />
+          <ConfigurationTextInput
+            disabled
+            id={`setup-sms-profile-${index}-region`}
+            label={intl.formatMessage({ id: 'setup.sms.profile.region.id.label' })}
+            value={profile.regionId}
+          />
+          <ConfigurationTextInput
+            disabled
+            id={`setup-sms-profile-${index}-endpoint`}
+            label={intl.formatMessage({ id: 'setup.sms.profile.endpoint.label' })}
+            value={profile.endpoint}
+          />
+        </div>
+      </SetupProfileSection>
+    </SetupProfileSheet>
   );
 }
 
@@ -389,9 +343,7 @@ function isSmsProfileDraft(value: unknown): value is SmsProfileDraft {
   const profile = value;
 
   return (
-    (profile.phoneCountryCode === '+86' ||
-      profile.phoneCountryCode === '+852' ||
-      profile.phoneCountryCode === '+853') &&
+    isSmsProfileCountryCode(profile.phoneCountryCode) &&
     typeof profile.apiVersion === 'string' &&
     typeof profile.operation === 'string' &&
     typeof profile.regionId === 'string' &&
@@ -401,12 +353,25 @@ function isSmsProfileDraft(value: unknown): value is SmsProfileDraft {
   );
 }
 
-function getDefaultSmsProfile(countryCode: SmsProfileCountryCode): SmsProfileDraft {
-  return { ...defaultSmsProfiles[countryCode] };
+function getDefaultSmsProfile(countryCode: SmsProfileCountryCode, intl: ReturnType<typeof useIntl>): SmsProfileDraft {
+  const profile = { ...defaultSmsProfiles[countryCode] };
+
+  if (countryCode !== SetupSmsPhoneCountryCode.ChinaMainland) {
+    profile.messageTemplate = intl.formatMessage(
+      { id: 'setup.sms.profile.message.template.default' },
+      { code: '${code}' },
+    );
+  }
+
+  return profile;
+}
+
+function isSmsProfileCountryCode(value: unknown): value is SmsProfileCountryCode {
+  return typeof value === 'string' && setupSmsPhoneCountryCodeValues.includes(value as SetupSmsPhoneCountryCodeValue);
 }
 
 function normalizeSmsProfileForStorage(profile: SmsProfileDraft) {
-  if (profile.phoneCountryCode === '+86') {
+  if (profile.phoneCountryCode === SetupSmsPhoneCountryCode.ChinaMainland) {
     return {
       phoneCountryCode: profile.phoneCountryCode,
       apiVersion: '2017-05-25',
@@ -434,6 +399,6 @@ function normalizeSmsProfileForStorage(profile: SmsProfileDraft) {
   };
 }
 
-function getSmsCountryCodeLabel(countryCode: SmsProfileCountryCode) {
-  return smsCountryCodeOptions.find((option) => option.value === countryCode)?.label ?? countryCode;
+function getSmsCountryCodeLabel(countryCode: SmsProfileCountryCode, intl: ReturnType<typeof useIntl>) {
+  return intl.formatMessage({ id: `setup.sms.profile.phone.country.code.${countryCode.replace('+', '')}` });
 }

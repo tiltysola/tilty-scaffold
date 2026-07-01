@@ -1,4 +1,5 @@
 import { type ChangeEvent } from 'react';
+import { useIntl } from 'react-intl';
 
 import { InfoIcon, type LucideIcon } from 'lucide-react';
 
@@ -24,6 +25,8 @@ export function AdministratorStep({
   hasExistingUsers: boolean;
   onChange: (field: keyof SetupAdministrator) => (event: ChangeEvent<HTMLInputElement>) => void;
 }) {
+  const intl = useIntl();
+
   if (hasExistingUsers) {
     return (
       <div className="grid max-w-3xl gap-5">
@@ -31,11 +34,8 @@ export function AdministratorStep({
           <div className="flex items-start gap-3">
             <InfoIcon className="mt-0.5 size-5 shrink-0" />
             <div className="grid gap-1">
-              <h3 className="text-sm font-semibold">Existing users detected</h3>
-              <p className="text-sm leading-6">
-                The selected database already contains available users. Administrator creation is skipped, and existing
-                users are retained.
-              </p>
+              <h3 className="text-sm font-semibold">{intl.formatMessage({ id: 'setup.existing.users.title' })}</h3>
+              <p className="text-sm leading-6">{intl.formatMessage({ id: 'setup.existing.users.description' })}</p>
             </div>
           </div>
         </section>
@@ -49,7 +49,7 @@ export function AdministratorStep({
         autoComplete="username"
         disabled={disabled}
         field="username"
-        label="Administrator username"
+        label={intl.formatMessage({ id: 'setup.admin.username' })}
         onChange={onChange('username')}
         value={administrator.username}
       />
@@ -57,7 +57,7 @@ export function AdministratorStep({
         autoComplete="name"
         disabled={disabled}
         field="displayName"
-        label="Administrator display name"
+        label={intl.formatMessage({ id: 'setup.admin.display.name' })}
         onChange={onChange('displayName')}
         value={administrator.displayName}
       />
@@ -65,7 +65,7 @@ export function AdministratorStep({
         autoComplete="email"
         disabled={disabled}
         field="email"
-        label="Administrator email"
+        label={intl.formatMessage({ id: 'setup.admin.email' })}
         onChange={onChange('email')}
         type="email"
         value={administrator.email}
@@ -74,7 +74,7 @@ export function AdministratorStep({
         autoComplete="new-password"
         disabled={disabled}
         field="password"
-        label="Administrator password"
+        label={intl.formatMessage({ id: 'setup.admin.password' })}
         onChange={onChange('password')}
         type="password"
         value={administrator.password}
@@ -83,7 +83,7 @@ export function AdministratorStep({
         autoComplete="new-password"
         disabled={disabled}
         field="confirmPassword"
-        label="Confirm administrator password"
+        label={intl.formatMessage({ id: 'setup.admin.confirm.password' })}
         onChange={onChange('confirmPassword')}
         type="password"
         value={administrator.confirmPassword}
@@ -109,9 +109,14 @@ function AdministratorField({
   type?: 'email' | 'password' | 'text';
   value: string;
 }) {
+  const intl = useIntl();
   const inputId = `setup-admin-${field}`;
   const descriptionId = `${inputId}-description`;
   const help = administratorFieldHelp[field];
+  const description = intl.formatMessage({ id: `setup.admin.${field}.description` });
+  const placeholder = help.placeholderMessageId
+    ? intl.formatMessage({ id: help.placeholderMessageId })
+    : help.placeholder;
 
   return (
     <div className="grid gap-2">
@@ -120,7 +125,7 @@ function AdministratorField({
           {label}
         </Label>
         <p className="text-xs leading-5 text-muted-foreground" id={descriptionId}>
-          {help.description}
+          {description}
         </p>
       </div>
       <div className="min-w-0 max-w-3xl">
@@ -131,7 +136,7 @@ function AdministratorField({
             disabled={disabled}
             id={inputId}
             onChange={onChange}
-            placeholder={help.placeholder}
+            placeholder={placeholder}
             value={value}
           />
         ) : (
@@ -141,7 +146,7 @@ function AdministratorField({
             disabled={disabled}
             id={inputId}
             onChange={onChange}
-            placeholder={help.placeholder}
+            placeholder={placeholder}
             type={type}
             value={value}
           />

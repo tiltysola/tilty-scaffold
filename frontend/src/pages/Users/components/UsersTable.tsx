@@ -1,3 +1,5 @@
+import { useIntl } from 'react-intl';
+
 import { ChevronLeftIcon, ChevronRightIcon, PencilIcon } from 'lucide-react';
 
 import { type RoleSummary, type UserListItem, type UserListPagination } from '@/lib/users';
@@ -36,26 +38,30 @@ export function UsersTable({
   savingUserId: string | null;
   users: UserListItem[];
 }) {
+  const intl = useIntl();
+
   return (
     <div className="grid gap-4">
       <HoverScrollArea className="w-full">
         <table className="w-full min-w-max caption-bottom text-sm">
           <TableHeader>
             <TableRow>
-              <TableHead>User</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Phone</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Roles</TableHead>
-              <TableHead>Created</TableHead>
-              {canManageUsers ? <TableHead className="w-24 text-right">Action</TableHead> : null}
+              <TableHead>{intl.formatMessage({ id: 'users.user' })}</TableHead>
+              <TableHead>{intl.formatMessage({ id: 'profile.email' })}</TableHead>
+              <TableHead>{intl.formatMessage({ id: 'users.phone' })}</TableHead>
+              <TableHead>{intl.formatMessage({ id: 'users.status' })}</TableHead>
+              <TableHead>{intl.formatMessage({ id: 'users.roles' })}</TableHead>
+              <TableHead>{intl.formatMessage({ id: 'users.created' })}</TableHead>
+              {canManageUsers ? (
+                <TableHead className="w-24 text-right">{intl.formatMessage({ id: 'users.action' })}</TableHead>
+              ) : null}
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
                 <TableCell className="h-24 text-center text-muted-foreground" colSpan={canManageUsers ? 7 : 6}>
-                  Loading users
+                  {intl.formatMessage({ id: 'users.loading' })}
                 </TableCell>
               </TableRow>
             ) : users.length ? (
@@ -68,25 +74,29 @@ export function UsersTable({
                     </div>
                   </TableCell>
                   <TableCell>
-                    <VerifiedContact label="Email" value={user.email} verified={user.emailVerified} />
+                    <VerifiedContact
+                      label={intl.formatMessage({ id: 'profile.email' })}
+                      value={user.email}
+                      verified={user.emailVerified}
+                    />
                   </TableCell>
                   <TableCell>
                     <VerifiedContact
-                      label="Phone"
+                      label={intl.formatMessage({ id: 'users.phone' })}
                       placeholder={!user.phoneNumber}
-                      value={user.phoneNumber ?? 'Not bound'}
+                      value={user.phoneNumber ?? intl.formatMessage({ id: 'common.not.bound' })}
                       verified={Boolean(user.phoneNumber && user.phoneVerified)}
                     />
                   </TableCell>
                   <TableCell>
                     <Badge variant={user.available ? 'secondary' : 'destructive'}>
-                      {user.available ? 'Available' : 'Disabled'}
+                      {intl.formatMessage({ id: user.available ? 'users.available' : 'users.disabled' })}
                     </Badge>
                   </TableCell>
                   <TableCell>
                     <RoleBadges roleKeys={user.roles} roles={roles} />
                   </TableCell>
-                  <TableCell>{formatDate(user.createdAt)}</TableCell>
+                  <TableCell>{formatDate(user.createdAt, intl.locale)}</TableCell>
                   {canManageUsers ? (
                     <TableCell className="text-right">
                       <Button
@@ -95,7 +105,7 @@ export function UsersTable({
                         size="sm"
                       >
                         <PencilIcon />
-                        Edit
+                        {intl.formatMessage({ id: 'common.edit' })}
                       </Button>
                     </TableCell>
                   ) : null}
@@ -104,7 +114,7 @@ export function UsersTable({
             ) : (
               <TableRow>
                 <TableCell className="h-24 text-center text-muted-foreground" colSpan={canManageUsers ? 7 : 6}>
-                  No users found.
+                  {intl.formatMessage({ id: 'users.empty' })}
                 </TableCell>
               </TableRow>
             )}
@@ -113,7 +123,10 @@ export function UsersTable({
       </HoverScrollArea>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <span className="text-sm text-muted-foreground">
-          Page {pagination.page} of {displayTotalPages} - {pagination.total} users
+          {intl.formatMessage(
+            { id: 'users.page.summary' },
+            { page: pagination.page, total: pagination.total, totalPages: displayTotalPages },
+          )}
         </span>
         <div className="flex items-center gap-2">
           <Button
@@ -123,7 +136,7 @@ export function UsersTable({
             variant="outline"
           >
             <ChevronLeftIcon />
-            Previous
+            {intl.formatMessage({ id: 'common.previous' })}
           </Button>
           <Button
             disabled={loading || pagination.page >= displayTotalPages}
@@ -131,7 +144,7 @@ export function UsersTable({
             size="sm"
             variant="outline"
           >
-            Next
+            {intl.formatMessage({ id: 'common.next' })}
             <ChevronRightIcon />
           </Button>
         </div>

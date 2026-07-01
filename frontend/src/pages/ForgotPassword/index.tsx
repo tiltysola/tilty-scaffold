@@ -1,4 +1,5 @@
 import { type SubmitEventHandler, useEffect, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { Link } from 'react-router-dom';
 
 import { type z } from 'zod';
@@ -8,32 +9,30 @@ import { useEmailVerification } from '@/hooks/useEmailVerification';
 import { useFormState } from '@/hooks/useFormState';
 import { getApiErrorMessage } from '@/lib/api';
 import { fetchAuthConfig, resetPassword, sendPasswordResetEmailVerification } from '@/lib/auth';
-import { createPasswordFormSchema, emailSchema, verificationCodeSchema } from '@/lib/auth-validation';
 import { routePath } from '@/router';
 import { Button } from '@/shadcn/components/ui/button';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
+import { createPasswordFormSchema, emailSchema, verificationCodeSchema } from '@tilty/shared/validation';
 
 import { AuthCard } from '@/components/AuthCard';
 import FormMessage from '@/components/FormMessage';
 
-import { getPasswordRecoveryErrorMessage, passwordRecoveryUnavailableMessage } from './utils';
+type ResetPasswordFormState = z.input<typeof resetPasswordSchema>;
 
 const resetPasswordSchema = createPasswordFormSchema({
   email: emailSchema,
   emailVerificationCode: verificationCodeSchema,
 });
 
-type ResetPasswordFormState = z.input<typeof resetPasswordSchema>;
-
 const Index = () => {
   const [configLoading, setConfigLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
   const [pageNotice, setPageNotice] = useState<string | null>(null);
   const [passwordRecoveryEnabled, setPasswordRecoveryEnabled] = useState(false);
-  const submitAction = useAsyncAction(getPasswordRecoveryErrorMessage);
+  const intl = useIntl();
+  const submitAction = useAsyncAction();
   const emailVerification = useEmailVerification({
-    getErrorMessage: getPasswordRecoveryErrorMessage,
     sendCode: sendPasswordResetEmailVerification,
   });
   const { form, handleChange, setForm } = useFormState<ResetPasswordFormState>({
@@ -41,6 +40,9 @@ const Index = () => {
     emailVerificationCode: '',
     password: '',
     confirmPassword: '',
+  });
+  const passwordRecoveryUnavailableMessage = intl.formatMessage({
+    id: 'auth.forgot.password.recovery.unavailable',
   });
   const error = submitAction.error ?? emailVerification.error ?? configError;
   const notice = pageNotice ?? emailVerification.notice;
@@ -63,7 +65,9 @@ const Index = () => {
       })
       .catch((requestError) => {
         if (isActive) {
-          setConfigError(getApiErrorMessage(requestError, 'Password recovery configuration could not be loaded.'));
+          setConfigError(
+            getApiErrorMessage(requestError, intl.formatMessage({ id: 'auth.password.recovery.config.load.failed' })),
+          );
         }
       })
       .finally(() => {
@@ -75,7 +79,7 @@ const Index = () => {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [intl, passwordRecoveryUnavailableMessage]);
 
   const handleSendCode = async () => {
     submitAction.clearError();
@@ -90,11 +94,13 @@ const Index = () => {
     const parsed = emailSchema.safeParse(form.email);
 
     if (!parsed.success) {
-      emailVerification.setError(parsed.error.issues[0]?.message ?? 'Provide a valid email address.');
+      emailVerification.setError(
+        intl.formatMessage({ id: parsed.error.issues[0]?.message ?? 'validation.email.invalid' }),
+      );
       return;
     }
 
-    await emailVerification.requestCode(parsed.data, 'Verification code could not be sent.');
+    await emailVerification.requestCode(parsed.data, intl.formatMessage({ id: 'auth.email.verification.send.failed' }));
   };
 
   const handleSubmit: SubmitEventHandler<HTMLFormElement> = async (event) => {
@@ -111,11 +117,16 @@ const Index = () => {
     const parsed = resetPasswordSchema.safeParse(form);
 
     if (!parsed.success) {
-      submitAction.setError(parsed.error.issues[0]?.message ?? 'Password reset details are invalid.');
+      submitAction.setError(
+        intl.formatMessage({ id: parsed.error.issues[0]?.message ?? 'validation.password.reset.invalid' }),
+      );
       return;
     }
 
-    const result = await submitAction.run(() => resetPassword(parsed.data), 'Password reset could not be completed.');
+    const result = await submitAction.run(
+      () => resetPassword(parsed.data),
+      intl.formatMessage({ id: 'auth.reset.password.failed' }),
+    );
 
     if (result) {
       setForm((current) => ({
@@ -124,27 +135,27 @@ const Index = () => {
         password: '',
         confirmPassword: '',
       }));
-      setPageNotice('Password has been reset. Log in with the new password.');
+      setPageNotice(intl.formatMessage({ id: 'auth.forgot.password.reset.complete' }));
     }
   };
 
   return (
     <AuthCard
-      description="Reset your account password with an email verification code."
+      description={intl.formatMessage({ id: 'auth.forgot.password.description' })}
       footer={
         <>
-          <span>Remember your password?</span>
+          <span>{intl.formatMessage({ id: 'auth.remember.password' })}</span>
           <Link className="font-medium text-primary hover:underline" to={routePath('login')}>
-            Log in
+            {intl.formatMessage({ id: 'auth.login' })}
           </Link>
         </>
       }
       footerClassName="justify-center gap-2 text-sm text-muted-foreground"
-      title="Password recovery"
+      title={intl.formatMessage({ id: 'auth.forgot.password.title' })}
     >
       <form className="grid gap-4" onSubmit={handleSubmit}>
         <div className="grid gap-2">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="email">{intl.formatMessage({ id: 'auth.email' })}</Label>
           <div className="flex gap-2">
             <Input
               autoComplete="email"
@@ -152,7 +163,7 @@ const Index = () => {
               id="email"
               name="email"
               onChange={handleChange('email')}
-              placeholder="alex@example.com"
+              placeholder={intl.formatMessage({ id: 'auth.email.placeholder' })}
               type="email"
               value={form.email}
             />
@@ -162,12 +173,12 @@ const Index = () => {
               type="button"
               variant="outline"
             >
-              {sendingCode ? 'Sending' : 'Send code'}
+              {intl.formatMessage({ id: sendingCode ? 'common.sending' : 'common.send.code' })}
             </Button>
           </div>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="emailVerificationCode">Verification code</Label>
+          <Label htmlFor="emailVerificationCode">{intl.formatMessage({ id: 'auth.verification.code' })}</Label>
           <Input
             autoComplete="one-time-code"
             disabled={configLoading || submitting || !passwordRecoveryEnabled}
@@ -177,32 +188,32 @@ const Index = () => {
             name="emailVerificationCode"
             onChange={handleChange('emailVerificationCode')}
             pattern="[0-9]{6}"
-            placeholder="000000"
+            placeholder={intl.formatMessage({ id: 'auth.verification.code.placeholder' })}
             value={form.emailVerificationCode}
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="password">New password</Label>
+          <Label htmlFor="password">{intl.formatMessage({ id: 'auth.password.new' })}</Label>
           <Input
             autoComplete="new-password"
             disabled={configLoading || submitting || !passwordRecoveryEnabled}
             id="password"
             name="password"
             onChange={handleChange('password')}
-            placeholder="At least 8 characters"
+            placeholder={intl.formatMessage({ id: 'auth.password.new.placeholder' })}
             type="password"
             value={form.password}
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="confirmPassword">Confirm password</Label>
+          <Label htmlFor="confirmPassword">{intl.formatMessage({ id: 'auth.password.confirm' })}</Label>
           <Input
             autoComplete="new-password"
             disabled={configLoading || submitting || !passwordRecoveryEnabled}
             id="confirmPassword"
             name="confirmPassword"
             onChange={handleChange('confirmPassword')}
-            placeholder="Repeat password"
+            placeholder={intl.formatMessage({ id: 'auth.password.confirm.placeholder' })}
             type="password"
             value={form.confirmPassword}
           />
@@ -210,7 +221,9 @@ const Index = () => {
         <FormMessage message={error} variant="error" />
         <FormMessage message={notice} variant="notice" />
         <Button className="w-full" disabled={configLoading || submitting || !passwordRecoveryEnabled} type="submit">
-          {submitting ? 'Resetting password' : configLoading ? 'Loading' : 'Reset password'}
+          {intl.formatMessage({
+            id: submitting ? 'auth.resetting.password' : configLoading ? 'common.loading' : 'auth.reset.password',
+          })}
         </Button>
       </form>
     </AuthCard>

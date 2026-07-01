@@ -30,6 +30,18 @@ export interface PasskeyRuntimeConfig {
   operationTimeoutMs: number;
 }
 
+export interface VerifyPasskeyRegistrationInput {
+  name: string;
+  registrationToken: string;
+  response: RegistrationResponseJSON;
+}
+
+export interface PasskeyRegistrationOptionsResult {
+  registrationToken: string;
+  options: PublicKeyCredentialCreationOptionsJSON;
+  expiresAt: string;
+}
+
 interface RegistrationRecord {
   challenge: string;
   expiresAt: number;
@@ -143,11 +155,11 @@ export class PasskeyService {
         requireUserVerification: true,
       });
     } catch {
-      throw new AppError('PASSKEY_REGISTRATION_INVALID', 'Passkey registration could not be verified.', 401);
+      throw new AppError('PASSKEY_REGISTRATION_INVALID', 'error.PASSKEY_REGISTRATION_INVALID', 401);
     }
 
     if (!verification.verified) {
-      throw new AppError('PASSKEY_REGISTRATION_INVALID', 'Passkey registration could not be verified.', 401);
+      throw new AppError('PASSKEY_REGISTRATION_INVALID', 'error.PASSKEY_REGISTRATION_INVALID', 401);
     }
 
     const { credential, credentialBackedUp, credentialDeviceType } = verification.registrationInfo;
@@ -158,7 +170,7 @@ export class PasskeyService {
     });
 
     if (existing) {
-      throw new AppError('PASSKEY_EXISTS', 'Passkey is already registered.', 409);
+      throw new AppError('PASSKEY_EXISTS', 'error.PASSKEY_EXISTS', 409);
     }
 
     const passkey = await this.passkeyModel.create({
@@ -185,7 +197,7 @@ export class PasskeyService {
     });
 
     if (passkeys.length === 0) {
-      throw new AppError('PASSKEY_NOT_CONFIGURED', 'No passkey is configured for this account.', 409);
+      throw new AppError('PASSKEY_NOT_CONFIGURED', 'error.PASSKEY_NOT_CONFIGURED', 409);
     }
 
     return generateAuthenticationOptions({
@@ -208,7 +220,7 @@ export class PasskeyService {
     });
 
     if (!passkey) {
-      throw new AppError('PASSKEY_NOT_FOUND', 'Passkey was not found for this account.', 401);
+      throw new AppError('PASSKEY_NOT_FOUND', 'error.PASSKEY_NOT_FOUND', 401);
     }
 
     let verification: Awaited<ReturnType<typeof verifyAuthenticationResponse>>;
@@ -228,11 +240,11 @@ export class PasskeyService {
         },
       });
     } catch {
-      throw new AppError('PASSKEY_AUTHENTICATION_INVALID', 'Passkey authentication could not be verified.', 401);
+      throw new AppError('PASSKEY_AUTHENTICATION_INVALID', 'error.PASSKEY_AUTHENTICATION_INVALID', 401);
     }
 
     if (!verification.verified) {
-      throw new AppError('PASSKEY_AUTHENTICATION_INVALID', 'Passkey authentication could not be verified.', 401);
+      throw new AppError('PASSKEY_AUTHENTICATION_INVALID', 'error.PASSKEY_AUTHENTICATION_INVALID', 401);
     }
 
     passkey.counter = verification.authenticationInfo.newCounter;
@@ -253,7 +265,7 @@ export class PasskeyService {
     });
 
     if (deleted === 0) {
-      throw new AppError('PASSKEY_NOT_FOUND', 'Passkey was not found for this account.', 404);
+      throw new AppError('PASSKEY_NOT_FOUND', 'error.PASSKEY_NOT_FOUND', 404);
     }
   }
 
@@ -263,11 +275,7 @@ export class PasskeyService {
 
     if (!record || record.userId !== userId || record.used || record.expiresAt <= Date.now()) {
       await this.cacheStore.delete(key);
-      throw new AppError(
-        'PASSKEY_REGISTRATION_TOKEN_INVALID',
-        'Passkey registration token is invalid or expired.',
-        401,
-      );
+      throw new AppError('PASSKEY_REGISTRATION_TOKEN_INVALID', 'error.PASSKEY_REGISTRATION_TOKEN_INVALID', 401);
     }
 
     const consumed = await this.cacheStore.compareAndSet(
@@ -281,25 +289,13 @@ export class PasskeyService {
     );
 
     if (!consumed) {
-      throw new AppError('PASSKEY_REGISTRATION_TOKEN_CONFLICT', 'Passkey registration state changed.', 409);
+      throw new AppError('PASSKEY_REGISTRATION_TOKEN_CONFLICT', 'error.PASSKEY_REGISTRATION_TOKEN_CONFLICT', 409);
     }
 
     await this.cacheStore.delete(key);
 
     return record;
   }
-}
-
-export interface VerifyPasskeyRegistrationInput {
-  name: string;
-  registrationToken: string;
-  response: RegistrationResponseJSON;
-}
-
-export interface PasskeyRegistrationOptionsResult {
-  registrationToken: string;
-  options: PublicKeyCredentialCreationOptionsJSON;
-  expiresAt: string;
 }
 
 function toPasskeySummary(passkey: AuthPasskeyModel): PasskeySummary {

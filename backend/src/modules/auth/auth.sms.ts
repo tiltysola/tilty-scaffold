@@ -1,10 +1,13 @@
 import OpenApiClient, { $OpenApiUtil } from '@alicloud/openapi-core';
 import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'crypto';
 
+import { SetupSmsPhoneCountryCode, type SetupSmsPhoneCountryCodeValue } from '@tilty/shared/setup';
+import { normalizePhoneNumber } from '@tilty/shared/validation';
+
 import { AppError } from '../../core/errors';
 import { type CacheStore, MemoryCacheStore } from '../../infra/cache';
 
-export type PhoneCountryCode = '+86' | '+852' | '+853';
+export type PhoneCountryCode = SetupSmsPhoneCountryCodeValue;
 
 interface AliyunSmsBaseProfileConfig {
   accessKeyId: string;
@@ -17,7 +20,7 @@ interface AliyunSmsBaseProfileConfig {
 export interface AliyunSmsDomesticProfileConfig extends AliyunSmsBaseProfileConfig {
   apiVersion: '2017-05-25';
   operation: 'SendSms';
-  phoneCountryCode: '+86';
+  phoneCountryCode: typeof SetupSmsPhoneCountryCode.ChinaMainland;
   signName: string;
   templateCode: string;
 }
@@ -26,7 +29,7 @@ export interface AliyunSmsInternationalProfileConfig extends AliyunSmsBaseProfil
   apiVersion: '2018-05-01';
   messageTemplate: string;
   operation: 'SendMessageToGlobe';
-  phoneCountryCode: '+852' | '+853';
+  phoneCountryCode: typeof SetupSmsPhoneCountryCode.HongKong | typeof SetupSmsPhoneCountryCode.Macao;
   senderId?: string | undefined;
   type: 'MKT' | 'NOTIFY' | 'OTP';
 }
@@ -122,7 +125,7 @@ export class SmsVerificationService {
 
   async verifyProfilePhoneVerificationCode(phoneNumber: string, code?: string) {
     if (!this.sender) {
-      throw new AppError('SMS_VERIFICATION_DISABLED', 'SMS verification is disabled.', 404);
+      throw new AppError('SMS_VERIFICATION_DISABLED', 'error.SMS_VERIFICATION_DISABLED', 404);
     }
 
     await this.verifyCode('profile-phone', phoneNumber, code);
@@ -130,7 +133,7 @@ export class SmsVerificationService {
 
   async verifyMfaCode(phoneNumber: string, code?: string) {
     if (!this.sender) {
-      throw new AppError('SMS_VERIFICATION_DISABLED', 'SMS verification is disabled.', 404);
+      throw new AppError('SMS_VERIFICATION_DISABLED', 'error.SMS_VERIFICATION_DISABLED', 404);
     }
 
     await this.verifyCode('mfa', phoneNumber, code);
@@ -138,7 +141,7 @@ export class SmsVerificationService {
 
   private async sendCode(purpose: VerificationPurpose, phoneNumber: string) {
     if (!this.sender) {
-      throw new AppError('SMS_VERIFICATION_DISABLED', 'SMS verification is disabled.', 404);
+      throw new AppError('SMS_VERIFICATION_DISABLED', 'error.SMS_VERIFICATION_DISABLED', 404);
     }
 
     const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
@@ -151,7 +154,7 @@ export class SmsVerificationService {
     const now = Date.now();
 
     if (existing && existing.nextSendAt > now) {
-      throw new AppError('SMS_VERIFICATION_COOLDOWN', 'SMS verification code was sent recently.', 429, {
+      throw new AppError('SMS_VERIFICATION_COOLDOWN', 'error.SMS_VERIFICATION_COOLDOWN', 429, {
         retryAfterSeconds: Math.ceil((existing.nextSendAt - now) / 1000),
       });
     }
@@ -163,7 +166,7 @@ export class SmsVerificationService {
       const retryAfterMs =
         current?.nextSendAt && current.nextSendAt > Date.now() ? current.nextSendAt - Date.now() : this.codeCooldownMs;
 
-      throw new AppError('SMS_VERIFICATION_COOLDOWN', 'SMS verification code was sent recently.', 429, {
+      throw new AppError('SMS_VERIFICATION_COOLDOWN', 'error.SMS_VERIFICATION_COOLDOWN', 429, {
         retryAfterSeconds: Math.ceil(retryAfterMs / 1000),
       });
     }
@@ -196,7 +199,7 @@ export class SmsVerificationService {
 
   private async verifyCode(purpose: VerificationPurpose, phoneNumber: string, code?: string) {
     if (!code) {
-      throw new AppError('SMS_VERIFICATION_REQUIRED', 'SMS verification code is required.', 400);
+      throw new AppError('SMS_VERIFICATION_REQUIRED', 'error.SMS_VERIFICATION_REQUIRED', 400);
     }
 
     const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
@@ -237,7 +240,7 @@ export class SmsVerificationService {
       }
     }
 
-    throw new AppError('SMS_VERIFICATION_CONFLICT', 'SMS verification state changed. Submit the request again.', 409);
+    throw new AppError('SMS_VERIFICATION_CONFLICT', 'error.SMS_VERIFICATION_CONFLICT', 409);
   }
 
   private assertSupportedPhoneCountryCode(phoneNumber: string) {
@@ -245,11 +248,7 @@ export class SmsVerificationService {
       return;
     }
 
-    throw new AppError(
-      'SMS_PHONE_COUNTRY_CODE_UNSUPPORTED',
-      'Phone number country code is not configured for SMS verification.',
-      400,
-    );
+    throw new AppError('SMS_PHONE_COUNTRY_CODE_UNSUPPORTED', 'error.SMS_PHONE_COUNTRY_CODE_UNSUPPORTED', 400);
   }
 
   private hashVerificationCode(purpose: VerificationPurpose, phoneNumber: string, code: string) {
@@ -300,18 +299,14 @@ export class AliyunSmsSenderPool implements SmsSender {
     const matchingProfiles = this.profiles.filter((profile) => input.phoneNumber.startsWith(profile.phoneCountryCode));
 
     if (matchingProfiles.length === 0) {
-      throw new AppError(
-        'SMS_PHONE_COUNTRY_CODE_UNSUPPORTED',
-        'Phone number country code is not configured for SMS verification.',
-        400,
-      );
+      throw new AppError('SMS_PHONE_COUNTRY_CODE_UNSUPPORTED', 'error.SMS_PHONE_COUNTRY_CODE_UNSUPPORTED', 400);
     }
 
     const profile =
       matchingProfiles[this.options.selectProfileIndex?.(matchingProfiles) ?? randomInt(matchingProfiles.length)];
 
     if (!profile) {
-      throw new AppError('SMS_PROFILE_SELECTION_FAILED', 'SMS verification profile could not be selected.', 500);
+      throw new AppError('SMS_PROFILE_SELECTION_FAILED', 'error.SMS_PROFILE_SELECTION_FAILED', 500);
     }
 
     const client = this.options.createClient?.(profile) ?? createAliyunSmsClient(profile, smsProbeTimeoutMs);
@@ -358,7 +353,9 @@ async function checkAliyunSmsProfile(profile: AliyunSmsProfileConfig) {
       return;
     }
 
-    throw new AppError('SETUP_SMS_CONNECTION_FAILED', getAliyunErrorMessage(error), 400);
+    throw new AppError('SETUP_SMS_CONNECTION_FAILED', 'error.SETUP_SMS_CONNECTION_FAILED', 400, {
+      reason: getAliyunErrorMessage(error),
+    });
   }
 }
 
@@ -376,7 +373,7 @@ function createAliyunSmsClient(profile: AliyunSmsProfileConfig, timeoutMs: numbe
 }
 
 function getProbeQuery(profile: AliyunSmsProfileConfig) {
-  if (profile.phoneCountryCode === '+86') {
+  if (profile.phoneCountryCode === SetupSmsPhoneCountryCode.ChinaMainland) {
     return {
       PhoneNumbers: '000',
       SignName: profile.signName,
@@ -394,7 +391,7 @@ function getProbeQuery(profile: AliyunSmsProfileConfig) {
 }
 
 function getSendQuery(profile: AliyunSmsProfileConfig, input: SendSmsInput) {
-  if (profile.phoneCountryCode === '+86') {
+  if (profile.phoneCountryCode === SetupSmsPhoneCountryCode.ChinaMainland) {
     return {
       PhoneNumbers: input.phoneNumber.slice(profile.phoneCountryCode.length),
       SignName: profile.signName,
@@ -438,10 +435,6 @@ function createVerificationCode() {
   return String(randomInt(0, 10 ** verificationCodeLength)).padStart(verificationCodeLength, '0');
 }
 
-function normalizePhoneNumber(phoneNumber: string) {
-  return phoneNumber.trim();
-}
-
 function getRecordKey(purpose: VerificationPurpose, phoneNumber: string) {
   return `sms-verification:${purpose}:${phoneNumber}`;
 }
@@ -451,5 +444,5 @@ function getSendLockKey(purpose: VerificationPurpose, phoneNumber: string) {
 }
 
 function throwInvalidVerificationCode(): never {
-  throw new AppError('SMS_VERIFICATION_INVALID', 'SMS verification code is invalid or expired.', 400);
+  throw new AppError('SMS_VERIFICATION_INVALID', 'error.SMS_VERIFICATION_INVALID', 400);
 }

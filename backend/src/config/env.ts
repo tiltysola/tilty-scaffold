@@ -4,17 +4,48 @@ import { resolve } from 'path';
 import { z } from 'zod';
 
 import { isSafeRelativePath } from '@tilty/shared/paths';
+import {
+  SetupAuthCookieSameSite,
+  setupAuthCookieSameSiteValues,
+  SetupAuthCookieSecure,
+  setupAuthCookieSecureValues,
+  SetupBoolean,
+  setupBooleanValues,
+  SetupCacheStore,
+  setupCacheStoreValues,
+  SetupDatabaseDialect,
+  setupDatabaseDialectValues,
+  SetupDatabaseSync,
+  setupDatabaseSyncValues,
+  SetupEmailVerificationService,
+  setupEmailVerificationServiceValues,
+  SetupFileStorageDriver,
+  setupFileStorageDriverValues,
+  SetupLogTarget,
+  setupLogTargetValues,
+  SetupNodeEnv,
+  setupNodeEnvValues,
+  SetupSmsPhoneCountryCode,
+  setupSmsPhoneCountryCodeValues,
+  SetupSmsVerificationService,
+  setupSmsVerificationServiceValues,
+  SetupSsoProtocol,
+  setupSsoProtocolValues,
+} from '@tilty/shared/setup';
 
-const databaseDialectSchema = z.enum(['postgres', 'mysql', 'sqlite']);
-const cacheStoreSchema = z.enum(['memory', 'redis']);
-const emailServiceSchema = z.enum(['off', 'smtp']);
-const fileStorageDriverSchema = z.enum(['local', 'oss']);
-const logTargetSchema = z.enum(['console', 'local', 'sls']);
-const smsServiceSchema = z.enum(['aliyun', 'off']);
-const smsPhoneCountryCodeSchema = z.enum(['+86', '+852', '+853']);
-const ssoProtocolSchema = z.enum(['oauth2', 'oidc']);
-const authCookieSameSiteSchema = z.enum(['lax', 'none', 'strict']);
-const authCookieSecureSchema = z.enum(['auto', 'false', 'true']);
+import { parseSeparatedValues, parseUniqueSeparatedValues } from '../core/strings';
+import { defaultSetupEnvironment, developmentAuthTokenSecret } from './defaults';
+
+const databaseDialectSchema = z.enum(setupDatabaseDialectValues);
+const cacheStoreSchema = z.enum(setupCacheStoreValues);
+const emailServiceSchema = z.enum(setupEmailVerificationServiceValues);
+const fileStorageDriverSchema = z.enum(setupFileStorageDriverValues);
+const logTargetSchema = z.enum(setupLogTargetValues);
+const smsServiceSchema = z.enum(setupSmsVerificationServiceValues);
+const smsPhoneCountryCodeSchema = z.enum(setupSmsPhoneCountryCodeValues);
+const ssoProtocolSchema = z.enum(setupSsoProtocolValues);
+const authCookieSameSiteSchema = z.enum(setupAuthCookieSameSiteValues);
+const authCookieSecureSchema = z.enum(setupAuthCookieSecureValues);
 const configFileName = 'config.toml';
 const profileEnvironmentKeys = ['EMAIL_SMTP_PROFILES', 'SMS_ALICLOUD_PROFILES', 'SSO_PROFILES'] as const;
 const profileEnvironmentKeySet = new Set<string>(profileEnvironmentKeys);
@@ -22,13 +53,12 @@ const nodeRequire = createRequire(__filename);
 const { parse: parseToml } = nodeRequire('smol-toml') as {
   parse(source: string): Record<string, unknown>;
 };
+const numberDefault = (value: string) => Number(value);
 const cookieNameSchema = z
   .string()
   .min(1)
   .max(128)
   .regex(/^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$/, 'Must be a valid cookie name');
-const developmentAuthTokenSecret = 'development-auth-token-secret-change-before-production';
-const defaultAppDomain = 'http://localhost:8011';
 const appDomainSchema = z
   .string()
   .trim()
@@ -104,7 +134,7 @@ const aliyunSmsDomesticProfileSchema = z
     apiVersion: z.literal('2017-05-25'),
     endpoint: z.literal('dysmsapi.aliyuncs.com'),
     operation: z.literal('SendSms'),
-    phoneCountryCode: z.literal('+86'),
+    phoneCountryCode: z.literal(SetupSmsPhoneCountryCode.ChinaMainland),
     regionId: z.string().trim().min(1).max(128),
     signName: z.string().trim().min(1).max(128),
     templateCode: z.string().trim().min(1).max(128),
@@ -117,7 +147,7 @@ const aliyunSmsInternationalProfileSchema = z
     endpoint: z.literal('dysmsapi.ap-southeast-1.aliyuncs.com'),
     messageTemplate: z.string().trim().min(1).max(1000),
     operation: z.literal('SendMessageToGlobe'),
-    phoneCountryCode: z.enum(['+852', '+853']),
+    phoneCountryCode: z.enum([SetupSmsPhoneCountryCode.HongKong, SetupSmsPhoneCountryCode.Macao]),
     regionId: z.literal('ap-southeast-1'),
     senderId: optionalAliyunSmsSenderIdSchema,
     type: z.enum(['MKT', 'NOTIFY', 'OTP']).default('OTP'),
@@ -170,7 +200,7 @@ const ssoProfileBaseSchema = {
 const ssoOidcProfileSchema = z
   .object({
     ...ssoProfileBaseSchema,
-    protocol: z.literal('oidc'),
+    protocol: z.literal(SetupSsoProtocol.Oidc),
     issuerUrl: z.url().max(1024),
   })
   .strict()
@@ -181,7 +211,7 @@ const ssoOidcProfileSchema = z
 const ssoOAuth2ProfileSchema = z
   .object({
     ...ssoProfileBaseSchema,
-    protocol: z.literal('oauth2'),
+    protocol: z.literal(SetupSsoProtocol.Oauth2),
     authorizationUrl: z.url().max(1024),
     tokenUrl: z.url().max(1024),
     userInfoUrl: z.url().max(1024),
@@ -215,116 +245,186 @@ const ssoProfilesSchema = z
 
 const envSchema = z
   .object({
-    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-    SETUP_LOCKED: z.enum(['true', 'false']).optional(),
-    SERVER_HOST: z.string().default('0.0.0.0'),
-    SERVER_PORT: z.coerce.number().int().positive().default(3000),
-    APP_DOMAIN: appDomainSchema.default(defaultAppDomain),
+    NODE_ENV: z.enum(setupNodeEnvValues).default(defaultSetupEnvironment.NODE_ENV),
+    SETUP_LOCKED: z.enum(setupBooleanValues).optional(),
+    SERVER_HOST: z.string().default(defaultSetupEnvironment.SERVER_HOST),
+    SERVER_PORT: z.coerce.number().int().positive().default(numberDefault(defaultSetupEnvironment.SERVER_PORT)),
+    APP_DOMAIN: appDomainSchema.default(defaultSetupEnvironment.APP_DOMAIN),
     APP_CORS_ORIGINS: z.string().trim().min(1).optional(),
-    SERVER_TRUST_PROXY: z.enum(['true', 'false']).default('false'),
-    SERVER_MULTI_INSTANCE_ENABLED: z.enum(['true', 'false']).default('false'),
-    DATABASE_DIALECT: databaseDialectSchema.default('sqlite'),
-    DATABASE_STORAGE: z.string().min(1).default('./data/database.sqlite'),
+    SERVER_TRUST_PROXY: z.enum(setupBooleanValues).default(defaultSetupEnvironment.SERVER_TRUST_PROXY),
+    SERVER_MULTI_INSTANCE_ENABLED: z
+      .enum(setupBooleanValues)
+      .default(defaultSetupEnvironment.SERVER_MULTI_INSTANCE_ENABLED),
+    DATABASE_DIALECT: databaseDialectSchema.default(defaultSetupEnvironment.DATABASE_DIALECT),
+    DATABASE_STORAGE: z.string().min(1).default(defaultSetupEnvironment.DATABASE_STORAGE),
     DATABASE_URL: z.string().optional(),
-    DATABASE_SSL: z.enum(['true', 'false']).default('false'),
-    DATABASE_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
-    DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
-    DATABASE_POOL_MIN: z.coerce.number().int().nonnegative().default(0),
-    DATABASE_POOL_ACQUIRE_MS: z.coerce.number().int().positive().default(30_000),
-    DATABASE_POOL_IDLE_MS: z.coerce.number().int().positive().default(10_000),
-    DATABASE_SYNC: z.enum(['off', 'alter', 'force']).default('off'),
-    CACHE_STORE: cacheStoreSchema.default('memory'),
+    DATABASE_SSL: z.enum(setupBooleanValues).default(defaultSetupEnvironment.DATABASE_SSL),
+    DATABASE_CONNECT_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.DATABASE_CONNECT_TIMEOUT_MS)),
+    DATABASE_POOL_MAX: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.DATABASE_POOL_MAX)),
+    DATABASE_POOL_MIN: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .default(numberDefault(defaultSetupEnvironment.DATABASE_POOL_MIN)),
+    DATABASE_POOL_ACQUIRE_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.DATABASE_POOL_ACQUIRE_MS)),
+    DATABASE_POOL_IDLE_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.DATABASE_POOL_IDLE_MS)),
+    DATABASE_SYNC: z.enum(setupDatabaseSyncValues).default(defaultSetupEnvironment.DATABASE_SYNC),
+    CACHE_STORE: cacheStoreSchema.default(defaultSetupEnvironment.CACHE_STORE),
     CACHE_REDIS_URL: z.string().optional(),
-    CACHE_REDIS_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
-    FILE_STORAGE_DRIVER: fileStorageDriverSchema.default('local'),
+    CACHE_REDIS_REQUEST_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.CACHE_REDIS_REQUEST_TIMEOUT_MS)),
+    FILE_STORAGE_DRIVER: fileStorageDriverSchema.default(defaultSetupEnvironment.FILE_STORAGE_DRIVER),
     FILE_UPLOAD_MAX_BYTES: z.coerce
       .number()
       .int()
       .positive()
-      .default(2 * 1024 * 1024),
-    FILE_PUBLIC_BASE_URL: z.string().min(1).default('/uploads'),
-    FILE_LOCAL_ROOT: z.string().min(1).default('./data/uploads'),
+      .default(numberDefault(defaultSetupEnvironment.FILE_UPLOAD_MAX_BYTES)),
+    FILE_PUBLIC_BASE_URL: z.string().min(1).default(defaultSetupEnvironment.FILE_PUBLIC_BASE_URL),
+    FILE_LOCAL_ROOT: z.string().min(1).default(defaultSetupEnvironment.FILE_LOCAL_ROOT),
     FILE_OSS_ACCESS_KEY_ID: z.string().min(1).optional(),
     FILE_OSS_ACCESS_KEY_SECRET: z.string().min(1).optional(),
     FILE_OSS_BUCKET: z.string().min(1).optional(),
     FILE_OSS_ENDPOINT: z.string().min(1).optional(),
     FILE_OSS_REGION: z.string().min(1).optional(),
     FILE_OSS_PUBLIC_BASE_URL: z.string().min(1).optional(),
-    SCHEDULER_ENABLED: z.enum(['true', 'false']).default('true'),
-    SCHEDULER_LOCK_TTL_MS: z.coerce.number().int().min(1000).default(300_000),
+    SCHEDULER_ENABLED: z.enum(setupBooleanValues).default(defaultSetupEnvironment.SCHEDULER_ENABLED),
+    SCHEDULER_LOCK_TTL_MS: z.coerce
+      .number()
+      .int()
+      .min(1000)
+      .default(numberDefault(defaultSetupEnvironment.SCHEDULER_LOCK_TTL_MS)),
     AUTH_TOKEN_SECRET: z.string().min(32).optional(),
     AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce
       .number()
       .int()
       .positive()
-      .default(15 * 60),
+      .default(numberDefault(defaultSetupEnvironment.AUTH_ACCESS_TOKEN_TTL_SECONDS)),
     AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce
       .number()
       .int()
       .positive()
-      .default(30 * 24 * 60 * 60),
+      .default(numberDefault(defaultSetupEnvironment.AUTH_REFRESH_TOKEN_TTL_SECONDS)),
     AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS: z.coerce
       .number()
       .int()
       .positive()
-      .default(5 * 60),
-    AUTH_VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+      .default(numberDefault(defaultSetupEnvironment.AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS)),
+    AUTH_VERIFICATION_MAX_ATTEMPTS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.AUTH_VERIFICATION_MAX_ATTEMPTS)),
     AUTH_VERIFICATION_SUDO_TTL_SECONDS: z.coerce
       .number()
       .int()
       .positive()
-      .default(15 * 60),
-    AUTH_PASSKEY_RP_NAME: z.string().trim().min(1).max(128).default('Tilty Scaffold'),
+      .default(numberDefault(defaultSetupEnvironment.AUTH_VERIFICATION_SUDO_TTL_SECONDS)),
+    AUTH_PASSKEY_RP_NAME: z.string().trim().min(1).max(128).default(defaultSetupEnvironment.AUTH_PASSKEY_RP_NAME),
     AUTH_PASSKEY_REGISTRATION_TTL_SECONDS: z.coerce
       .number()
       .int()
       .positive()
-      .default(5 * 60),
-    AUTH_PASSKEY_OPERATION_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
-    AUTH_TOTP_ISSUER: z.string().trim().min(1).max(128).default('Tilty Scaffold'),
+      .default(numberDefault(defaultSetupEnvironment.AUTH_PASSKEY_REGISTRATION_TTL_SECONDS)),
+    AUTH_PASSKEY_OPERATION_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.AUTH_PASSKEY_OPERATION_TIMEOUT_MS)),
+    AUTH_TOTP_ISSUER: z.string().trim().min(1).max(128).default(defaultSetupEnvironment.AUTH_TOTP_ISSUER),
     AUTH_TOTP_SETUP_TTL_SECONDS: z.coerce
       .number()
       .int()
       .positive()
-      .default(10 * 60),
-    AUTH_ACCESS_TOKEN_COOKIE_NAME: cookieNameSchema.default('tilty_scaffold_access_token'),
-    AUTH_REFRESH_TOKEN_COOKIE_NAME: cookieNameSchema.default('tilty_scaffold_refresh_token'),
-    AUTH_COOKIE_SAME_SITE: authCookieSameSiteSchema.default('lax'),
-    AUTH_COOKIE_SECURE: authCookieSecureSchema.default('auto'),
-    AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
-    AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
-    GLOBAL_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
-    GLOBAL_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(1000),
-    LOG_REQUEST_ENABLED: z.enum(['true', 'false']).default('true'),
-    LOG_TARGETS: z.string().min(1).default('console'),
-    LOG_PENDING_WRITE_MAX: z.coerce.number().int().positive().default(1000),
-    LOG_WRITE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
-    LOG_LOCAL_PATH: z.string().min(1).default('./logs/backend.log'),
+      .default(numberDefault(defaultSetupEnvironment.AUTH_TOTP_SETUP_TTL_SECONDS)),
+    AUTH_ACCESS_TOKEN_COOKIE_NAME: cookieNameSchema.default(defaultSetupEnvironment.AUTH_ACCESS_TOKEN_COOKIE_NAME),
+    AUTH_REFRESH_TOKEN_COOKIE_NAME: cookieNameSchema.default(defaultSetupEnvironment.AUTH_REFRESH_TOKEN_COOKIE_NAME),
+    AUTH_COOKIE_SAME_SITE: authCookieSameSiteSchema.default(defaultSetupEnvironment.AUTH_COOKIE_SAME_SITE),
+    AUTH_COOKIE_SECURE: authCookieSecureSchema.default(defaultSetupEnvironment.AUTH_COOKIE_SECURE),
+    AUTH_RATE_LIMIT_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.AUTH_RATE_LIMIT_WINDOW_MS)),
+    AUTH_RATE_LIMIT_MAX: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.AUTH_RATE_LIMIT_MAX)),
+    GLOBAL_RATE_LIMIT_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.GLOBAL_RATE_LIMIT_WINDOW_MS)),
+    GLOBAL_RATE_LIMIT_MAX: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.GLOBAL_RATE_LIMIT_MAX)),
+    LOG_REQUEST_ENABLED: z.enum(setupBooleanValues).default(defaultSetupEnvironment.LOG_REQUEST_ENABLED),
+    LOG_TARGETS: z.string().min(1).default(defaultSetupEnvironment.LOG_TARGETS),
+    LOG_PENDING_WRITE_MAX: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.LOG_PENDING_WRITE_MAX)),
+    LOG_WRITE_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.LOG_WRITE_TIMEOUT_MS)),
+    LOG_LOCAL_PATH: z.string().min(1).default(defaultSetupEnvironment.LOG_LOCAL_PATH),
     LOG_SLS_ENDPOINT: z.string().optional(),
     LOG_SLS_PROJECT: z.string().optional(),
     LOG_SLS_LOGSTORE: z.string().optional(),
     LOG_SLS_ACCESS_KEY_ID: z.string().optional(),
     LOG_SLS_ACCESS_KEY_SECRET: z.string().optional(),
-    LOG_SLS_TOPIC: z.string().min(1).default('tilty-scaffold'),
-    LOG_SLS_SOURCE: z.string().min(1).default('backend'),
-    EMAIL_VERIFICATION_SERVICE: emailServiceSchema.default('off'),
+    LOG_SLS_TOPIC: z.string().min(1).default(defaultSetupEnvironment.LOG_SLS_TOPIC),
+    LOG_SLS_SOURCE: z.string().min(1).default(defaultSetupEnvironment.LOG_SLS_SOURCE),
+    EMAIL_VERIFICATION_SERVICE: emailServiceSchema.default(defaultSetupEnvironment.EMAIL_VERIFICATION_SERVICE),
     EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS: z.coerce
       .number()
       .int()
       .positive()
-      .default(10 * 60_000),
-    EMAIL_VERIFICATION_CODE_COOLDOWN_MS: z.coerce.number().int().positive().default(60_000),
-    EMAIL_SMTP_PROFILES: z.string().default('[]'),
-    SMS_VERIFICATION_SERVICE: smsServiceSchema.default('off'),
+      .default(numberDefault(defaultSetupEnvironment.EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS)),
+    EMAIL_VERIFICATION_CODE_COOLDOWN_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.EMAIL_VERIFICATION_CODE_COOLDOWN_MS)),
+    EMAIL_SMTP_PROFILES: z.string().default(defaultSetupEnvironment.EMAIL_SMTP_PROFILES),
+    SMS_VERIFICATION_SERVICE: smsServiceSchema.default(defaultSetupEnvironment.SMS_VERIFICATION_SERVICE),
     SMS_VERIFICATION_CODE_EXPIRES_IN_MS: z.coerce
       .number()
       .int()
       .positive()
-      .default(10 * 60_000),
-    SMS_VERIFICATION_CODE_COOLDOWN_MS: z.coerce.number().int().positive().default(60_000),
-    SMS_ALICLOUD_PROFILES: z.string().default('[]'),
-    SSO_ENABLED: z.enum(['true', 'false']).default('false'),
-    SSO_PROFILES: z.string().default('[]'),
+      .default(numberDefault(defaultSetupEnvironment.SMS_VERIFICATION_CODE_EXPIRES_IN_MS)),
+    SMS_VERIFICATION_CODE_COOLDOWN_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(numberDefault(defaultSetupEnvironment.SMS_VERIFICATION_CODE_COOLDOWN_MS)),
+    SMS_ALICLOUD_PROFILES: z.string().default(defaultSetupEnvironment.SMS_ALICLOUD_PROFILES),
+    SSO_ENABLED: z.enum(setupBooleanValues).default(defaultSetupEnvironment.SSO_ENABLED),
+    SSO_PROFILES: z.string().default(defaultSetupEnvironment.SSO_PROFILES),
   })
   .superRefine((env, ctx) => {
     const rawLogTargets = parseCommaSeparatedValues(env.LOG_TARGETS);
@@ -351,7 +451,7 @@ const envSchema = z
       });
     }
 
-    if (logTargets.includes('sls')) {
+    if (logTargets.includes(SetupLogTarget.Sls)) {
       for (const key of [
         'LOG_SLS_ENDPOINT',
         'LOG_SLS_PROJECT',
@@ -369,7 +469,7 @@ const envSchema = z
       }
     }
 
-    if (env.SERVER_MULTI_INSTANCE_ENABLED === 'true' && env.CACHE_STORE !== 'redis') {
+    if (env.SERVER_MULTI_INSTANCE_ENABLED === SetupBoolean.True && env.CACHE_STORE !== SetupCacheStore.Redis) {
       ctx.addIssue({
         code: 'custom',
         path: ['CACHE_STORE'],
@@ -377,7 +477,10 @@ const envSchema = z
       });
     }
 
-    if (env.SERVER_MULTI_INSTANCE_ENABLED === 'true' && env.DATABASE_DIALECT === 'sqlite') {
+    if (
+      env.SERVER_MULTI_INSTANCE_ENABLED === SetupBoolean.True &&
+      env.DATABASE_DIALECT === SetupDatabaseDialect.Sqlite
+    ) {
       ctx.addIssue({
         code: 'custom',
         path: ['DATABASE_DIALECT'],
@@ -385,7 +488,10 @@ const envSchema = z
       });
     }
 
-    if (env.SERVER_MULTI_INSTANCE_ENABLED === 'true' && env.FILE_STORAGE_DRIVER !== 'oss') {
+    if (
+      env.SERVER_MULTI_INSTANCE_ENABLED === SetupBoolean.True &&
+      env.FILE_STORAGE_DRIVER !== SetupFileStorageDriver.Oss
+    ) {
       ctx.addIssue({
         code: 'custom',
         path: ['FILE_STORAGE_DRIVER'],
@@ -393,7 +499,7 @@ const envSchema = z
       });
     }
 
-    if (env.CACHE_STORE === 'redis') {
+    if (env.CACHE_STORE === SetupCacheStore.Redis) {
       if (!env.CACHE_REDIS_URL) {
         ctx.addIssue({
           code: 'custom',
@@ -428,7 +534,7 @@ const envSchema = z
     for (const key of ['FILE_PUBLIC_BASE_URL', 'FILE_OSS_PUBLIC_BASE_URL'] as const) {
       const value = env[key];
 
-      if (env.NODE_ENV === 'production' && value && hasUrlProtocol(value, ['http:'])) {
+      if (env.NODE_ENV === SetupNodeEnv.Production && value && hasUrlProtocol(value, ['http:'])) {
         ctx.addIssue({
           code: 'custom',
           path: [key],
@@ -437,7 +543,7 @@ const envSchema = z
       }
     }
 
-    if (env.FILE_STORAGE_DRIVER === 'oss') {
+    if (env.FILE_STORAGE_DRIVER === SetupFileStorageDriver.Oss) {
       for (const key of [
         'FILE_OSS_ACCESS_KEY_ID',
         'FILE_OSS_ACCESS_KEY_SECRET',
@@ -456,7 +562,7 @@ const envSchema = z
     }
 
     if (
-      env.NODE_ENV === 'production' &&
+      env.NODE_ENV === SetupNodeEnv.Production &&
       parseCommaSeparatedValues(env.APP_CORS_ORIGINS ?? env.APP_DOMAIN).includes('*')
     ) {
       ctx.addIssue({
@@ -466,7 +572,7 @@ const envSchema = z
       });
     }
 
-    if (env.NODE_ENV === 'production' && env.DATABASE_SYNC !== 'off') {
+    if (env.NODE_ENV === SetupNodeEnv.Production && env.DATABASE_SYNC !== SetupDatabaseSync.Off) {
       ctx.addIssue({
         code: 'custom',
         path: ['DATABASE_SYNC'],
@@ -474,7 +580,7 @@ const envSchema = z
       });
     }
 
-    if (env.NODE_ENV === 'production' && !env.AUTH_TOKEN_SECRET) {
+    if (env.NODE_ENV === SetupNodeEnv.Production && !env.AUTH_TOKEN_SECRET) {
       ctx.addIssue({
         code: 'custom',
         path: ['AUTH_TOKEN_SECRET'],
@@ -482,7 +588,7 @@ const envSchema = z
       });
     }
 
-    if (env.NODE_ENV === 'production' && env.AUTH_TOKEN_SECRET === developmentAuthTokenSecret) {
+    if (env.NODE_ENV === SetupNodeEnv.Production && env.AUTH_TOKEN_SECRET === developmentAuthTokenSecret) {
       ctx.addIssue({
         code: 'custom',
         path: ['AUTH_TOKEN_SECRET'],
@@ -506,7 +612,10 @@ const envSchema = z
       });
     }
 
-    if (env.AUTH_COOKIE_SAME_SITE === 'none' && env.AUTH_COOKIE_SECURE !== 'true') {
+    if (
+      env.AUTH_COOKIE_SAME_SITE === SetupAuthCookieSameSite.None &&
+      env.AUTH_COOKIE_SECURE !== SetupAuthCookieSecure.True
+    ) {
       ctx.addIssue({
         code: 'custom',
         path: ['AUTH_COOKIE_SECURE'],
@@ -514,7 +623,7 @@ const envSchema = z
       });
     }
 
-    if (env.NODE_ENV === 'production' && env.AUTH_COOKIE_SECURE !== 'true') {
+    if (env.NODE_ENV === SetupNodeEnv.Production && env.AUTH_COOKIE_SECURE !== SetupAuthCookieSecure.True) {
       ctx.addIssue({
         code: 'custom',
         path: ['AUTH_COOKIE_SECURE'],
@@ -522,7 +631,7 @@ const envSchema = z
       });
     }
 
-    if (env.SSO_ENABLED === 'true') {
+    if (env.SSO_ENABLED === SetupBoolean.True) {
       const result = parseSsoProfilesResult(env.SSO_PROFILES);
 
       if (!result.success) {
@@ -536,7 +645,7 @@ const envSchema = z
       }
     }
 
-    if (env.EMAIL_VERIFICATION_SERVICE === 'smtp') {
+    if (env.EMAIL_VERIFICATION_SERVICE === SetupEmailVerificationService.Smtp) {
       const result = parseSmtpProfilesResult(env.EMAIL_SMTP_PROFILES);
 
       if (!result.success) {
@@ -558,7 +667,7 @@ const envSchema = z
       }
     }
 
-    if (env.SMS_VERIFICATION_SERVICE === 'aliyun') {
+    if (env.SMS_VERIFICATION_SERVICE === SetupSmsVerificationService.Aliyun) {
       const result = parseAliyunSmsProfilesResult(env.SMS_ALICLOUD_PROFILES);
 
       if (!result.success) {
@@ -570,7 +679,7 @@ const envSchema = z
       }
     }
 
-    if (env.DATABASE_DIALECT === 'sqlite') {
+    if (env.DATABASE_DIALECT === SetupDatabaseDialect.Sqlite) {
       return;
     }
 
@@ -598,14 +707,18 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
   const corsOrigins = parseCommaSeparatedValues(parsed.APP_CORS_ORIGINS ?? appDomain);
   const logTargets = parseLogTargets(parsed.LOG_TARGETS);
   const smtpProfiles =
-    parsed.EMAIL_VERIFICATION_SERVICE === 'smtp' ? parseSmtpProfiles(parsed.EMAIL_SMTP_PROFILES) : [];
+    parsed.EMAIL_VERIFICATION_SERVICE === SetupEmailVerificationService.Smtp
+      ? parseSmtpProfiles(parsed.EMAIL_SMTP_PROFILES)
+      : [];
   const smsProfiles =
-    parsed.SMS_VERIFICATION_SERVICE === 'aliyun' ? parseAliyunSmsProfiles(parsed.SMS_ALICLOUD_PROFILES) : [];
-  const ssoProfiles = parsed.SSO_ENABLED === 'true' ? parseSsoProfiles(parsed.SSO_PROFILES) : [];
+    parsed.SMS_VERIFICATION_SERVICE === SetupSmsVerificationService.Aliyun
+      ? parseAliyunSmsProfiles(parsed.SMS_ALICLOUD_PROFILES)
+      : [];
+  const ssoProfiles = parsed.SSO_ENABLED === SetupBoolean.True ? parseSsoProfiles(parsed.SSO_PROFILES) : [];
   const database =
-    parsed.DATABASE_DIALECT === 'sqlite'
+    parsed.DATABASE_DIALECT === SetupDatabaseDialect.Sqlite
       ? {
-          dialect: 'sqlite' as const,
+          dialect: SetupDatabaseDialect.Sqlite,
           storage: parsed.DATABASE_STORAGE,
         }
       : {
@@ -617,7 +730,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
             max: parsed.DATABASE_POOL_MAX,
             min: parsed.DATABASE_POOL_MIN,
           },
-          ssl: parsed.DATABASE_SSL === 'true',
+          ssl: parsed.DATABASE_SSL === SetupBoolean.True,
           url: parsed.DATABASE_URL!,
         };
 
@@ -626,31 +739,31 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
     nodeEnv: parsed.NODE_ENV,
     host: parsed.SERVER_HOST,
     port: parsed.SERVER_PORT,
-    trustProxy: parsed.SERVER_TRUST_PROXY === 'true',
-    multiInstanceEnabled: parsed.SERVER_MULTI_INSTANCE_ENABLED === 'true',
+    trustProxy: parsed.SERVER_TRUST_PROXY === SetupBoolean.True,
+    multiInstanceEnabled: parsed.SERVER_MULTI_INSTANCE_ENABLED === SetupBoolean.True,
     cache:
-      parsed.CACHE_STORE === 'redis'
+      parsed.CACHE_STORE === SetupCacheStore.Redis
         ? {
-            store: 'redis' as const,
+            store: SetupCacheStore.Redis,
             timeoutMs: parsed.CACHE_REDIS_REQUEST_TIMEOUT_MS,
             url: parsed.CACHE_REDIS_URL!,
           }
         : {
-            store: 'memory' as const,
+            store: SetupCacheStore.Memory,
           },
     fileStorage:
-      parsed.FILE_STORAGE_DRIVER === 'oss'
+      parsed.FILE_STORAGE_DRIVER === SetupFileStorageDriver.Oss
         ? {
             accessKeyId: parsed.FILE_OSS_ACCESS_KEY_ID!,
             accessKeySecret: parsed.FILE_OSS_ACCESS_KEY_SECRET!,
             bucket: parsed.FILE_OSS_BUCKET!,
-            driver: 'oss' as const,
+            driver: SetupFileStorageDriver.Oss,
             endpoint: parsed.FILE_OSS_ENDPOINT!,
             ...(parsed.FILE_OSS_PUBLIC_BASE_URL ? { publicBaseUrl: parsed.FILE_OSS_PUBLIC_BASE_URL } : {}),
             region: parsed.FILE_OSS_REGION!,
           }
         : {
-            driver: 'local' as const,
+            driver: SetupFileStorageDriver.Local,
             publicBaseUrl: parsed.FILE_PUBLIC_BASE_URL,
             root: parsed.FILE_LOCAL_ROOT,
           },
@@ -658,7 +771,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
       maxBytes: parsed.FILE_UPLOAD_MAX_BYTES,
     },
     localFiles:
-      parsed.FILE_STORAGE_DRIVER === 'local'
+      parsed.FILE_STORAGE_DRIVER === SetupFileStorageDriver.Local
         ? {
             root: parsed.FILE_LOCAL_ROOT,
             urlPrefix: getLocalFileUrlPrefix(parsed.FILE_PUBLIC_BASE_URL),
@@ -680,7 +793,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
       localPath: parsed.LOG_LOCAL_PATH,
       maxPendingWrites: parsed.LOG_PENDING_WRITE_MAX,
       writeTimeoutMs: parsed.LOG_WRITE_TIMEOUT_MS,
-      ...(logTargets.includes('sls')
+      ...(logTargets.includes(SetupLogTarget.Sls)
         ? {
             sls: {
               accessKeyId: parsed.LOG_SLS_ACCESS_KEY_ID!,
@@ -694,10 +807,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
           }
         : {}),
     },
-    requestLogEnabled: parsed.LOG_REQUEST_ENABLED === 'true',
-    scheduleEnabled: parsed.SCHEDULER_ENABLED === 'true',
+    requestLogEnabled: parsed.LOG_REQUEST_ENABLED === SetupBoolean.True,
+    scheduleEnabled: parsed.SCHEDULER_ENABLED === SetupBoolean.True,
     schedulerLock:
-      parsed.SERVER_MULTI_INSTANCE_ENABLED === 'true' && parsed.SCHEDULER_ENABLED === 'true'
+      parsed.SERVER_MULTI_INSTANCE_ENABLED === SetupBoolean.True && parsed.SCHEDULER_ENABLED === SetupBoolean.True
         ? {
             ttlMs: parsed.SCHEDULER_LOCK_TTL_MS,
           }
@@ -728,7 +841,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
       setupTtlMs: parsed.AUTH_TOTP_SETUP_TTL_SECONDS * 1000,
     },
     email:
-      parsed.EMAIL_VERIFICATION_SERVICE === 'smtp'
+      parsed.EMAIL_VERIFICATION_SERVICE === SetupEmailVerificationService.Smtp
         ? {
             codeCooldownMs: parsed.EMAIL_VERIFICATION_CODE_COOLDOWN_MS,
             codeExpiresInMs: parsed.EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS,
@@ -736,7 +849,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
           }
         : undefined,
     sms:
-      parsed.SMS_VERIFICATION_SERVICE === 'aliyun'
+      parsed.SMS_VERIFICATION_SERVICE === SetupSmsVerificationService.Aliyun
         ? {
             aliyunProfiles: smsProfiles,
             codeCooldownMs: parsed.SMS_VERIFICATION_CODE_COOLDOWN_MS,
@@ -744,7 +857,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
           }
         : undefined,
     sso:
-      parsed.SSO_ENABLED === 'true'
+      parsed.SSO_ENABLED === SetupBoolean.True
         ? {
             profiles: ssoProfiles,
           }
@@ -808,7 +921,7 @@ export function isSetupLocked() {
     return false;
   }
 
-  return setupLockedValue !== 'false';
+  return setupLockedValue !== SetupBoolean.False;
 }
 
 function getResolvedEnvironmentSource(source: NodeJS.ProcessEnv) {
@@ -921,21 +1034,15 @@ function isPlainConfigRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseLogTargets(value: string) {
-  return parseUniqueValues(value, /,/).map((target) => logTargetSchema.parse(target));
+  return parseUniqueSeparatedValues(value, /,/).map((target) => logTargetSchema.parse(target));
 }
 
 function parseCommaSeparatedValues(value: string) {
-  return parseValues(value, /,/);
+  return parseSeparatedValues(value, /,/);
 }
 
 function parseSmtpProfiles(value: string) {
-  const result = parseSmtpProfilesResult(value);
-
-  if (!result.success) {
-    throw new Error(result.message);
-  }
-
-  return result.profiles;
+  return parseProfileJsonOrThrow(parseSmtpProfilesResult(value));
 }
 
 function parseSmtpProfilesResult(value: string) {
@@ -948,13 +1055,7 @@ function parseSmtpProfilesResult(value: string) {
 }
 
 function parseAliyunSmsProfiles(value: string) {
-  const result = parseAliyunSmsProfilesResult(value);
-
-  if (!result.success) {
-    throw new Error(result.message);
-  }
-
-  return result.profiles;
+  return parseProfileJsonOrThrow(parseAliyunSmsProfilesResult(value));
 }
 
 function parseAliyunSmsProfilesResult(value: string) {
@@ -967,13 +1068,7 @@ function parseAliyunSmsProfilesResult(value: string) {
 }
 
 function parseSsoProfiles(value: string) {
-  const result = parseSsoProfilesResult(value);
-
-  if (!result.success) {
-    throw new Error(result.message);
-  }
-
-  return result.profiles;
+  return parseProfileJsonOrThrow(parseSsoProfilesResult(value));
 }
 
 function parseSsoProfilesResult(value: string) {
@@ -1020,6 +1115,14 @@ function parseProfileJsonResult<T>(
   };
 }
 
+function parseProfileJsonOrThrow<T>(result: ReturnType<typeof parseProfileJsonResult<T>>) {
+  if (!result.success) {
+    throw new Error(result.message);
+  }
+
+  return result.profiles;
+}
+
 function validateSsoProfileUrls(
   profiles: Array<z.infer<typeof ssoProfileSchema>>,
   nodeEnv: string,
@@ -1032,7 +1135,7 @@ function validateSsoProfileUrls(
       fields.push('iconUrl');
     }
 
-    if (profile.protocol === 'oidc') {
+    if (profile.protocol === SetupSsoProtocol.Oidc) {
       fields.push('issuerUrl');
     } else {
       fields.push('authorizationUrl', 'tokenUrl', 'userInfoUrl');
@@ -1062,17 +1165,6 @@ function validateSsoProfileUrls(
       }
     }
   }
-}
-
-function parseUniqueValues(value: string, separator: RegExp) {
-  return Array.from(new Set(parseValues(value, separator)));
-}
-
-function parseValues(value: string, separator: RegExp) {
-  return value
-    .split(separator)
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function isRedisUrl(value: string) {

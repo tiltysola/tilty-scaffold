@@ -101,7 +101,10 @@ describe('setup service', () => {
 
     const service = new SetupService('setup');
 
-    expect(() => service.getDefaults()).toThrow('Setup is locked');
+    expect(getThrownError(() => service.getDefaults())).toMatchObject({
+      code: 'SETUP_LOCKED',
+      status: 403,
+    });
   });
 
   it('writes configuration, migrates the database, and creates the root administrator', async () => {
@@ -136,7 +139,10 @@ describe('setup service', () => {
     expect(configFile).toContain('# SQLite database file path.');
     expect(configFile).toContain('DATABASE_STORAGE = "./data/setup.sqlite"');
     await expect(readFile('config.toml.setup.lock', 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(() => service.getDefaults()).toThrow('Setup is locked');
+    expect(getThrownError(() => service.getDefaults())).toMatchObject({
+      code: 'SETUP_LOCKED',
+      status: 403,
+    });
 
     const sequelize = createSequelize({ dialect: 'sqlite', storage: './data/setup.sqlite' });
     const models = initModels(sequelize);
@@ -584,7 +590,13 @@ describe('setup service', () => {
       APP_CORS_ORIGINS: '',
     };
 
-    expect(() => service.validateEnvironment({ environment })).toThrow('APP_CORS_ORIGINS');
+    expect(getThrownError(() => service.validateEnvironment({ environment }))).toMatchObject({
+      code: 'SETUP_ENV_REQUIRED',
+      details: {
+        missing: ['APP_CORS_ORIGINS'],
+      },
+      status: 400,
+    });
   });
 
   it('validates only the selected setup step before completion', async () => {
@@ -606,17 +618,35 @@ describe('setup service', () => {
       code: 'SETUP_ENV_INVALID',
       status: 400,
     });
-    expect(() =>
-      service.validate({
-        administrator: {
-          username: 'root_user',
-          displayName: 'Root User',
-          email: 'root@example.com',
-          password: 'password123',
-          confirmPassword: 'password123',
-        },
-        environment,
-      }),
-    ).toThrow('SMS_ALICLOUD_PROFILES');
+    expect(
+      getThrownError(() =>
+        service.validate({
+          administrator: {
+            username: 'root_user',
+            displayName: 'Root User',
+            email: 'root@example.com',
+            password: 'password123',
+            confirmPassword: 'password123',
+          },
+          environment,
+        }),
+      ),
+    ).toMatchObject({
+      code: 'SETUP_ENV_INVALID',
+      details: {
+        reason: expect.stringContaining('SMS_ALICLOUD_PROFILES'),
+      },
+      status: 400,
+    });
   });
 });
+
+function getThrownError(action: () => unknown) {
+  try {
+    action();
+  } catch (error) {
+    return error;
+  }
+
+  throw new Error('Expected action to throw.');
+}

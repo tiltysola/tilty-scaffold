@@ -1,4 +1,5 @@
 import { type SubmitEventHandler, useEffect, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { type z } from 'zod';
@@ -8,20 +9,22 @@ import { useEmailVerification } from '@/hooks/useEmailVerification';
 import { useFormState } from '@/hooks/useFormState';
 import { getApiErrorMessage } from '@/lib/api';
 import { fetchAuthConfig, register, sendRegistrationEmailVerification } from '@/lib/auth';
+import { routePath } from '@/router';
+import { Button } from '@/shadcn/components/ui/button';
+import { Input } from '@/shadcn/components/ui/input';
+import { Label } from '@/shadcn/components/ui/label';
 import {
   createPasswordFormSchema,
   displayNameSchema,
   emailSchema,
   optionalVerificationCodeSchema,
   usernameSchema,
-} from '@/lib/auth-validation';
-import { routePath } from '@/router';
-import { Button } from '@/shadcn/components/ui/button';
-import { Input } from '@/shadcn/components/ui/input';
-import { Label } from '@/shadcn/components/ui/label';
+} from '@tilty/shared/validation';
 
 import { AuthCard } from '@/components/AuthCard';
 import FormMessage from '@/components/FormMessage';
+
+type RegisterFormState = z.input<typeof registerSchema>;
 
 const registerSchema = createPasswordFormSchema({
   username: usernameSchema,
@@ -30,13 +33,12 @@ const registerSchema = createPasswordFormSchema({
   emailVerificationCode: optionalVerificationCodeSchema,
 });
 
-type RegisterFormState = z.input<typeof registerSchema>;
-
 const Index = () => {
   const [configLoading, setConfigLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
   const [emailVerificationRequired, setEmailVerificationRequired] = useState(false);
   const navigate = useNavigate();
+  const intl = useIntl();
   const submitAction = useAsyncAction();
   const emailVerification = useEmailVerification({
     sendCode: sendRegistrationEmailVerification,
@@ -66,7 +68,9 @@ const Index = () => {
         }
       } catch (requestError) {
         if (isActive) {
-          setConfigError(getApiErrorMessage(requestError, 'Registration configuration could not be loaded.'));
+          setConfigError(
+            getApiErrorMessage(requestError, intl.formatMessage({ id: 'auth.registration.config.load.failed' })),
+          );
         }
       } finally {
         if (isActive) {
@@ -80,7 +84,7 @@ const Index = () => {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [intl]);
 
   const handleSubmit: SubmitEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
@@ -90,12 +94,14 @@ const Index = () => {
     const parsed = registerSchema.safeParse(form);
 
     if (!parsed.success) {
-      submitAction.setError(parsed.error.issues[0]?.message ?? 'Account registration details are invalid.');
+      submitAction.setError(
+        intl.formatMessage({ id: parsed.error.issues[0]?.message ?? 'validation.account.registration.invalid' }),
+      );
       return;
     }
 
     if (emailVerificationRequired && !parsed.data.emailVerificationCode) {
-      submitAction.setError('Email verification code is required.');
+      submitAction.setError(intl.formatMessage({ id: 'auth.email.verification.code.required' }));
       return;
     }
 
@@ -109,7 +115,7 @@ const Index = () => {
           password: parsed.data.password,
           confirmPassword: parsed.data.confirmPassword,
         }),
-      'Account creation could not be completed.',
+      intl.formatMessage({ id: 'auth.registration.failed' }),
     );
 
     if (session) {
@@ -124,54 +130,56 @@ const Index = () => {
     const parsed = emailSchema.safeParse(form.email);
 
     if (!parsed.success) {
-      emailVerification.setError(parsed.error.issues[0]?.message ?? 'Provide a valid email address.');
+      emailVerification.setError(
+        intl.formatMessage({ id: parsed.error.issues[0]?.message ?? 'validation.email.invalid' }),
+      );
       return;
     }
 
-    await emailVerification.requestCode(parsed.data, 'Verification code could not be sent.');
+    await emailVerification.requestCode(parsed.data, intl.formatMessage({ id: 'auth.email.verification.send.failed' }));
   };
 
   return (
     <AuthCard
-      description="Register an account to access the dashboard."
+      description={intl.formatMessage({ id: 'auth.register.description' })}
       footer={
         <>
-          <span>Already have an account?</span>
+          <span>{intl.formatMessage({ id: 'auth.already.have.account' })}</span>
           <Link className="font-medium text-primary hover:underline" to={routePath('login')}>
-            Log in
+            {intl.formatMessage({ id: 'auth.login' })}
           </Link>
         </>
       }
       footerClassName="justify-center gap-2 text-sm text-muted-foreground"
-      title="Account registration"
+      title={intl.formatMessage({ id: 'auth.register.title' })}
     >
       <form className="grid gap-4" onSubmit={handleSubmit}>
         <div className="grid gap-2">
-          <Label htmlFor="username">Username</Label>
+          <Label htmlFor="username">{intl.formatMessage({ id: 'auth.username' })}</Label>
           <Input
             autoComplete="username"
             disabled={submitting}
             id="username"
             name="username"
             onChange={handleChange('username')}
-            placeholder="alex_chen"
+            placeholder={intl.formatMessage({ id: 'auth.username.placeholder' })}
             value={form.username}
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="displayName">Display name</Label>
+          <Label htmlFor="displayName">{intl.formatMessage({ id: 'auth.display.name' })}</Label>
           <Input
             autoComplete="name"
             disabled={submitting}
             id="displayName"
             name="displayName"
             onChange={handleChange('displayName')}
-            placeholder="Alex Chen"
+            placeholder={intl.formatMessage({ id: 'auth.display.name.placeholder' })}
             value={form.displayName}
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="email">{intl.formatMessage({ id: 'auth.email' })}</Label>
           <div className="flex gap-2">
             <Input
               autoComplete="email"
@@ -179,7 +187,7 @@ const Index = () => {
               id="email"
               name="email"
               onChange={handleChange('email')}
-              placeholder="alex@example.com"
+              placeholder={intl.formatMessage({ id: 'auth.email.placeholder' })}
               type="email"
               value={form.email}
             />
@@ -190,14 +198,14 @@ const Index = () => {
                 type="button"
                 variant="outline"
               >
-                {sendingCode ? 'Sending' : 'Send code'}
+                {intl.formatMessage({ id: sendingCode ? 'common.sending' : 'common.send.code' })}
               </Button>
             ) : null}
           </div>
         </div>
         {emailVerificationRequired ? (
           <div className="grid gap-2">
-            <Label htmlFor="emailVerificationCode">Verification code</Label>
+            <Label htmlFor="emailVerificationCode">{intl.formatMessage({ id: 'auth.verification.code' })}</Label>
             <Input
               autoComplete="one-time-code"
               disabled={submitting}
@@ -207,33 +215,33 @@ const Index = () => {
               name="emailVerificationCode"
               onChange={handleChange('emailVerificationCode')}
               pattern="[0-9]{6}"
-              placeholder="000000"
+              placeholder={intl.formatMessage({ id: 'auth.verification.code.placeholder' })}
               value={form.emailVerificationCode}
             />
           </div>
         ) : null}
         <div className="grid gap-2">
-          <Label htmlFor="password">Password</Label>
+          <Label htmlFor="password">{intl.formatMessage({ id: 'auth.password' })}</Label>
           <Input
             autoComplete="new-password"
             disabled={submitting}
             id="password"
             name="password"
             onChange={handleChange('password')}
-            placeholder="At least 8 characters"
+            placeholder={intl.formatMessage({ id: 'auth.password.new.placeholder' })}
             type="password"
             value={form.password}
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="confirmPassword">Confirm password</Label>
+          <Label htmlFor="confirmPassword">{intl.formatMessage({ id: 'auth.password.confirm' })}</Label>
           <Input
             autoComplete="new-password"
             disabled={submitting}
             id="confirmPassword"
             name="confirmPassword"
             onChange={handleChange('confirmPassword')}
-            placeholder="Repeat password"
+            placeholder={intl.formatMessage({ id: 'auth.password.confirm.placeholder' })}
             type="password"
             value={form.confirmPassword}
           />
@@ -241,7 +249,9 @@ const Index = () => {
         <FormMessage message={error} variant="error" />
         <FormMessage message={notice} variant="notice" />
         <Button className="w-full" disabled={configLoading || submitting} type="submit">
-          {submitting ? 'Creating account' : configLoading ? 'Loading' : 'Create account'}
+          {intl.formatMessage({
+            id: submitting ? 'auth.processing' : configLoading ? 'common.loading' : 'auth.create.account',
+          })}
         </Button>
       </form>
     </AuthCard>

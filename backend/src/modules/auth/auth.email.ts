@@ -2,7 +2,10 @@ import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 
 import nodemailer from 'nodemailer';
 import SMTPTransport from 'nodemailer/lib/smtp-transport';
 
+import { defaultLocale, type SupportedLocale } from '@tilty/shared/i18n';
+
 import { AppError } from '../../core/errors';
+import { formatBackendMessage } from '../../i18n';
 import { type CacheStore, MemoryCacheStore } from '../../infra/cache';
 
 interface EmailVerificationConfig {
@@ -79,41 +82,54 @@ export class EmailVerificationService {
 
   getDeliveryMetadata() {
     if (!this.sender) {
-      throw new AppError('EMAIL_VERIFICATION_DISABLED', 'Email verification is disabled.', 404);
+      throw new AppError('EMAIL_VERIFICATION_DISABLED', 'error.EMAIL_VERIFICATION_DISABLED', 404);
     }
 
     return this.createDeliveryMetadata();
   }
 
-  async sendRegistrationCode(email: string) {
-    return this.sendCode('registration', email, 'Registration verification code', (code) => [
-      `Your registration verification code is ${code}.`,
-      `This code expires in ${Math.ceil(this.codeExpiresInMs / 60_000)} minutes.`,
-      'No action is required if this code was not requested by you.',
+  async sendRegistrationCode(email: string, locale: SupportedLocale = defaultLocale) {
+    return this.sendCode('registration', email, formatBackendMessage(locale, 'email.registration.subject'), (code) => [
+      formatBackendMessage(locale, 'email.registration.code', { code }),
+      formatBackendMessage(locale, 'email.expiresInMinutes', {
+        minutes: Math.ceil(this.codeExpiresInMs / 60_000),
+      }),
+      formatBackendMessage(locale, 'email.noActionRequired'),
     ]);
   }
 
-  async sendPasswordResetCode(email: string) {
-    return this.sendCode('password-reset', email, 'Password reset verification code', (code) => [
-      `Your password reset verification code is ${code}.`,
-      `This code expires in ${Math.ceil(this.codeExpiresInMs / 60_000)} minutes.`,
-      'No action is required if this code was not requested by you.',
+  async sendPasswordResetCode(email: string, locale: SupportedLocale = defaultLocale) {
+    return this.sendCode(
+      'password-reset',
+      email,
+      formatBackendMessage(locale, 'email.passwordReset.subject'),
+      (code) => [
+        formatBackendMessage(locale, 'email.passwordReset.code', { code }),
+        formatBackendMessage(locale, 'email.expiresInMinutes', {
+          minutes: Math.ceil(this.codeExpiresInMs / 60_000),
+        }),
+        formatBackendMessage(locale, 'email.noActionRequired'),
+      ],
+    );
+  }
+
+  async sendProfileEmailVerificationCode(email: string, locale: SupportedLocale = defaultLocale) {
+    return this.sendCode('profile-email', email, formatBackendMessage(locale, 'email.profileEmail.subject'), (code) => [
+      formatBackendMessage(locale, 'email.profileEmail.code', { code }),
+      formatBackendMessage(locale, 'email.expiresInMinutes', {
+        minutes: Math.ceil(this.codeExpiresInMs / 60_000),
+      }),
+      formatBackendMessage(locale, 'email.noActionRequired'),
     ]);
   }
 
-  async sendProfileEmailVerificationCode(email: string) {
-    return this.sendCode('profile-email', email, 'Profile email verification code', (code) => [
-      `Your profile email verification code is ${code}.`,
-      `This code expires in ${Math.ceil(this.codeExpiresInMs / 60_000)} minutes.`,
-      'No action is required if this code was not requested by you.',
-    ]);
-  }
-
-  async sendMfaCode(email: string) {
-    return this.sendCode('mfa', email, 'Security verification code', (code) => [
-      `Your security verification code is ${code}.`,
-      `This code expires in ${Math.ceil(this.codeExpiresInMs / 60_000)} minutes.`,
-      'No action is required if this code was not requested by you.',
+  async sendMfaCode(email: string, locale: SupportedLocale = defaultLocale) {
+    return this.sendCode('mfa', email, formatBackendMessage(locale, 'email.mfa.subject'), (code) => [
+      formatBackendMessage(locale, 'email.mfa.code', { code }),
+      formatBackendMessage(locale, 'email.expiresInMinutes', {
+        minutes: Math.ceil(this.codeExpiresInMs / 60_000),
+      }),
+      formatBackendMessage(locale, 'email.noActionRequired'),
     ]);
   }
 
@@ -127,7 +143,7 @@ export class EmailVerificationService {
 
   async verifyPasswordResetCode(email: string, code?: string) {
     if (!this.sender) {
-      throw new AppError('EMAIL_VERIFICATION_DISABLED', 'Email verification is disabled.', 404);
+      throw new AppError('EMAIL_VERIFICATION_DISABLED', 'error.EMAIL_VERIFICATION_DISABLED', 404);
     }
 
     await this.verifyCode('password-reset', email, code);
@@ -135,7 +151,7 @@ export class EmailVerificationService {
 
   async verifyProfileEmailVerificationCode(email: string, code?: string) {
     if (!this.sender) {
-      throw new AppError('EMAIL_VERIFICATION_DISABLED', 'Email verification is disabled.', 404);
+      throw new AppError('EMAIL_VERIFICATION_DISABLED', 'error.EMAIL_VERIFICATION_DISABLED', 404);
     }
 
     await this.verifyCode('profile-email', email, code);
@@ -143,7 +159,7 @@ export class EmailVerificationService {
 
   async verifyMfaCode(email: string, code?: string) {
     if (!this.sender) {
-      throw new AppError('EMAIL_VERIFICATION_DISABLED', 'Email verification is disabled.', 404);
+      throw new AppError('EMAIL_VERIFICATION_DISABLED', 'error.EMAIL_VERIFICATION_DISABLED', 404);
     }
 
     await this.verifyCode('mfa', email, code);
@@ -156,7 +172,7 @@ export class EmailVerificationService {
     createText: (code: string) => string[],
   ) {
     if (!this.sender) {
-      throw new AppError('EMAIL_VERIFICATION_DISABLED', 'Email verification is disabled.', 404);
+      throw new AppError('EMAIL_VERIFICATION_DISABLED', 'error.EMAIL_VERIFICATION_DISABLED', 404);
     }
 
     const normalizedEmail = normalizeEmail(email);
@@ -167,7 +183,7 @@ export class EmailVerificationService {
     const now = Date.now();
 
     if (existing && existing.nextSendAt > now) {
-      throw new AppError('EMAIL_VERIFICATION_COOLDOWN', 'Email verification code was sent recently.', 429, {
+      throw new AppError('EMAIL_VERIFICATION_COOLDOWN', 'error.EMAIL_VERIFICATION_COOLDOWN', 429, {
         retryAfterSeconds: Math.ceil((existing.nextSendAt - now) / 1000),
       });
     }
@@ -179,7 +195,7 @@ export class EmailVerificationService {
       const retryAfterMs =
         current?.nextSendAt && current.nextSendAt > Date.now() ? current.nextSendAt - Date.now() : this.codeCooldownMs;
 
-      throw new AppError('EMAIL_VERIFICATION_COOLDOWN', 'Email verification code was sent recently.', 429, {
+      throw new AppError('EMAIL_VERIFICATION_COOLDOWN', 'error.EMAIL_VERIFICATION_COOLDOWN', 429, {
         retryAfterSeconds: Math.ceil(retryAfterMs / 1000),
       });
     }
@@ -213,7 +229,7 @@ export class EmailVerificationService {
 
   private async verifyCode(purpose: VerificationPurpose, email: string, code?: string) {
     if (!code) {
-      throw new AppError('EMAIL_VERIFICATION_REQUIRED', 'Email verification code is required.', 400);
+      throw new AppError('EMAIL_VERIFICATION_REQUIRED', 'error.EMAIL_VERIFICATION_REQUIRED', 400);
     }
 
     const normalizedEmail = normalizeEmail(email);
@@ -253,11 +269,7 @@ export class EmailVerificationService {
       }
     }
 
-    throw new AppError(
-      'EMAIL_VERIFICATION_CONFLICT',
-      'Email verification state changed. Submit the request again.',
-      409,
-    );
+    throw new AppError('EMAIL_VERIFICATION_CONFLICT', 'error.EMAIL_VERIFICATION_CONFLICT', 409);
   }
 
   private hashVerificationCode(purpose: VerificationPurpose, email: string, code: string) {
@@ -324,7 +336,7 @@ export class SmtpEmailSenderPool implements EmailSender {
 
   constructor(configs: SmtpEmailSenderConfig[], options: SmtpEmailSenderPoolOptions = {}) {
     if (configs.length === 0) {
-      throw new AppError('EMAIL_SMTP_PROFILES_EMPTY', 'At least one SMTP profile is required.', 500);
+      throw new AppError('EMAIL_SMTP_PROFILES_EMPTY', 'error.EMAIL_SMTP_PROFILES_EMPTY', 500);
     }
 
     this.selectProfileIndex = options.selectProfileIndex ?? randomInt;
@@ -339,7 +351,7 @@ export class SmtpEmailSenderPool implements EmailSender {
     const profileIndex = this.selectProfileIndex(this.senders.length);
 
     if (!Number.isInteger(profileIndex) || profileIndex < 0 || profileIndex >= this.senders.length) {
-      throw new AppError('SMTP_PROFILE_SELECTION_INVALID', 'SMTP profile selection returned an invalid index.', 500);
+      throw new AppError('SMTP_PROFILE_SELECTION_INVALID', 'error.SMTP_PROFILE_SELECTION_INVALID', 500);
     }
 
     return this.senders[profileIndex]!;
@@ -365,7 +377,7 @@ function getSendLockKey(purpose: VerificationPurpose, email: string) {
 }
 
 function throwInvalidVerificationCode(): never {
-  throw new AppError('EMAIL_VERIFICATION_INVALID', 'Email verification code is invalid or expired.', 400);
+  throw new AppError('EMAIL_VERIFICATION_INVALID', 'error.EMAIL_VERIFICATION_INVALID', 400);
 }
 
 function createSmtpTransport(config: SmtpEmailSenderConfig) {

@@ -12,29 +12,17 @@ export const systemPermissionKeys = [
 
 export type SystemPermissionKey = (typeof systemPermissionKeys)[number];
 
-export interface SystemPermissionDefinition {
-  key: SystemPermissionKey;
-  name: string;
-  description: string;
-}
-
 export const systemPermissionDefinitions = [
   {
     key: SystemPermission.Root,
-    name: 'Root',
-    description: 'Bypass all permission checks.',
   },
   {
     key: SystemPermission.UserAdmin,
-    name: 'User Administration',
-    description: 'Manage user roles and user administration settings.',
   },
   {
     key: SystemPermission.UserList,
-    name: 'User List',
-    description: 'View the user directory.',
   },
-] as const satisfies readonly SystemPermissionDefinition[];
+] as const satisfies readonly { key: SystemPermissionKey }[];
 
 export const SystemRole = {
   Root: 'ROOT',
@@ -46,33 +34,20 @@ export const systemRoleKeys = [SystemRole.Root, SystemRole.UserAdmin, SystemRole
 
 export type SystemRoleKey = (typeof systemRoleKeys)[number];
 
-export interface SystemRoleDefinition {
-  key: SystemRoleKey;
-  name: string;
-  description: string;
-  permissionKeys: readonly SystemPermissionKey[];
-}
-
 export const systemRoleDefinitions = [
   {
     key: SystemRole.Root,
-    name: 'Root',
-    description: 'Full platform administration.',
     permissionKeys: [SystemPermission.Root, SystemPermission.UserAdmin, SystemPermission.UserList],
   },
   {
     key: SystemRole.UserAdmin,
-    name: 'User Administrator',
-    description: 'Manage users and grant user-facing roles.',
     permissionKeys: [SystemPermission.UserAdmin, SystemPermission.UserList],
   },
   {
     key: SystemRole.UserList,
-    name: 'User List Viewer',
-    description: 'View the user directory.',
     permissionKeys: [SystemPermission.UserList],
   },
-] as const satisfies readonly SystemRoleDefinition[];
+] as const satisfies readonly { key: SystemRoleKey; permissionKeys: readonly SystemPermissionKey[] }[];
 
 export function hasPermission(permissionKeys: readonly string[] | undefined, requiredPermission: string) {
   return Boolean(permissionKeys?.includes(SystemPermission.Root) || permissionKeys?.includes(requiredPermission));

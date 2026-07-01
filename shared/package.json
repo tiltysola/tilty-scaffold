@@ -1,6 +1,6 @@
 {
   "name": "@tilty/shared",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "type": "commonjs",
   "exports": {
@@ -25,6 +25,27 @@
       "require": "./dist/cjs/access-control.js",
       "default": "./dist/esm/access-control.mjs"
     },
+    "./auth": {
+      "development": "./src/auth.ts",
+      "types": "./dist/esm/auth.d.ts",
+      "import": "./dist/esm/auth.mjs",
+      "require": "./dist/cjs/auth.js",
+      "default": "./dist/esm/auth.mjs"
+    },
+    "./i18n": {
+      "development": "./src/i18n.ts",
+      "types": "./dist/esm/i18n.d.ts",
+      "import": "./dist/esm/i18n.mjs",
+      "require": "./dist/cjs/i18n.js",
+      "default": "./dist/esm/i18n.mjs"
+    },
+    "./setup": {
+      "development": "./src/setup.ts",
+      "types": "./dist/esm/setup.d.ts",
+      "import": "./dist/esm/setup.mjs",
+      "require": "./dist/cjs/setup.js",
+      "default": "./dist/esm/setup.mjs"
+    },
     "./validation": {
       "development": "./src/validation.ts",
       "types": "./dist/esm/validation.d.ts",
@@ -47,7 +68,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "libphonenumber-js": "^1.13.7"
+    "libphonenumber-js": "^1.13.7",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "typescript": "^6.0.3"

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useIntl } from 'react-intl';
 
 import { OTPInput, type RenderProps } from 'input-otp';
 
@@ -33,6 +34,7 @@ const VerificationCodeInput = ({
   value,
 }: VerificationCodeInputProps) => {
   const [now, setNow] = useState(() => Date.now());
+  const intl = useIntl();
 
   useEffect(() => {
     if (!resendAvailableAt || resendAvailableAt <= Date.now()) {
@@ -54,7 +56,9 @@ const VerificationCodeInput = ({
 
   const remainingSeconds = resendAvailableAt ? Math.max(0, Math.ceil((resendAvailableAt - now) / 1000)) : 0;
   const canResend = Boolean(onResend);
-  const resendLabel = codeSent ? 'Resend' : 'Send code';
+  const resendLabel = codeSent
+    ? intl.formatMessage({ id: 'common.resend' })
+    : intl.formatMessage({ id: 'common.send.code' });
 
   return (
     <div className="grid gap-2">
@@ -73,7 +77,7 @@ const VerificationCodeInput = ({
       />
       {canResend ? (
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <span>Code not received?</span>
+          <span>{intl.formatMessage({ id: 'identity.code.not.received' })}</span>
           <Button
             className="h-auto p-0 text-xs"
             disabled={disabled || resendDisabled || resendPending || remainingSeconds > 0}
@@ -81,7 +85,9 @@ const VerificationCodeInput = ({
             type="button"
             variant="link"
           >
-            {resendPending ? 'Sending' : `${resendLabel}${remainingSeconds > 0 ? ` (${remainingSeconds})` : ''}`}
+            {resendPending
+              ? intl.formatMessage({ id: 'common.sending' })
+              : `${resendLabel}${remainingSeconds > 0 ? ` (${remainingSeconds})` : ''}`}
           </Button>
         </div>
       ) : null}

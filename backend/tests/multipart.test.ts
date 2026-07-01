@@ -4,6 +4,13 @@ import { describe, expect, it } from 'vitest';
 
 import { readMultipartFile } from '../src/infra/multipart';
 
+interface MultipartPart {
+  content: Buffer;
+  contentType: string;
+  fieldName: string;
+  filename: string;
+}
+
 describe('multipart file reader', () => {
   it('reads one uploaded file from a multipart request stream', async () => {
     const content = Buffer.from('89504e470d0a1a0a', 'hex');
@@ -178,13 +185,6 @@ describe('multipart file reader', () => {
     });
   });
 });
-
-interface MultipartPart {
-  content: Buffer;
-  contentType: string;
-  fieldName: string;
-  filename: string;
-}
 
 function createMultipartBody(boundary: string, parts: MultipartPart[]) {
   const chunks = parts.flatMap((part) => [

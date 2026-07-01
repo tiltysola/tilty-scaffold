@@ -1,3 +1,5 @@
+import { useIntl } from 'react-intl';
+
 import { LinkIcon } from 'lucide-react';
 
 import { type SsoIdentityPublic, type SsoPublicProvider } from '@/lib/auth';
@@ -16,6 +18,8 @@ export function SsoProviderList({
   onBind: (providerId: string) => void;
   providers: SsoPublicProvider[];
 }) {
+  const intl = useIntl();
+
   return (
     <>
       {providers.map((provider) => {
@@ -23,7 +27,7 @@ export function SsoProviderList({
         const bindButton = (
           <Button className="w-fit" disabled={Boolean(identity)} size="sm" type="button" variant="outline">
             <LinkIcon />
-            {identity ? 'Bound' : 'Bind'}
+            {identity ? intl.formatMessage({ id: 'profile.sso.bound' }) : intl.formatMessage({ id: 'common.bind' })}
           </Button>
         );
 
@@ -35,7 +39,9 @@ export function SsoProviderList({
             <ItemContent className="min-w-0">
               <ItemTitle>{provider.name}</ItemTitle>
               <ItemDescription className="truncate text-xs">
-                {identity ? `Bound as ${identity.email}` : 'External sign-in provider'}
+                {identity
+                  ? intl.formatMessage({ id: 'profile.sso.bound.as' }, { email: identity.email })
+                  : intl.formatMessage({ id: 'profile.sso.provider.description' })}
               </ItemDescription>
             </ItemContent>
             <ItemActions className="ml-auto">
@@ -43,11 +49,11 @@ export function SsoProviderList({
                 bindButton
               ) : (
                 <ConfirmActionDialog
-                  confirmLabel="Bind provider"
+                  confirmLabel={intl.formatMessage({ id: 'profile.sso.bind.provider' })}
                   confirmVariant="default"
-                  description="You will be redirected to the provider to link this external sign-in method to your account."
+                  description={intl.formatMessage({ id: 'profile.sso.bind.provider.description' })}
                   onConfirm={() => onBind(provider.id)}
-                  title={`Bind ${provider.name}?`}
+                  title={intl.formatMessage({ id: 'profile.sso.bind.provider.title' }, { name: provider.name })}
                 >
                   {bindButton}
                 </ConfirmActionDialog>

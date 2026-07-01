@@ -47,31 +47,6 @@ interface SlsRuntime {
   PutLogsRequest: new (input: { body: unknown }) => unknown;
 }
 
-export function configureLogger(config: LoggerConfig) {
-  const sinks: LogSink[] = [];
-
-  if (config.targets.includes('console')) {
-    sinks.push(new ConsoleLogSink());
-  }
-
-  if (config.targets.includes('local')) {
-    sinks.push(new LocalFileLogSink(config.localPath ?? './logs/backend.log'));
-  }
-
-  if (config.targets.includes('sls')) {
-    if (!config.sls) {
-      throw new Error('SLS logger configuration is required when LOG_TARGETS includes sls.');
-    }
-
-    sinks.push(new SlsLogSink(config.sls));
-  }
-
-  setLoggerSinks(sinks, {
-    ...(config.maxPendingWrites === undefined ? {} : { maxPendingWrites: config.maxPendingWrites }),
-    ...(config.writeTimeoutMs === undefined ? {} : { writeTimeoutMs: config.writeTimeoutMs }),
-  });
-}
-
 class ConsoleLogSink implements LogSink {
   write(record: LogRecord) {
     const prefix = `[${record.timestamp}] ${record.level.toUpperCase()}`;
@@ -142,6 +117,31 @@ class SlsLogSink implements LogSink {
 
     return this.client;
   }
+}
+
+export function configureLogger(config: LoggerConfig) {
+  const sinks: LogSink[] = [];
+
+  if (config.targets.includes('console')) {
+    sinks.push(new ConsoleLogSink());
+  }
+
+  if (config.targets.includes('local')) {
+    sinks.push(new LocalFileLogSink(config.localPath ?? './logs/backend.log'));
+  }
+
+  if (config.targets.includes('sls')) {
+    if (!config.sls) {
+      throw new Error('SLS logger configuration is required when LOG_TARGETS includes sls.');
+    }
+
+    sinks.push(new SlsLogSink(config.sls));
+  }
+
+  setLoggerSinks(sinks, {
+    ...(config.maxPendingWrites === undefined ? {} : { maxPendingWrites: config.maxPendingWrites }),
+    ...(config.writeTimeoutMs === undefined ? {} : { writeTimeoutMs: config.writeTimeoutMs }),
+  });
 }
 
 function toSlsContents(record: LogRecord, LogContent: SlsRuntime['LogContent']) {

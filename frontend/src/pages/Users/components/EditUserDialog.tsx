@@ -1,19 +1,17 @@
 import { type Dispatch, type ReactNode, type SetStateAction, useEffect, useState } from 'react';
+import { type IntlShape, useIntl } from 'react-intl';
 
 import {
   ChevronDownIcon,
   FingerprintIcon,
   ImageIcon,
   ImageUpIcon,
-  LaptopIcon,
   LinkIcon,
-  MonitorIcon,
+  LogOutIcon,
   SaveIcon,
   ShieldCheckIcon,
   ShieldIcon,
   ShieldOffIcon,
-  SmartphoneIcon,
-  TabletIcon,
   Trash2Icon,
   WallpaperIcon,
 } from 'lucide-react';
@@ -27,12 +25,12 @@ import {
   resolveAssetUrl,
   type SsoIdentityPublic,
 } from '@/lib/auth';
-import { composePhoneNumber, formatPhoneCountryCode, getPhonePlaceholder } from '@/lib/phone';
+import { createImageObjectUrl } from '@/lib/image-upload';
+import { composePhoneNumber, getPhoneCountryCodeMessageId, getPhonePlaceholder } from '@/lib/phone';
 import {
   formatPasskeyCount,
   formatPasskeyDeviceType,
   formatPasskeyDisplayName,
-  formatSecurityDate,
   getTwoStepStatusDescription,
 } from '@/lib/security-display';
 import {
@@ -45,6 +43,8 @@ import {
   fetchUserDetails,
   type ManagedUserDetails,
   type ManagedUserSecurity,
+  revokeUserDeviceSession,
+  revokeUserDeviceSessions,
   type RoleSummary,
   updateUserMfaSettings,
   uploadUserAvatar,
@@ -55,15 +55,6 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/shadcn/components/ui/avatar';
 import { Badge } from '@/shadcn/components/ui/badge';
 import { Button } from '@/shadcn/components/ui/button';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/shadcn/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -87,6 +78,15 @@ import { Switch } from '@/shadcn/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shadcn/components/ui/tabs';
 import { Textarea } from '@/shadcn/components/ui/textarea';
 
+import {
+  AppDialogBody,
+  AppDialogClose,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogRoot,
+} from '@/components/AppDialog';
+import { AuthDeviceItem } from '@/components/AuthDeviceItem';
 import BirthdayPicker from '@/components/BirthdayPicker';
 import { ConfirmActionDialog } from '@/components/ConfirmActionDialog';
 import FormMessage from '@/components/FormMessage';
@@ -95,7 +95,7 @@ import { ImagePreviewMedia, ImagePreviewTrigger } from '@/components/ImagePrevie
 import { ProfileItem, ProfileSection } from '@/components/ProfileCardList';
 import { ProfileGenderInput, ProfileLocationInput } from '@/components/ProfileInputs';
 
-import { arraysEqual, type EditUserForm, getVerifiedStateTooltip, isEditUserFormChanged } from '../utils';
+import { arraysEqual, type EditUserForm, isEditUserFormChanged } from '../utils';
 import { RoleEditor } from './RoleEditor';
 import { ToggleControl } from './ToggleControl';
 
@@ -104,11 +104,6 @@ type UserImageTarget = 'avatar' | 'profileBanner' | 'profileBackground';
 type PendingSecurityConfirmation = 'disable-sso-requirement' | 'disable-two-step' | null;
 
 interface UserImageConfig {
-  title: string;
-  description: string;
-  imageSelectLabel: string;
-  removeLabel: string;
-  submitLabel: string;
   aspect: number;
   output: {
     contentType?: string;
@@ -123,16 +118,8 @@ interface UserImageConfig {
   upload: (userId: string, file: File) => Promise<ManagedUserDetails>;
 }
 
-const profileImageMimeTypes = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp']);
-const profileImageTypeError = 'Use a JPEG, PNG, WebP, or GIF image.';
-
 const userImageConfigs: Record<UserImageTarget, UserImageConfig> = {
   avatar: {
-    title: 'Upload avatar',
-    description: 'Crop the avatar before uploading.',
-    imageSelectLabel: 'Select avatar',
-    removeLabel: 'Remove',
-    submitLabel: 'Upload',
     aspect: 1,
     cropShape: 'round',
     output: {
@@ -145,11 +132,6 @@ const userImageConfigs: Record<UserImageTarget, UserImageConfig> = {
     upload: uploadUserAvatar,
   },
   profileBanner: {
-    title: 'Upload profile banner',
-    description: 'Crop and adjust the profile banner image.',
-    imageSelectLabel: 'Select profile banner',
-    removeLabel: 'Remove',
-    submitLabel: 'Upload',
     aspect: 4,
     showAdjustments: true,
     output: {
@@ -163,11 +145,6 @@ const userImageConfigs: Record<UserImageTarget, UserImageConfig> = {
     upload: uploadUserProfileBanner,
   },
   profileBackground: {
-    title: 'Upload profile background',
-    description: 'Crop and adjust the profile background image.',
-    imageSelectLabel: 'Select profile background',
-    removeLabel: 'Remove',
-    submitLabel: 'Upload',
     aspect: 16 / 9,
     showAdjustments: true,
     output: {
@@ -224,6 +201,7 @@ export function EditUserDialog({
   const [activeTab, setActiveTab] = useState<UserDialogTab>('account');
   const [managedDetails, setManagedDetails] = useState<ManagedUserDetails | null>(null);
   const [detailsError, setDetailsError] = useState<{ message: string; userId: string } | null>(null);
+  const [devicePending, setDevicePending] = useState(false);
   const [securityPending, setSecurityPending] = useState(false);
   const [imageTarget, setImageTarget] = useState<UserImageTarget | null>(null);
   const [imageCropUrl, setImageCropUrl] = useState<string | null>(null);
@@ -232,6 +210,7 @@ export function EditUserDialog({
   const [imageUploading, setImageUploading] = useState(false);
   const [imageRemoving, setImageRemoving] = useState(false);
   const [pendingSecurityConfirmation, setPendingSecurityConfirmation] = useState<PendingSecurityConfirmation>(null);
+  const intl = useIntl();
   const saving = Boolean(editingUser && savingUserId === editingUser.id);
   const changed = editingUser
     ? isEditUserFormChanged(editingForm, editingUser, phoneBindingEnabled, profileEmailVerificationEnabled) ||
@@ -259,7 +238,7 @@ export function EditUserDialog({
   const saveButton = (
     <Button disabled={!editingUser || saving || !changed} onClick={sensitiveChanges ? undefined : onSave} type="button">
       {saving ? <Spinner /> : <SaveIcon />}
-      Save changes
+      {intl.formatMessage({ id: 'common.save.changes' })}
     </Button>
   );
 
@@ -281,7 +260,7 @@ export function EditUserDialog({
       .catch((error: unknown) => {
         if (isActive) {
           setDetailsError({
-            message: getApiErrorMessage(error, 'User details could not be loaded.'),
+            message: getApiErrorMessage(error, intl.formatMessage({ id: 'users.edit.details.load.failed' })),
             userId: editingUserId,
           });
         }
@@ -290,7 +269,7 @@ export function EditUserDialog({
     return () => {
       isActive = false;
     };
-  }, [editingUserId, onManagedUserChange]);
+  }, [editingUserId, intl, onManagedUserChange]);
 
   useEffect(() => {
     return () => {
@@ -324,7 +303,7 @@ export function EditUserDialog({
       applyManagedDetails(details);
     } catch (error) {
       setDetailsError({
-        message: getApiErrorMessage(error, 'User details could not be loaded.'),
+        message: getApiErrorMessage(error, intl.formatMessage({ id: 'users.edit.details.load.failed' })),
         userId: editingUser.id,
       });
     }
@@ -344,29 +323,87 @@ export function EditUserDialog({
       applyManagedSecurity(await request(editingUser.id));
       toast.success(successMessage);
     } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Security settings could not be updated.'));
+      toast.error(getApiErrorMessage(error, intl.formatMessage({ id: 'users.edit.security.update.failed' })));
     } finally {
       setSecurityPending(false);
+    }
+  };
+
+  const handleRevokeDevice = async (sessionId: string) => {
+    if (!editingUser) {
+      return;
+    }
+
+    setDevicePending(true);
+
+    try {
+      await revokeUserDeviceSession(editingUser.id, sessionId);
+      setManagedDetails((current) =>
+        current && current.user.id === editingUser.id
+          ? {
+              ...current,
+              devices: current.devices.filter((device) => device.id !== sessionId),
+            }
+          : current,
+      );
+      toast.success(intl.formatMessage({ id: 'security.session.revoked' }));
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, intl.formatMessage({ id: 'security.device.session.revoke.failed' })));
+    } finally {
+      setDevicePending(false);
+    }
+  };
+
+  const handleRevokeDevices = async () => {
+    if (!editingUser) {
+      return;
+    }
+
+    setDevicePending(true);
+
+    try {
+      await revokeUserDeviceSessions(editingUser.id);
+      setManagedDetails((current) =>
+        current && current.user.id === editingUser.id
+          ? {
+              ...current,
+              devices: current.devices.filter((device) => device.isCurrent),
+            }
+          : current,
+      );
+      toast.success(intl.formatMessage({ id: 'users.edit.devices.revoked' }));
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, intl.formatMessage({ id: 'security.device.sessions.revoke.failed' })));
+    } finally {
+      setDevicePending(false);
     }
   };
 
   const handleTwoStepEnabledChange = (enabled: boolean) =>
     handleSecurityUpdate(
       (userId) => updateUserMfaSettings(userId, { enabled }),
-      enabled ? 'Two-step verification enabled.' : 'Two-step verification disabled.',
+      intl.formatMessage({
+        id: enabled ? 'security.two.step.authentication.enabled' : 'security.two.step.authentication.disabled',
+      }),
     );
 
   const handleSsoRequirementChange = (requiredForSso: boolean) =>
     handleSecurityUpdate(
       (userId) => updateUserMfaSettings(userId, { requiredForSso }),
-      requiredForSso ? 'Third-party sign-in verification enabled.' : 'Third-party sign-in verification disabled.',
+      intl.formatMessage({ id: requiredForSso ? 'security.sso.mfa.enabled' : 'security.sso.mfa.disabled' }),
     );
 
   const handleDisableTotp = () =>
-    handleSecurityUpdate((userId) => disableUserTotp(userId), 'Authenticator app removed.');
+    handleSecurityUpdate(
+      (userId) => disableUserTotp(userId),
+      intl.formatMessage({ id: 'security.authenticator.app.removed' }),
+    );
 
   const handleDeletePasskey = (passkeyId: string) =>
-    handleSecurityUpdate((userId) => deleteUserPasskey(userId, passkeyId), 'Passkey removed.');
+    handleSecurityUpdate(
+      (userId) => deleteUserPasskey(userId, passkeyId),
+      intl.formatMessage({ id: 'security.passkey.removed' }),
+    );
 
   const handleDeleteSsoIdentity = async (providerId: string) => {
     if (!editingUser) {
@@ -379,9 +416,9 @@ export function EditUserDialog({
       const result = await deleteUserSsoIdentity(editingUser.id, providerId);
 
       setManagedDetails((current) => (current ? { ...current, ssoIdentities: result.identities } : current));
-      toast.success('SSO binding removed.');
+      toast.success(intl.formatMessage({ id: 'users.edit.sso.binding.removed' }));
     } catch (error) {
-      toast.error(getApiErrorMessage(error, 'SSO binding could not be removed.'));
+      toast.error(getApiErrorMessage(error, intl.formatMessage({ id: 'users.edit.sso.binding.remove.failed' })));
     } finally {
       setSecurityPending(false);
     }
@@ -394,7 +431,11 @@ export function EditUserDialog({
   };
 
   const handleImageSelect = (file: File) => {
-    const objectUrl = createUserImageObjectUrl(file, setImageUploadError);
+    const objectUrl = createImageObjectUrl(
+      file,
+      setImageUploadError,
+      intl.formatMessage({ id: 'profile.image.type.error' }),
+    );
 
     setImageCropUrl((current) => {
       if (current) {
@@ -456,9 +497,12 @@ export function EditUserDialog({
       applyManagedDetails(await imageConfig.upload(editingUser.id, file));
       setImageTarget(null);
       resetImageDialog();
-      toast.success(`${getImageLabel(imageTarget)} updated.`);
+      toast.success(intl.formatMessage({ id: getImageUpdatedMessageId(imageTarget) }));
     } catch (error) {
-      const message = getApiErrorMessage(error, `${getImageLabel(imageTarget)} could not be uploaded.`);
+      const message = getApiErrorMessage(
+        error,
+        intl.formatMessage({ id: 'profile.image.upload.failed' }, { label: getImageLabel(imageTarget, intl) }),
+      );
 
       setImageUploadError(message);
       toast.error(message);
@@ -479,9 +523,12 @@ export function EditUserDialog({
       applyManagedDetails(await imageConfig.remove(editingUser.id));
       setImageTarget(null);
       resetImageDialog();
-      toast.success(`${getImageLabel(imageTarget)} removed.`);
+      toast.success(intl.formatMessage({ id: getImageRemovedMessageId(imageTarget) }));
     } catch (error) {
-      const message = getApiErrorMessage(error, `${getImageLabel(imageTarget)} could not be removed.`);
+      const message = getApiErrorMessage(
+        error,
+        intl.formatMessage({ id: 'profile.image.remove.failed' }, { label: getImageLabel(imageTarget, intl) }),
+      );
 
       setImageUploadError(message);
       toast.error(message);
@@ -492,146 +539,157 @@ export function EditUserDialog({
 
   return (
     <>
-      <Dialog open={Boolean(editingUser)} onOpenChange={handleDialogOpenChange}>
-        <DialogContent
-          className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl"
-          onInteractOutside={handleDialogInteractOutside}
-        >
-          <DialogHeader>
-            <DialogTitle>Edit user</DialogTitle>
-            <DialogDescription>
-              Update account, profile, security, devices, and sign-in bindings for{' '}
-              {currentManagedUser?.displayName ?? 'the selected user'}.
-            </DialogDescription>
-          </DialogHeader>
-          <Tabs value={activeTab} onValueChange={(value: string) => setActiveTab(value as UserDialogTab)}>
-            <TabsList className="h-auto w-full flex-wrap justify-start" variant="line">
-              <TabsTrigger value="account">Account</TabsTrigger>
-              <TabsTrigger value="permissions">Permissions</TabsTrigger>
-              <TabsTrigger value="profile">Profile</TabsTrigger>
-              <TabsTrigger value="security">Security</TabsTrigger>
-              <TabsTrigger value="devices">Login Devices</TabsTrigger>
-              <TabsTrigger value="sso">SSO</TabsTrigger>
-            </TabsList>
-            <TabsContent value="account">
-              <AccountTab
-                editError={editError}
-                editingDisabled={editingDisabled}
-                editingForm={editingForm}
-                editingUser={editingUser}
-                emailVerifiedDisabled={emailVerifiedDisabled}
-                onFormChange={onFormChange}
-                phoneBindingEnabled={phoneBindingEnabled}
-                phoneCountryCodes={phoneCountryCodes}
-                phoneDisabled={phoneDisabled}
-                profileEmailVerificationEnabled={profileEmailVerificationEnabled}
-                saving={saving}
-              />
-            </TabsContent>
-            <TabsContent value="permissions">
-              <PermissionsTab
-                availableRoles={availableRoles}
-                disabled={editingDisabled}
-                editingRoleKeys={editingRoleKeys}
-                onRoleToggle={onRoleToggle}
-              />
-            </TabsContent>
-            <TabsContent value="profile">
-              <DetailsBoundary
-                error={currentDetailsError}
-                loading={detailsLoading}
-                onRetry={() => void handleReloadDetails()}
-              >
-                {currentManagedUser ? (
-                  <ProfileTab
-                    disabled={imageBusy}
-                    editingDisabled={editingDisabled}
-                    editingForm={editingForm}
-                    imagePreviewTarget={imagePreviewTarget}
-                    onFormChange={onFormChange}
-                    onOpenImageDialog={handleOpenImageDialog}
-                    onPreviewOpenChange={(target, open) => setImagePreviewTarget(open ? target : null)}
-                    user={currentManagedUser}
-                  />
-                ) : null}
-              </DetailsBoundary>
-            </TabsContent>
-            <TabsContent value="security">
-              <DetailsBoundary
-                error={currentDetailsError}
-                loading={detailsLoading}
-                onRetry={() => void handleReloadDetails()}
-              >
-                {currentManagedDetails ? (
-                  <SecurityTab
-                    disabled={securityPending}
-                    onDeletePasskey={handleDeletePasskey}
-                    onDisableTotp={handleDisableTotp}
-                    onSsoRequirementChange={handleSsoRequirementChange}
-                    onTwoStepEnabledChange={handleTwoStepEnabledChange}
-                    pendingConfirmation={pendingSecurityConfirmation}
-                    security={currentManagedDetails.security}
-                    setPendingConfirmation={setPendingSecurityConfirmation}
-                  />
-                ) : null}
-              </DetailsBoundary>
-            </TabsContent>
-            <TabsContent value="devices">
-              <DetailsBoundary
-                error={currentDetailsError}
-                loading={detailsLoading}
-                onRetry={() => void handleReloadDetails()}
-              >
-                {currentManagedDetails ? <DevicesTab devices={currentManagedDetails.devices} /> : null}
-              </DetailsBoundary>
-            </TabsContent>
-            <TabsContent value="sso">
-              <DetailsBoundary
-                error={currentDetailsError}
-                loading={detailsLoading}
-                onRetry={() => void handleReloadDetails()}
-              >
-                {currentManagedDetails ? (
-                  <SsoTab
-                    disabled={securityPending}
-                    identities={currentManagedDetails.ssoIdentities}
-                    onDeleteIdentity={handleDeleteSsoIdentity}
-                  />
-                ) : null}
-              </DetailsBoundary>
-            </TabsContent>
-          </Tabs>
+      <AppDialogRoot open={Boolean(editingUser)} onOpenChange={handleDialogOpenChange}>
+        <AppDialogContent className="sm:max-w-2xl" onInteractOutside={handleDialogInteractOutside}>
+          <AppDialogHeader
+            description={intl.formatMessage(
+              { id: 'users.edit.dialog.description' },
+              {
+                name:
+                  currentManagedUser?.displayName ?? intl.formatMessage({ id: 'users.edit.selected.user.fallback' }),
+              },
+            )}
+            title={intl.formatMessage({ id: 'users.edit.dialog.title' })}
+          />
+          <AppDialogBody>
+            <Tabs value={activeTab} onValueChange={(value: string) => setActiveTab(value as UserDialogTab)}>
+              <TabsList className="h-auto w-full flex-wrap justify-start" variant="line">
+                <TabsTrigger value="account">{intl.formatMessage({ id: 'users.edit.account.tab' })}</TabsTrigger>
+                <TabsTrigger value="permissions">
+                  {intl.formatMessage({ id: 'users.edit.permissions.tab' })}
+                </TabsTrigger>
+                <TabsTrigger value="profile">{intl.formatMessage({ id: 'users.edit.profile.tab' })}</TabsTrigger>
+                <TabsTrigger value="security">{intl.formatMessage({ id: 'users.edit.security.tab' })}</TabsTrigger>
+                <TabsTrigger value="devices">{intl.formatMessage({ id: 'users.edit.devices.tab' })}</TabsTrigger>
+                <TabsTrigger value="sso">{intl.formatMessage({ id: 'users.edit.sso.tab' })}</TabsTrigger>
+              </TabsList>
+              <TabsContent value="account">
+                <AccountTab
+                  editError={editError}
+                  editingDisabled={editingDisabled}
+                  editingForm={editingForm}
+                  editingUser={editingUser}
+                  emailVerifiedDisabled={emailVerifiedDisabled}
+                  onFormChange={onFormChange}
+                  phoneBindingEnabled={phoneBindingEnabled}
+                  phoneCountryCodes={phoneCountryCodes}
+                  phoneDisabled={phoneDisabled}
+                  profileEmailVerificationEnabled={profileEmailVerificationEnabled}
+                  saving={saving}
+                />
+              </TabsContent>
+              <TabsContent value="permissions">
+                <PermissionsTab
+                  availableRoles={availableRoles}
+                  disabled={editingDisabled}
+                  editingRoleKeys={editingRoleKeys}
+                  onRoleToggle={onRoleToggle}
+                />
+              </TabsContent>
+              <TabsContent value="profile">
+                <DetailsBoundary
+                  error={currentDetailsError}
+                  loading={detailsLoading}
+                  onRetry={() => void handleReloadDetails()}
+                >
+                  {currentManagedUser ? (
+                    <ProfileTab
+                      disabled={imageBusy}
+                      editingDisabled={editingDisabled}
+                      editingForm={editingForm}
+                      imagePreviewTarget={imagePreviewTarget}
+                      onFormChange={onFormChange}
+                      onOpenImageDialog={handleOpenImageDialog}
+                      onPreviewOpenChange={(target, open) => setImagePreviewTarget(open ? target : null)}
+                      user={currentManagedUser}
+                    />
+                  ) : null}
+                </DetailsBoundary>
+              </TabsContent>
+              <TabsContent value="security">
+                <DetailsBoundary
+                  error={currentDetailsError}
+                  loading={detailsLoading}
+                  onRetry={() => void handleReloadDetails()}
+                >
+                  {currentManagedDetails ? (
+                    <SecurityTab
+                      disabled={securityPending}
+                      onDeletePasskey={handleDeletePasskey}
+                      onDisableTotp={handleDisableTotp}
+                      onSsoRequirementChange={handleSsoRequirementChange}
+                      onTwoStepEnabledChange={handleTwoStepEnabledChange}
+                      pendingConfirmation={pendingSecurityConfirmation}
+                      security={currentManagedDetails.security}
+                      setPendingConfirmation={setPendingSecurityConfirmation}
+                    />
+                  ) : null}
+                </DetailsBoundary>
+              </TabsContent>
+              <TabsContent value="devices">
+                <DetailsBoundary
+                  error={currentDetailsError}
+                  loading={detailsLoading}
+                  onRetry={() => void handleReloadDetails()}
+                >
+                  {currentManagedDetails ? (
+                    <DevicesTab
+                      devices={currentManagedDetails.devices}
+                      disabled={devicePending}
+                      onRevokeDevice={handleRevokeDevice}
+                      onRevokeDevices={handleRevokeDevices}
+                    />
+                  ) : null}
+                </DetailsBoundary>
+              </TabsContent>
+              <TabsContent value="sso">
+                <DetailsBoundary
+                  error={currentDetailsError}
+                  loading={detailsLoading}
+                  onRetry={() => void handleReloadDetails()}
+                >
+                  {currentManagedDetails ? (
+                    <SsoTab
+                      disabled={securityPending}
+                      identities={currentManagedDetails.ssoIdentities}
+                      onDeleteIdentity={handleDeleteSsoIdentity}
+                    />
+                  ) : null}
+                </DetailsBoundary>
+              </TabsContent>
+            </Tabs>
+          </AppDialogBody>
           {showSaveFooter ? (
-            <DialogFooter>
-              <DialogClose asChild>
+            <AppDialogFooter>
+              <AppDialogClose asChild>
                 <Button disabled={saving} type="button" variant="outline">
-                  Cancel
+                  {intl.formatMessage({ id: 'common.cancel' })}
                 </Button>
-              </DialogClose>
+              </AppDialogClose>
               {sensitiveChanges ? (
                 <ConfirmActionDialog
-                  confirmLabel="Save changes"
+                  confirmLabel={intl.formatMessage({ id: 'common.save.changes' })}
                   confirmVariant="default"
-                  description="This update changes roles, availability, password, or trusted contact verification state for the selected user."
+                  description={intl.formatMessage({ id: 'users.edit.sensitive.save.description' })}
                   onConfirm={onSave}
-                  title="Save sensitive user changes?"
+                  title={intl.formatMessage({ id: 'users.edit.sensitive.save.title' })}
                 >
                   {saveButton}
                 </ConfirmActionDialog>
               ) : (
                 saveButton
               )}
-            </DialogFooter>
+            </AppDialogFooter>
           ) : null}
-        </DialogContent>
-      </Dialog>
-      {imageConfig ? (
+        </AppDialogContent>
+      </AppDialogRoot>
+      {imageConfig && imageTarget ? (
         <ImageCropDialog
           aspect={imageConfig.aspect}
           cropShape={imageConfig.cropShape}
-          description={imageConfig.description}
+          description={getImageUploadDescription(imageTarget, intl)}
           error={imageUploadError}
-          imageSelectLabel={imageConfig.imageSelectLabel}
+          imageSelectLabel={intl.formatMessage({ id: 'profile.image.select' })}
           imageUrl={imageCropUrl}
           loading={imageUploading}
           maxFileBytes={profileImageMaxBytes}
@@ -641,12 +699,12 @@ export function EditUserDialog({
           onSubmit={handleImageSubmit}
           open={Boolean(imageTarget)}
           output={imageConfig.output}
-          removeLabel={imageConfig.removeLabel}
+          removeLabel={intl.formatMessage({ id: 'common.remove' })}
           removeLoading={imageRemoving}
           showAdjustments={imageConfig.showAdjustments}
           showGrid={imageTarget !== 'avatar'}
-          submitLabel={imageConfig.submitLabel}
-          title={imageConfig.title}
+          submitLabel={intl.formatMessage({ id: 'common.upload' })}
+          title={getImageUploadTitle(imageTarget, intl)}
         />
       ) : null}
     </>
@@ -678,31 +736,35 @@ function AccountTab({
   profileEmailVerificationEnabled: boolean;
   saving: boolean;
 }) {
+  const intl = useIntl();
+
   return (
     <div className="grid gap-5 pt-2">
       <div className="grid gap-4">
         <div className="grid gap-2">
-          <Label htmlFor="editUsername">Username</Label>
+          <Label htmlFor="editUsername">{intl.formatMessage({ id: 'auth.username' })}</Label>
           <Input
             autoComplete="username"
             disabled={saving}
             id="editUsername"
             onChange={(event) => onFormChange((current) => ({ ...current, username: event.target.value }))}
+            placeholder={intl.formatMessage({ id: 'auth.username.placeholder' })}
             value={editingForm.username}
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="editDisplayName">Display name</Label>
+          <Label htmlFor="editDisplayName">{intl.formatMessage({ id: 'profile.display.name' })}</Label>
           <Input
             autoComplete="name"
             disabled={saving}
             id="editDisplayName"
             onChange={(event) => onFormChange((current) => ({ ...current, displayName: event.target.value }))}
+            placeholder={intl.formatMessage({ id: 'profile.display.name.placeholder' })}
             value={editingForm.displayName}
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="editEmail">Email</Label>
+          <Label htmlFor="editEmail">{intl.formatMessage({ id: 'profile.email' })}</Label>
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
             <Input
               autoComplete="email"
@@ -717,27 +779,29 @@ function AccountTab({
                   emailVerified: editingUser && email === editingUser.email ? editingUser.emailVerified : false,
                 }));
               }}
+              placeholder={intl.formatMessage({ id: 'auth.email.placeholder' })}
               type="email"
               value={editingForm.email}
             />
             <ToggleControl
               checked={editingForm.emailVerified}
               disabled={emailVerifiedDisabled}
-              label="Email verified"
+              label={intl.formatMessage({ id: 'users.edit.email.verified.label' })}
               onCheckedChange={(checked) => onFormChange((current) => ({ ...current, emailVerified: checked }))}
               showLabel={false}
-              tooltip={getVerifiedStateTooltip(
-                'Email',
+              tooltip={formatVerifiedStateTooltip(
+                intl,
+                intl.formatMessage({ id: 'profile.email' }),
                 editingForm.emailVerified,
                 profileEmailVerificationEnabled
                   ? undefined
-                  : 'cannot be changed because email verification is not configured.',
+                  : intl.formatMessage({ id: 'users.edit.email.verification.not.configured' }),
               )}
             />
           </div>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="editPhoneLocalNumber">Phone</Label>
+          <Label htmlFor="editPhoneLocalNumber">{intl.formatMessage({ id: 'profile.phone' })}</Label>
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
             <div className="flex gap-2">
               <DropdownMenu>
@@ -769,7 +833,7 @@ function AccountTab({
                         })
                       }
                     >
-                      {formatPhoneCountryCode(countryCode)}
+                      {intl.formatMessage({ id: getPhoneCountryCodeMessageId(countryCode) })}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
@@ -797,48 +861,53 @@ function AccountTab({
                     };
                   });
                 }}
-                placeholder={phoneBindingEnabled ? getPhonePlaceholder(editingForm.phoneCountryCode) : 'Not configured'}
+                placeholder={
+                  phoneBindingEnabled
+                    ? getPhonePlaceholder(editingForm.phoneCountryCode)
+                    : intl.formatMessage({ id: 'common.not.configured' })
+                }
                 value={editingForm.phoneLocalNumber}
               />
             </div>
             <ToggleControl
               checked={editingForm.phoneVerified}
               disabled={phoneDisabled || !editingForm.phoneLocalNumber.trim()}
-              label="Phone verified"
+              label={intl.formatMessage({ id: 'users.edit.phone.verified.label' })}
               onCheckedChange={(checked) => onFormChange((current) => ({ ...current, phoneVerified: checked }))}
               showLabel={false}
-              tooltip={getVerifiedStateTooltip(
-                'Phone',
+              tooltip={formatVerifiedStateTooltip(
+                intl,
+                intl.formatMessage({ id: 'profile.phone' }),
                 editingForm.phoneVerified,
                 !phoneBindingEnabled
-                  ? 'cannot be changed because SMS verification is not configured.'
+                  ? intl.formatMessage({ id: 'users.edit.sms.verification.not.configured' })
                   : editingForm.phoneLocalNumber.trim()
                     ? undefined
-                    : 'requires a phone number before it can be marked verified.',
+                    : intl.formatMessage({ id: 'users.edit.phone.verification.requires.phone' }),
               )}
             />
           </div>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="editPassword">Password</Label>
+          <Label htmlFor="editPassword">{intl.formatMessage({ id: 'auth.password' })}</Label>
           <Input
             autoComplete="new-password"
             disabled={editingDisabled}
             id="editPassword"
             onChange={(event) => onFormChange((current) => ({ ...current, password: event.target.value }))}
-            placeholder="Leave blank to keep current password"
+            placeholder={intl.formatMessage({ id: 'users.edit.password.placeholder' })}
             type="password"
             value={editingForm.password}
           />
         </div>
         <div className="grid gap-2">
-          <Label>Availability</Label>
+          <Label>{intl.formatMessage({ id: 'users.edit.availability' })}</Label>
           <ToggleControl
             checked={editingForm.available}
             disabled={editingDisabled}
-            label={editingForm.available ? 'Available' : 'Disabled'}
+            label={intl.formatMessage({ id: editingForm.available ? 'users.available' : 'users.disabled' })}
             onCheckedChange={(checked) => onFormChange((current) => ({ ...current, available: checked }))}
-            tooltip={editingForm.available ? 'Available' : 'Disabled'}
+            tooltip={intl.formatMessage({ id: editingForm.available ? 'users.available' : 'users.disabled' })}
           />
         </div>
       </div>
@@ -858,11 +927,15 @@ function PermissionsTab({
   editingRoleKeys: string[];
   onRoleToggle: (roleKey: string, enabled: boolean) => void;
 }) {
+  const intl = useIntl();
   const selectedPermissionKeys = resolveSelectedPermissionKeys(availableRoles, editingRoleKeys);
 
   return (
     <div className="grid gap-4 pt-2">
-      <ProfileSection title="Roles" description="Assign role groups for this user.">
+      <ProfileSection
+        title={intl.formatMessage({ id: 'users.roles' })}
+        description={intl.formatMessage({ id: 'users.edit.roles.description' })}
+      >
         <div className="p-4">
           <RoleEditor
             disabled={disabled}
@@ -872,7 +945,10 @@ function PermissionsTab({
           />
         </div>
       </ProfileSection>
-      <ProfileSection title="Permissions" description="Permissions granted by the selected roles.">
+      <ProfileSection
+        title={intl.formatMessage({ id: 'users.permissions' })}
+        description={intl.formatMessage({ id: 'users.edit.permissions.description' })}
+      >
         <div className="p-4">
           {selectedPermissionKeys.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
@@ -883,7 +959,7 @@ function PermissionsTab({
               ))}
             </div>
           ) : (
-            <span className="text-sm text-muted-foreground">No permissions assigned.</span>
+            <span className="text-sm text-muted-foreground">{intl.formatMessage({ id: 'users.no.permissions' })}</span>
           )}
         </div>
       </ProfileSection>
@@ -910,16 +986,20 @@ function ProfileTab({
   onPreviewOpenChange: (target: UserImageTarget, open: boolean) => void;
   user: UserListItem;
 }) {
+  const intl = useIntl();
   const avatarUrl = resolveAssetUrl(user.avatarUrl);
   const profileBannerUrl = resolveAssetUrl(user.profileBannerUrl);
   const profileBackgroundUrl = resolveAssetUrl(user.profileBackgroundUrl);
 
   return (
     <div className="grid gap-4 pt-2">
-      <ProfileSection title="Profile details" description="Public profile information shown with this account.">
+      <ProfileSection
+        title={intl.formatMessage({ id: 'profile.details' })}
+        description={intl.formatMessage({ id: 'profile.details.description' })}
+      >
         <div className="grid gap-4 p-4">
           <div className="grid gap-2">
-            <Label htmlFor="editGender">Gender</Label>
+            <Label htmlFor="editGender">{intl.formatMessage({ id: 'profile.gender' })}</Label>
             <ProfileGenderInput
               disabled={editingDisabled}
               id="editGender"
@@ -928,7 +1008,7 @@ function ProfileTab({
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="editBirthday">Birthday</Label>
+            <Label htmlFor="editBirthday">{intl.formatMessage({ id: 'profile.birthday' })}</Label>
             <BirthdayPicker
               disabled={editingDisabled}
               id="editBirthday"
@@ -938,19 +1018,19 @@ function ProfileTab({
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="editBio">Bio</Label>
+            <Label htmlFor="editBio">{intl.formatMessage({ id: 'profile.bio' })}</Label>
             <Textarea
               disabled={editingDisabled}
               id="editBio"
               maxLength={280}
               onChange={(event) => onFormChange((current) => ({ ...current, bio: event.target.value }))}
-              placeholder="Introduce this user"
+              placeholder={intl.formatMessage({ id: 'users.edit.introduce.user.placeholder' })}
               rows={4}
               value={editingForm.bio}
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="editLocation">Location</Label>
+            <Label htmlFor="editLocation">{intl.formatMessage({ id: 'profile.location' })}</Label>
             <ProfileLocationInput
               disabled={editingDisabled}
               id="editLocation"
@@ -959,32 +1039,35 @@ function ProfileTab({
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="editWebsiteUrl">Homepage</Label>
+            <Label htmlFor="editWebsiteUrl">{intl.formatMessage({ id: 'profile.homepage' })}</Label>
             <Input
               autoComplete="url"
               disabled={editingDisabled}
               id="editWebsiteUrl"
               onChange={(event) => onFormChange((current) => ({ ...current, websiteUrl: event.target.value }))}
-              placeholder="https://example.com"
+              placeholder={intl.formatMessage({ id: 'profile.website.placeholder' })}
               type="url"
               value={editingForm.websiteUrl}
             />
           </div>
         </div>
       </ProfileSection>
-      <ProfileSection title="Profile visuals" description="View and update the user's public profile imagery.">
+      <ProfileSection
+        title={intl.formatMessage({ id: 'users.profile.visuals' })}
+        description={intl.formatMessage({ id: 'users.profile.visuals.description' })}
+      >
         <ProfileItem
           actionDisabled={disabled}
           actionIcon={<ImageUpIcon />}
-          actionLabel="Change"
-          description="Shown on the profile and account menus."
+          actionLabel={intl.formatMessage({ id: 'common.change' })}
+          description={intl.formatMessage({ id: 'users.profile.visuals.avatar.description' })}
           media={
             <ImagePreviewTrigger
-              imageAlt={`${user.displayName} avatar`}
+              imageAlt={intl.formatMessage({ id: 'profile.avatar.alt' }, { name: user.displayName })}
               imageUrl={avatarUrl}
               onOpenChange={(open) => onPreviewOpenChange('avatar', open)}
               open={imagePreviewTarget === 'avatar'}
-              title="Avatar preview"
+              title={intl.formatMessage({ id: 'profile.avatar.preview' })}
             >
               <Avatar className="size-full">
                 <AvatarImage src={avatarUrl} alt={user.displayName} />
@@ -995,23 +1078,23 @@ function ProfileTab({
           mediaClassName="size-10 rounded-full"
           mediaVariant="default"
           onAction={() => onOpenImageDialog('avatar')}
-          status={avatarUrl ? 'Custom' : 'Default'}
+          status={intl.formatMessage({ id: avatarUrl ? 'common.custom' : 'common.default' })}
           statusVariant={avatarUrl ? 'secondary' : 'outline'}
-          title="Avatar"
+          title={intl.formatMessage({ id: 'profile.avatar' })}
         />
         <ItemSeparator className="!my-0" />
         <ProfileItem
           actionDisabled={disabled}
           actionIcon={<ImageUpIcon />}
-          actionLabel="Change"
-          description="Displayed across the top of the user's profile."
+          actionLabel={intl.formatMessage({ id: 'common.change' })}
+          description={intl.formatMessage({ id: 'users.profile.visuals.banner.description' })}
           media={
             <ImagePreviewTrigger
-              imageAlt={`${user.displayName} profile banner`}
+              imageAlt={intl.formatMessage({ id: 'profile.banner.alt' }, { name: user.displayName })}
               imageUrl={profileBannerUrl}
               onOpenChange={(open) => onPreviewOpenChange('profileBanner', open)}
               open={imagePreviewTarget === 'profileBanner'}
-              title="Profile banner preview"
+              title={intl.formatMessage({ id: 'profile.banner.preview' })}
             >
               <ImagePreviewMedia fallbackIcon={<ImageIcon className="size-4" />} imageUrl={profileBannerUrl} />
             </ImagePreviewTrigger>
@@ -1019,23 +1102,23 @@ function ProfileTab({
           mediaClassName="size-10 rounded-full"
           mediaVariant="default"
           onAction={() => onOpenImageDialog('profileBanner')}
-          status={profileBannerUrl ? 'Custom' : 'Default'}
+          status={intl.formatMessage({ id: profileBannerUrl ? 'common.custom' : 'common.default' })}
           statusVariant={profileBannerUrl ? 'secondary' : 'outline'}
-          title="Profile banner"
+          title={intl.formatMessage({ id: 'profile.banner' })}
         />
         <ItemSeparator className="!my-0" />
         <ProfileItem
           actionDisabled={disabled}
           actionIcon={<ImageUpIcon />}
-          actionLabel="Change"
-          description="Used as the app background while the user is signed in."
+          actionLabel={intl.formatMessage({ id: 'common.change' })}
+          description={intl.formatMessage({ id: 'users.profile.visuals.background.description' })}
           media={
             <ImagePreviewTrigger
-              imageAlt={`${user.displayName} profile background`}
+              imageAlt={intl.formatMessage({ id: 'profile.background.alt' }, { name: user.displayName })}
               imageUrl={profileBackgroundUrl}
               onOpenChange={(open) => onPreviewOpenChange('profileBackground', open)}
               open={imagePreviewTarget === 'profileBackground'}
-              title="Profile background preview"
+              title={intl.formatMessage({ id: 'profile.background.preview' })}
             >
               <ImagePreviewMedia fallbackIcon={<WallpaperIcon className="size-4" />} imageUrl={profileBackgroundUrl} />
             </ImagePreviewTrigger>
@@ -1043,9 +1126,9 @@ function ProfileTab({
           mediaClassName="size-10 rounded-full"
           mediaVariant="default"
           onAction={() => onOpenImageDialog('profileBackground')}
-          status={profileBackgroundUrl ? 'Custom' : 'Default'}
+          status={intl.formatMessage({ id: profileBackgroundUrl ? 'common.custom' : 'common.default' })}
           statusVariant={profileBackgroundUrl ? 'secondary' : 'outline'}
-          title="Profile background"
+          title={intl.formatMessage({ id: 'profile.background' })}
         />
       </ProfileSection>
     </div>
@@ -1071,6 +1154,7 @@ function SecurityTab({
   security: ManagedUserSecurity;
   setPendingConfirmation: (confirmation: PendingSecurityConfirmation) => void;
 }) {
+  const intl = useIntl();
   const twoStepSwitchDisabled =
     disabled ||
     (security.mfaSettings.twoStepEnabled
@@ -1080,8 +1164,8 @@ function SecurityTab({
   return (
     <div className="grid gap-4 pt-2">
       <ProfileSection
-        title="Two-step authentication"
-        description="Review strong verifiers and authentication requirements."
+        title={intl.formatMessage({ id: 'security.two.step.authentication' })}
+        description={intl.formatMessage({ id: 'users.edit.two.step.description' })}
       >
         <Item>
           <ItemMedia>
@@ -1089,28 +1173,31 @@ function SecurityTab({
           </ItemMedia>
           <ItemContent>
             <ItemTitle>
-              Authenticator app
+              {intl.formatMessage({ id: 'security.authenticator.app' })}
               <Badge variant={security.totpStatus.enabled ? 'secondary' : 'outline'}>
-                {security.totpStatus.enabled ? 'Enabled' : 'Disabled'}
+                {intl.formatMessage({ id: security.totpStatus.enabled ? 'common.enabled' : 'common.disabled' })}
               </Badge>
             </ItemTitle>
             <ItemDescription>
               {security.totpStatus.enabled
-                ? `${security.totpStatus.recoveryCodesRemaining} recovery codes remain.`
-                : 'No authenticator app is configured.'}
+                ? intl.formatMessage(
+                    { id: 'security.recovery.codes.remaining' },
+                    { count: security.totpStatus.recoveryCodesRemaining },
+                  )
+                : intl.formatMessage({ id: 'users.edit.no.authenticator.configured' })}
             </ItemDescription>
           </ItemContent>
           {security.totpStatus.enabled ? (
             <ItemActions>
               <ConfirmActionDialog
-                confirmLabel="Remove"
-                description="Authenticator app codes and recovery codes will no longer protect this account."
+                confirmLabel={intl.formatMessage({ id: 'common.remove' })}
+                description={intl.formatMessage({ id: 'users.edit.remove.authenticator.description' })}
                 onConfirm={onDisableTotp}
-                title="Remove authenticator app?"
+                title={intl.formatMessage({ id: 'users.edit.remove.authenticator.title' })}
               >
                 <Button disabled={disabled} size="sm" type="button" variant="destructive">
                   <ShieldOffIcon />
-                  Remove
+                  {intl.formatMessage({ id: 'common.remove' })}
                 </Button>
               </ConfirmActionDialog>
             </ItemActions>
@@ -1121,7 +1208,7 @@ function SecurityTab({
         <ItemSeparator className="!my-0" />
         <MfaSwitchItem
           checked={security.mfaSettings.twoStepEnabled}
-          description={getTwoStepStatusDescription(security.mfaSettings)}
+          description={getTwoStepStatusDescription(security.mfaSettings, intl)}
           disabled={twoStepSwitchDisabled}
           icon={<ShieldIcon className="size-4" />}
           onCheckedChange={(checked) => {
@@ -1132,13 +1219,15 @@ function SecurityTab({
 
             onTwoStepEnabledChange(true);
           }}
-          status={security.mfaSettings.twoStepEnabled ? 'Enabled' : 'Off'}
-          title="Two-step verification"
+          status={intl.formatMessage({
+            id: security.mfaSettings.twoStepEnabled ? 'common.enabled' : 'common.disabled',
+          })}
+          title={intl.formatMessage({ id: 'security.two.step.verification' })}
         />
         <ItemSeparator className="!my-0" />
         <MfaSwitchItem
           checked={security.mfaSettings.mfaRequiredForSso}
-          description="Require two-step authentication after SSO provider verification."
+          description={intl.formatMessage({ id: 'security.sso.mfa.description' })}
           disabled={disabled || !security.mfaSettings.twoStepEnabled}
           icon={<LinkIcon className="size-4" />}
           onCheckedChange={(checked) => {
@@ -1149,31 +1238,33 @@ function SecurityTab({
 
             onSsoRequirementChange(true);
           }}
-          status={security.mfaSettings.mfaRequiredForSso ? 'Enabled' : 'Off'}
-          title="Third-party sign-in verification"
+          status={intl.formatMessage({
+            id: security.mfaSettings.mfaRequiredForSso ? 'common.enabled' : 'common.disabled',
+          })}
+          title={intl.formatMessage({ id: 'security.sso.mfa' })}
         />
       </ProfileSection>
       <ConfirmActionDialog
-        confirmLabel="Disable"
-        description="Sensitive sign-ins will no longer require a second factor when password sign-in has already succeeded."
+        confirmLabel={intl.formatMessage({ id: 'common.disable' })}
+        description={intl.formatMessage({ id: 'security.disable.totp.description' })}
         onConfirm={() => {
           setPendingConfirmation(null);
           onTwoStepEnabledChange(false);
         }}
         onOpenChange={(open) => (!open ? setPendingConfirmation(null) : undefined)}
         open={pendingConfirmation === 'disable-two-step'}
-        title="Disable two-step verification?"
+        title={intl.formatMessage({ id: 'security.disable.totp.title' })}
       />
       <ConfirmActionDialog
-        confirmLabel="Disable"
-        description="Third-party sign-ins will be accepted after provider verification without an additional local second factor."
+        confirmLabel={intl.formatMessage({ id: 'common.disable' })}
+        description={intl.formatMessage({ id: 'security.disable.sso.mfa.description' })}
         onConfirm={() => {
           setPendingConfirmation(null);
           onSsoRequirementChange(false);
         }}
         onOpenChange={(open) => (!open ? setPendingConfirmation(null) : undefined)}
         open={pendingConfirmation === 'disable-sso-requirement'}
-        title="Disable SSO two-step requirement?"
+        title={intl.formatMessage({ id: 'security.disable.sso.mfa.title' })}
       />
     </div>
   );
@@ -1188,6 +1279,8 @@ function PasskeyItem({
   onDeletePasskey: (passkeyId: string) => void;
   passkeys: PasskeySummary[];
 }) {
+  const intl = useIntl();
+
   return (
     <Item>
       <ItemMedia>
@@ -1195,10 +1288,12 @@ function PasskeyItem({
       </ItemMedia>
       <ItemContent>
         <ItemTitle>
-          Passkeys
-          <Badge variant={passkeys.length > 0 ? 'secondary' : 'outline'}>{formatPasskeyCount(passkeys.length)}</Badge>
+          {intl.formatMessage({ id: 'security.passkeys' })}
+          <Badge variant={passkeys.length > 0 ? 'secondary' : 'outline'}>
+            {formatPasskeyCount(passkeys.length, intl)}
+          </Badge>
         </ItemTitle>
-        <ItemDescription>Device-bound or synced passkeys configured for verification.</ItemDescription>
+        <ItemDescription>{intl.formatMessage({ id: 'users.edit.passkeys.description' })}</ItemDescription>
       </ItemContent>
       {passkeys.length > 0 ? (
         <ItemFooter className="mt-1 pl-7">
@@ -1206,21 +1301,25 @@ function PasskeyItem({
             {passkeys.map((passkey) => (
               <div className="flex items-center justify-between gap-3 py-1.5" key={passkey.id}>
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{formatPasskeyDisplayName(passkey.name)}</div>
+                  <div className="truncate text-sm font-medium">{formatPasskeyDisplayName(passkey.name, intl)}</div>
                   <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                    <span>{formatPasskeyDeviceType(passkey.deviceType)}</span>
+                    <span>{formatPasskeyDeviceType(passkey.deviceType, intl)}</span>
                     <span aria-hidden="true">·</span>
-                    <span>{passkey.backedUp ? 'Backed up' : 'Single device'}</span>
+                    <span>
+                      {intl.formatMessage({
+                        id: passkey.backedUp ? 'security.passkey.backed.up' : 'security.passkey.single.device',
+                      })}
+                    </span>
                   </div>
                 </div>
                 <ConfirmActionDialog
-                  confirmLabel="Remove"
-                  description="This passkey will no longer be available for account verification or sign-in."
+                  confirmLabel={intl.formatMessage({ id: 'common.remove' })}
+                  description={intl.formatMessage({ id: 'security.passkey.remove.description' })}
                   onConfirm={() => onDeletePasskey(passkey.id)}
-                  title="Remove passkey?"
+                  title={intl.formatMessage({ id: 'security.passkey.remove.title' })}
                 >
                   <Button
-                    aria-label="Remove passkey"
+                    aria-label={intl.formatMessage({ id: 'security.remove.passkey.label' })}
                     disabled={disabled}
                     size="icon"
                     type="button"
@@ -1272,44 +1371,62 @@ function MfaSwitchItem({
   );
 }
 
-function DevicesTab({ devices }: { devices: AuthDeviceSession[] }) {
+function DevicesTab({
+  devices,
+  disabled,
+  onRevokeDevice,
+  onRevokeDevices,
+}: {
+  devices: AuthDeviceSession[];
+  disabled: boolean;
+  onRevokeDevice: (sessionId: string) => void;
+  onRevokeDevices: () => void;
+}) {
+  const intl = useIntl();
+  const revocableDeviceCount = devices.filter((device) => !device.isCurrent).length;
+
   return (
     <div className="grid gap-4 pt-2">
-      <ProfileSection title="Login devices" description="Active browser sessions for this user.">
+      <ProfileSection
+        actions={
+          revocableDeviceCount > 0 ? (
+            <ConfirmActionDialog
+              confirmLabel={intl.formatMessage({ id: 'security.sign.out.all.devices' })}
+              description={intl.formatMessage({ id: 'users.edit.devices.sign.out.all.description' })}
+              onConfirm={onRevokeDevices}
+              title={intl.formatMessage({ id: 'users.edit.devices.sign.out.all.title' })}
+            >
+              <Button disabled={disabled} size="sm" type="button" variant="destructive">
+                <LogOutIcon />
+                {intl.formatMessage({ id: 'security.sign.out.all.devices' })}
+              </Button>
+            </ConfirmActionDialog>
+          ) : undefined
+        }
+        title={intl.formatMessage({ id: 'security.login.devices' })}
+        description={intl.formatMessage({ id: 'security.login.devices.description' })}
+      >
         {devices.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground">No active devices.</div>
+          <div className="p-4 text-sm text-muted-foreground">
+            {intl.formatMessage({ id: 'security.login.devices.none' })}
+          </div>
         ) : (
           devices.map((device, index) => (
             <div key={device.id}>
-              <DeviceItem device={device} />
+              <AuthDeviceItem
+                device={device}
+                disabled={disabled}
+                onRevoke={onRevokeDevice}
+                revokeDescription={intl.formatMessage({ id: 'security.device.revoke.description' })}
+                revokeLabel={intl.formatMessage({ id: 'security.sign.out.device' })}
+                revokeTitle={intl.formatMessage({ id: 'security.device.revoke.title' })}
+              />
               {index < devices.length - 1 ? <ItemSeparator className="!my-0" /> : null}
             </div>
           ))
         )}
       </ProfileSection>
     </div>
-  );
-}
-
-function DeviceItem({ device }: { device: AuthDeviceSession }) {
-  return (
-    <Item>
-      <ItemMedia>
-        <DeviceIcon deviceType={device.deviceType} />
-      </ItemMedia>
-      <ItemContent>
-        <ItemTitle>
-          {device.deviceName}
-          {device.isCurrent ? <Badge variant="secondary">Current</Badge> : null}
-        </ItemTitle>
-        <ItemDescription>
-          {device.browser} · {device.os}
-        </ItemDescription>
-        <ItemDescription>
-          {formatSecurityDate(device.lastActiveAt)} · {device.ipAddress}
-        </ItemDescription>
-      </ItemContent>
-    </Item>
   );
 }
 
@@ -1322,11 +1439,18 @@ function SsoTab({
   identities: SsoIdentityPublic[];
   onDeleteIdentity: (providerId: string) => void;
 }) {
+  const intl = useIntl();
+
   return (
     <div className="grid gap-4 pt-2">
-      <ProfileSection title="SSO bindings" description="External identity providers linked to this account.">
+      <ProfileSection
+        title={intl.formatMessage({ id: 'users.edit.sso.bindings' })}
+        description={intl.formatMessage({ id: 'users.edit.sso.bindings.description' })}
+      >
         {identities.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground">No SSO providers are bound.</div>
+          <div className="p-4 text-sm text-muted-foreground">
+            {intl.formatMessage({ id: 'users.edit.sso.bindings.none' })}
+          </div>
         ) : (
           identities.map((identity, index) => (
             <div key={identity.providerId}>
@@ -1340,13 +1464,13 @@ function SsoTab({
                 </ItemContent>
                 <ItemActions>
                   <ConfirmActionDialog
-                    confirmLabel="Remove"
-                    description="This SSO provider will no longer be available for this user."
+                    confirmLabel={intl.formatMessage({ id: 'common.remove' })}
+                    description={intl.formatMessage({ id: 'users.edit.remove.sso.binding.description' })}
                     onConfirm={() => onDeleteIdentity(identity.providerId)}
-                    title="Remove SSO binding?"
+                    title={intl.formatMessage({ id: 'users.edit.remove.sso.binding.title' })}
                   >
                     <Button
-                      aria-label="Remove SSO binding"
+                      aria-label={intl.formatMessage({ id: 'users.edit.remove.sso.binding.label' })}
                       disabled={disabled}
                       size="icon"
                       type="button"
@@ -1377,11 +1501,13 @@ function DetailsBoundary({
   loading: boolean;
   onRetry: () => void;
 }) {
+  const intl = useIntl();
+
   if (loading) {
     return (
       <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
         <Spinner />
-        Loading user details
+        {intl.formatMessage({ id: 'users.edit.details.loading' })}
       </div>
     );
   }
@@ -1392,7 +1518,7 @@ function DetailsBoundary({
         <div className="grid justify-items-center gap-3">
           <span>{error}</span>
           <Button onClick={onRetry} size="sm" type="button" variant="outline">
-            Retry
+            {intl.formatMessage({ id: 'common.retry' })}
           </Button>
         </div>
       </div>
@@ -1417,23 +1543,6 @@ function resolveSelectedPermissionKeys(roles: RoleSummary[], selectedRoleKeys: s
   return Array.from(permissionKeySet).sort();
 }
 
-function DeviceIcon({ deviceType }: { deviceType: AuthDeviceSession['deviceType'] }) {
-  if (deviceType === 'mobile') {
-    return <SmartphoneIcon className="size-4" />;
-  }
-
-  if (deviceType === 'tablet') {
-    return <TabletIcon className="size-4" />;
-  }
-
-  return (
-    <>
-      <MonitorIcon className="hidden size-4 sm:block" />
-      <LaptopIcon className="size-4 sm:hidden" />
-    </>
-  );
-}
-
 function getUserFallback(displayName: string) {
   return (
     displayName
@@ -1446,24 +1555,77 @@ function getUserFallback(displayName: string) {
   );
 }
 
-function createUserImageObjectUrl(file: File, setError: (message: string | null) => void) {
-  if (file.type && !profileImageMimeTypes.has(file.type)) {
-    setError(profileImageTypeError);
-    return null;
-  }
+function formatVerifiedStateTooltip(intl: IntlShape, label: string, verified: boolean, reason?: string) {
+  const messageId = reason
+    ? 'users.edit.verification.state.tooltip.with.reason'
+    : 'users.edit.verification.state.tooltip';
 
-  setError(null);
-  return URL.createObjectURL(file);
+  return intl.formatMessage(
+    { id: messageId },
+    {
+      label,
+      reason,
+      state: intl.formatMessage({ id: verified ? 'users.edit.verified.state' : 'users.edit.unverified.state' }),
+    },
+  );
 }
 
-function getImageLabel(target: UserImageTarget | null) {
+function getImageLabel(target: UserImageTarget | null, intl: IntlShape) {
   if (target === 'avatar') {
-    return 'Avatar';
+    return intl.formatMessage({ id: 'profile.avatar' });
   }
 
   if (target === 'profileBanner') {
-    return 'Profile banner';
+    return intl.formatMessage({ id: 'profile.banner' });
   }
 
-  return 'Profile background';
+  return intl.formatMessage({ id: 'profile.background' });
+}
+
+function getImageUploadTitle(target: UserImageTarget, intl: IntlShape) {
+  if (target === 'avatar') {
+    return intl.formatMessage({ id: 'profile.image.upload.avatar' });
+  }
+
+  if (target === 'profileBanner') {
+    return intl.formatMessage({ id: 'profile.image.upload.banner' });
+  }
+
+  return intl.formatMessage({ id: 'profile.image.upload.background' });
+}
+
+function getImageUploadDescription(target: UserImageTarget, intl: IntlShape) {
+  if (target === 'avatar') {
+    return intl.formatMessage({ id: 'users.profile.visuals.avatar.upload.description' });
+  }
+
+  if (target === 'profileBanner') {
+    return intl.formatMessage({ id: 'users.profile.visuals.banner.upload.description' });
+  }
+
+  return intl.formatMessage({ id: 'users.profile.visuals.background.upload.description' });
+}
+
+function getImageUpdatedMessageId(target: UserImageTarget | null) {
+  if (target === 'avatar') {
+    return 'profile.avatar.updated';
+  }
+
+  if (target === 'profileBanner') {
+    return 'profile.banner.updated';
+  }
+
+  return 'profile.background.updated';
+}
+
+function getImageRemovedMessageId(target: UserImageTarget | null) {
+  if (target === 'avatar') {
+    return 'profile.avatar.removed';
+  }
+
+  if (target === 'profileBanner') {
+    return 'profile.banner.removed';
+  }
+
+  return 'profile.background.removed';
 }

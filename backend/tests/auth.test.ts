@@ -23,6 +23,92 @@ import { UserService } from '../src/modules/users/user.service';
 import { createTestContext, getTestRoute, getTestRouteHandler, runMiddleware, runMiddlewares } from './support/http';
 import { createTotpCode } from './support/totp';
 
+interface AuthSessionBody {
+  data: {
+    accessTokenExpiresAt: string;
+    refreshTokenExpiresAt: string;
+    user: {
+      username: string;
+      displayName: string;
+      gender?: string;
+      birthday?: string;
+      bio?: string;
+      location?: string;
+      websiteUrl?: string;
+      email: string;
+      emailVerified: boolean;
+      phoneNumber?: string;
+      phoneVerified: boolean;
+    };
+  };
+}
+
+interface VerificationRequiredBody {
+  data: {
+    defaultMethod: string;
+    expiresAt: string;
+    methods: Array<{
+      method: string;
+      maskedTarget?: string;
+    }>;
+    purpose: string;
+    remainingAttempts: number;
+    requiresVerification: true;
+    verificationToken: string;
+  };
+}
+
+interface VerificationCodeSendBody {
+  data: {
+    cooldownSeconds: number;
+    expiresInSeconds: number;
+    maskedTarget?: string;
+  };
+}
+
+interface AuthDeviceSessionsBody {
+  data: {
+    sessions: Array<{
+      id: string;
+      deviceName: string;
+      deviceType: string;
+      browser: string;
+      os: string;
+      ipAddress: string;
+      lastActiveAt: string;
+      createdAt: string;
+      expiresAt: string;
+      isCurrent: boolean;
+    }>;
+  };
+}
+
+interface AuthUserBody {
+  data: {
+    username: string;
+    displayName: string;
+    gender?: string;
+    birthday?: string;
+    bio?: string;
+    location?: string;
+    websiteUrl?: string;
+    email: string;
+    emailVerified: boolean;
+    phoneNumber?: string;
+    phoneVerified: boolean;
+    avatarUrl?: string;
+    profileBannerUrl?: string;
+    profileBackgroundUrl?: string;
+  };
+}
+
+interface CreateAuthServiceOptions {
+  cacheStore?: MemoryCacheStore;
+  emailVerification?: EmailVerificationService;
+  fileStorage?: FileStorage;
+  smsVerification?: SmsVerificationService;
+}
+
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
 
 describe('auth API', () => {
@@ -1647,6 +1733,42 @@ describe('auth API', () => {
     expect(getAuthCookie(verifyContext, 'tilty_scaffold_refresh_token')).toEqual(expect.any(String));
   });
 
+  it('omits presentation labels from verification method descriptors', async () => {
+    await services.auth.register({
+      username: 'totp_locale_user',
+      displayName: 'TOTP Locale User',
+      email: 'totp-locale@example.com',
+      password: 'password123',
+      confirmPassword: 'password123',
+    });
+    const user = await models.user.findOne({
+      where: {
+        email: 'totp-locale@example.com',
+      },
+    });
+
+    expect(user).toBeTruthy();
+
+    const setup = await services.totp.createSetup(user!);
+    await services.totp.enable(user!, setup.setupToken, createTotpCode(setup.secret));
+
+    const loginContext = await runMiddleware(
+      getTestRouteHandler(routes, 'post', '/login'),
+      createTestContext({
+        identifier: 'totp-locale@example.com',
+        password: 'password123',
+      }),
+    );
+    const loginBody = loginContext.body as VerificationRequiredBody;
+
+    expect(loginBody.data.methods).toMatchObject([
+      {
+        method: 'totp',
+      },
+    ]);
+    expect(loginBody.data.methods[0]).not.toHaveProperty('label');
+  });
+
   it('keeps the authenticator setup token valid after an invalid setup code', async () => {
     await services.auth.register({
       username: 'totp_retry_user',
@@ -2428,93 +2550,6 @@ describe('auth API', () => {
   });
 });
 
-interface AuthSessionBody {
-  data: {
-    accessTokenExpiresAt: string;
-    refreshTokenExpiresAt: string;
-    user: {
-      username: string;
-      displayName: string;
-      gender?: string;
-      birthday?: string;
-      bio?: string;
-      location?: string;
-      websiteUrl?: string;
-      email: string;
-      emailVerified: boolean;
-      phoneNumber?: string;
-      phoneVerified: boolean;
-    };
-  };
-}
-
-interface VerificationRequiredBody {
-  data: {
-    defaultMethod: string;
-    expiresAt: string;
-    methods: Array<{
-      label: string;
-      method: string;
-      maskedTarget?: string;
-    }>;
-    purpose: string;
-    remainingAttempts: number;
-    requiresVerification: true;
-    verificationToken: string;
-  };
-}
-
-interface VerificationCodeSendBody {
-  data: {
-    cooldownSeconds: number;
-    expiresInSeconds: number;
-    maskedTarget?: string;
-  };
-}
-
-interface AuthDeviceSessionsBody {
-  data: {
-    sessions: Array<{
-      id: string;
-      deviceName: string;
-      deviceType: string;
-      browser: string;
-      os: string;
-      ipAddress: string;
-      lastActiveAt: string;
-      createdAt: string;
-      expiresAt: string;
-      isCurrent: boolean;
-    }>;
-  };
-}
-
-function getAuthCookie(context: Awaited<ReturnType<typeof runMiddleware>>, name: string) {
-  const rawCookie = context.responseHeaders[`set-cookie:${name}`];
-  const parsed = rawCookie ? (JSON.parse(rawCookie) as { value?: unknown }) : undefined;
-
-  return typeof parsed?.value === 'string' ? parsed.value : '';
-}
-
-interface AuthUserBody {
-  data: {
-    username: string;
-    displayName: string;
-    gender?: string;
-    birthday?: string;
-    bio?: string;
-    location?: string;
-    websiteUrl?: string;
-    email: string;
-    emailVerified: boolean;
-    phoneNumber?: string;
-    phoneVerified: boolean;
-    avatarUrl?: string;
-    profileBannerUrl?: string;
-    profileBackgroundUrl?: string;
-  };
-}
-
 class CapturingFileStorage implements FileStorage {
   deletedKeys: string[] = [];
   saved?: SaveFileInput;
@@ -2543,9 +2578,9 @@ class RejectingCompareAndSetCacheStore extends MemoryCacheStore {
   }
 }
 
-interface CreateAuthServiceOptions {
-  cacheStore?: MemoryCacheStore;
-  emailVerification?: EmailVerificationService;
-  fileStorage?: FileStorage;
-  smsVerification?: SmsVerificationService;
+function getAuthCookie(context: Awaited<ReturnType<typeof runMiddleware>>, name: string) {
+  const rawCookie = context.responseHeaders[`set-cookie:${name}`];
+  const parsed = rawCookie ? (JSON.parse(rawCookie) as { value?: unknown }) : undefined;
+
+  return typeof parsed?.value === 'string' ? parsed.value : '';
 }

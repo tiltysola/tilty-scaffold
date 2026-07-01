@@ -31,7 +31,7 @@ export function staticFilesMiddleware(config: StaticFilesConfig): Middleware {
     const filePath = resolve(root, relativePath);
 
     if (!isPathInside(root, filePath)) {
-      throw new AppError('FILE_NOT_FOUND', 'The file was not found.', 404);
+      throw new AppError('FILE_NOT_FOUND', 'error.FILE_NOT_FOUND', 404);
     }
 
     let fileStat;
@@ -39,11 +39,11 @@ export function staticFilesMiddleware(config: StaticFilesConfig): Middleware {
     try {
       fileStat = await stat(filePath);
     } catch {
-      throw new AppError('FILE_NOT_FOUND', 'The file was not found.', 404);
+      throw new AppError('FILE_NOT_FOUND', 'error.FILE_NOT_FOUND', 404);
     }
 
     if (!fileStat.isFile()) {
-      throw new AppError('FILE_NOT_FOUND', 'The file was not found.', 404);
+      throw new AppError('FILE_NOT_FOUND', 'error.FILE_NOT_FOUND', 404);
     }
 
     ctx.set('Cache-Control', 'public, max-age=31536000, immutable');
@@ -59,7 +59,7 @@ function decodePathSegment(value: string) {
   try {
     return decodeURIComponent(value);
   } catch {
-    throw new AppError('FILE_PATH_INVALID', 'The file path is invalid.', 400);
+    throw new AppError('FILE_PATH_INVALID', 'error.FILE_PATH_INVALID', 400);
   }
 }
 

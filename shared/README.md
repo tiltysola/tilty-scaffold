@@ -18,12 +18,15 @@ Run commands from `shared/`.
 
 ## Exports
 
-| Export                         | Purpose                            |
-| ------------------------------ | ---------------------------------- |
-| `@tilty/shared`                | Package entry point                |
-| `@tilty/shared/access-control` | Built-in permission and role keys  |
-| `@tilty/shared/paths`          | Safe redirect and path helpers     |
-| `@tilty/shared/validation`     | Runtime-neutral validation helpers |
+| Export                         | Purpose                             |
+| ------------------------------ | ----------------------------------- |
+| `@tilty/shared`                | Package entry point                 |
+| `@tilty/shared/access-control` | Built-in permission and role keys   |
+| `@tilty/shared/auth`           | Auth value contracts                |
+| `@tilty/shared/i18n`           | Locale keys and negotiation helpers |
+| `@tilty/shared/paths`          | Safe redirect and path helpers      |
+| `@tilty/shared/setup`          | Setup option value contracts        |
+| `@tilty/shared/validation`     | Runtime-neutral validation helpers  |
 
 Package exports include a `development` condition that points to `src/` for
 development tooling. Standard import and require conditions use built `dist/`

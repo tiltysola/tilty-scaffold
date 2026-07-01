@@ -1,9 +1,10 @@
-﻿import { randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { open, unlink } from 'fs/promises';
 import { z } from 'zod';
 
 import { SystemRole } from '@tilty/shared/access-control';
-import { hasMatchingPasswordConfirmation } from '@tilty/shared/validation';
+import { SetupEmailVerificationService, SetupLogTarget, SetupSmsVerificationService } from '@tilty/shared/setup';
+import { createPasswordFormSchema, displayNameSchema, emailSchema, usernameSchema } from '@tilty/shared/validation';
 
 import { getConfigFilePath, isSetupLocked, loadEnv } from '../../config/env';
 import {
@@ -17,10 +18,10 @@ import {
   assertValidSsoEnvironment,
   getSetupEnvironmentDefaults,
   parseLogTargets,
+  type SetupEnvironment,
   setupEnvironmentInputSchema,
   setupEnvironmentValidationInputSchema,
   setupEnvSchema,
-  setupLockedMessage,
   toCacheConfig,
   toDatabaseConfig,
   toFileStorageConfig,
@@ -44,35 +45,18 @@ type SetupCompletionLock = {
   fileHandle: Awaited<ReturnType<typeof open>>;
   lockFilePath: string;
 };
-const administratorSchema = z
-  .object({
-    username: z
-      .string()
-      .trim()
-      .min(3)
-      .max(32)
-      .regex(/^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$/)
-      .transform((username) => username.toLowerCase()),
-    displayName: z.string().trim().min(2).max(64),
-    email: z
-      .string()
-      .trim()
-      .max(255)
-      .pipe(z.email())
-      .transform((email) => email.toLowerCase()),
-    password: z.string().min(8).max(128),
-    confirmPassword: z.string().min(8).max(128),
-  })
-  .refine(hasMatchingPasswordConfirmation, {
-    message: 'Password confirmation does not match.',
-    path: ['confirmPassword'],
-  });
+type SetupCompleteInput = z.infer<typeof setupCompleteSchema>;
+
+const administratorSchema = createPasswordFormSchema({
+  username: usernameSchema,
+  displayName: displayNameSchema,
+  email: emailSchema,
+});
 
 const setupCompleteSchema = z.object({
   administrator: administratorSchema.optional(),
   environment: setupEnvSchema,
 });
-type SetupCompleteInput = z.infer<typeof setupCompleteSchema>;
 let setupCompletionInProgress = false;
 
 export class SetupService {
@@ -129,7 +113,9 @@ export class SetupService {
         hasExistingUsers,
       } as const;
     } catch (error) {
-      throw new AppError('SETUP_DATABASE_CONNECTION_FAILED', getConnectionErrorMessage(error), 400);
+      throw new AppError('SETUP_DATABASE_CONNECTION_FAILED', 'error.SETUP_DATABASE_CONNECTION_FAILED', 400, {
+        reason: getConnectionErrorMessage(error),
+      });
     } finally {
       await sequelize.close();
     }
@@ -150,7 +136,9 @@ export class SetupService {
         store: cacheConfig.store,
       } as const;
     } catch (error) {
-      throw new AppError('SETUP_CACHE_CONNECTION_FAILED', getConnectionErrorMessage(error), 400);
+      throw new AppError('SETUP_CACHE_CONNECTION_FAILED', 'error.SETUP_CACHE_CONNECTION_FAILED', 400, {
+        reason: getConnectionErrorMessage(error),
+      });
     } finally {
       await cache.close();
     }
@@ -177,7 +165,9 @@ export class SetupService {
         driver: config.driver,
       } as const;
     } catch (error) {
-      throw new AppError('SETUP_FILE_STORAGE_CONNECTION_FAILED', getConnectionErrorMessage(error), 400);
+      throw new AppError('SETUP_FILE_STORAGE_CONNECTION_FAILED', 'error.SETUP_FILE_STORAGE_CONNECTION_FAILED', 400, {
+        reason: getConnectionErrorMessage(error),
+      });
     }
   }
 
@@ -188,10 +178,10 @@ export class SetupService {
     const envSource = assertValidLoggingEnvironment(environment);
     const logTargets = parseLogTargets(environment.LOG_TARGETS);
 
-    if (!logTargets.includes('sls')) {
+    if (!logTargets.includes(SetupLogTarget.Sls)) {
       return {
         connected: true,
-        target: logTargets.includes('local') ? 'local' : 'console',
+        target: logTargets.includes(SetupLogTarget.Local) ? SetupLogTarget.Local : SetupLogTarget.Console,
       } as const;
     }
 
@@ -238,73 +228,71 @@ export class SetupService {
 
       return {
         connected: true,
-        target: 'sls',
+        target: SetupLogTarget.Sls,
       } as const;
     } catch (error) {
-      throw new AppError('SETUP_SLS_CONNECTION_FAILED', getConnectionErrorMessage(error), 400);
+      throw new AppError('SETUP_SLS_CONNECTION_FAILED', 'error.SETUP_SLS_CONNECTION_FAILED', 400, {
+        reason: getConnectionErrorMessage(error),
+      });
     }
   }
 
   async testEmail(input: unknown) {
     this.assertSetupAvailable();
 
-    const { environment } = setupEnvironmentInputSchema.parse(input);
-    const environmentConfig = loadEnv(assertValidEmailEnvironment(environment));
+    const { environment, environmentConfig } = loadValidatedSetupEnvironment(input, assertValidEmailEnvironment);
 
-    if (environment.EMAIL_VERIFICATION_SERVICE.trim() !== 'smtp') {
+    if (environment.EMAIL_VERIFICATION_SERVICE.trim() !== SetupEmailVerificationService.Smtp) {
       return {
         connected: true,
-        service: 'off',
+        service: SetupEmailVerificationService.Off,
       } as const;
     }
 
-    try {
+    return runSetupConnectionTest('SETUP_SMTP_CONNECTION_FAILED', 'error.SETUP_SMTP_CONNECTION_FAILED', async () => {
       await Promise.all(environmentConfig.email!.smtpProfiles.map((profile) => new SmtpEmailSender(profile).check()));
 
       return {
         connected: true,
-        service: 'smtp',
+        service: SetupEmailVerificationService.Smtp,
       } as const;
-    } catch (error) {
-      throw new AppError('SETUP_SMTP_CONNECTION_FAILED', getConnectionErrorMessage(error), 400);
-    }
+    });
   }
 
   async testSms(input: unknown) {
     this.assertSetupAvailable();
 
-    const { environment } = setupEnvironmentInputSchema.parse(input);
-    const environmentConfig = loadEnv(assertValidSmsEnvironment(environment));
+    const { environmentConfig } = loadValidatedSetupEnvironment(input, assertValidSmsEnvironment);
 
     if (!environmentConfig.sms) {
       return {
         connected: true,
-        service: 'off',
+        service: SetupSmsVerificationService.Off,
       } as const;
     }
 
-    try {
-      await checkAliyunSmsProfiles(environmentConfig.sms.aliyunProfiles);
+    const smsConfig = environmentConfig.sms;
 
-      return {
-        connected: true,
-        service: 'aliyun',
-        profileCountryCodes: environmentConfig.sms.aliyunProfiles.map((profile) => profile.phoneCountryCode),
-      } as const;
-    } catch (error) {
-      if (error instanceof AppError) {
-        throw error;
-      }
+    return runSetupConnectionTest(
+      'SETUP_SMS_CONNECTION_FAILED',
+      'error.SETUP_SMS_CONNECTION_FAILED',
+      async () => {
+        await checkAliyunSmsProfiles(smsConfig.aliyunProfiles);
 
-      throw new AppError('SETUP_SMS_CONNECTION_FAILED', getConnectionErrorMessage(error), 400);
-    }
+        return {
+          connected: true,
+          service: SetupSmsVerificationService.Aliyun,
+          profileCountryCodes: smsConfig.aliyunProfiles.map((profile) => profile.phoneCountryCode),
+        } as const;
+      },
+      { preserveAppError: true },
+    );
   }
 
   async testSso(input: unknown) {
     this.assertSetupAvailable();
 
-    const { environment } = setupEnvironmentInputSchema.parse(input);
-    const environmentConfig = loadEnv(assertValidSsoEnvironment(environment));
+    const { environmentConfig } = loadValidatedSetupEnvironment(input, assertValidSsoEnvironment);
 
     if (!environmentConfig.sso) {
       return {
@@ -313,24 +301,24 @@ export class SetupService {
       } as const;
     }
 
-    try {
-      const result = await testSsoDiscovery(environmentConfig.sso);
+    const ssoConfig = environmentConfig.sso;
+
+    return runSetupConnectionTest('SETUP_SSO_CONNECTION_FAILED', 'error.SETUP_SSO_CONNECTION_FAILED', async () => {
+      const result = await testSsoDiscovery(ssoConfig);
 
       return {
         connected: true,
         enabled: true,
         providerIds: result.providerIds,
       } as const;
-    } catch (error) {
-      throw new AppError('SETUP_SSO_CONNECTION_FAILED', getConnectionErrorMessage(error), 400);
-    }
+    });
   }
 
   async complete(input: unknown) {
     this.assertSetupAvailable();
 
     if (setupCompletionInProgress) {
-      throw new AppError('SETUP_IN_PROGRESS', 'Setup is already running.', 409);
+      throw new AppError('SETUP_IN_PROGRESS', 'error.SETUP_IN_PROGRESS', 409);
     }
 
     setupCompletionInProgress = true;
@@ -362,8 +350,39 @@ export class SetupService {
 
   private assertSetupAvailable() {
     if (this.mode === 'locked' || isSetupLocked()) {
-      throw new AppError('SETUP_LOCKED', setupLockedMessage, 403);
+      throw new AppError('SETUP_LOCKED', 'error.SETUP_LOCKED', 403);
     }
+  }
+}
+
+function loadValidatedSetupEnvironment(
+  input: unknown,
+  validateEnvironment: (environment: SetupEnvironment) => NodeJS.ProcessEnv,
+) {
+  const { environment } = setupEnvironmentInputSchema.parse(input);
+
+  return {
+    environment,
+    environmentConfig: loadEnv(validateEnvironment(environment)),
+  };
+}
+
+async function runSetupConnectionTest<T>(
+  errorCode: string,
+  errorMessageId: string,
+  check: () => Promise<T>,
+  options: { preserveAppError?: boolean } = {},
+) {
+  try {
+    return await check();
+  } catch (error) {
+    if (options.preserveAppError && error instanceof AppError) {
+      throw error;
+    }
+
+    throw new AppError(errorCode, errorMessageId, 400, {
+      reason: getConnectionErrorMessage(error),
+    });
   }
 }
 
@@ -470,7 +489,7 @@ async function acquireSetupCompletionLock(): Promise<SetupCompletionLock> {
     }
 
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new AppError('SETUP_IN_PROGRESS', 'Setup is already running.', 409);
+      throw new AppError('SETUP_IN_PROGRESS', 'error.SETUP_IN_PROGRESS', 409);
     }
 
     throw error;

@@ -30,7 +30,7 @@ export function getAuthToken(ctx: Parameters<Middleware>[0], config: AuthCookieC
   const cookieToken = ctx.cookies.get(config.accessTokenName);
 
   if (!cookieToken) {
-    throw new AppError('AUTH_REQUIRED', 'Authentication is required.', 401);
+    throw new AppError('AUTH_REQUIRED', 'error.AUTH_REQUIRED', 401);
   }
 
   return cookieToken;

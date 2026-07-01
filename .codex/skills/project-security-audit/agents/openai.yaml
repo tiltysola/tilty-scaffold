@@ -1,4 +1,0 @@
-interface:
-  display_name: 'Project Security Audit'
-  short_description: 'Full P0-P3 security and risk audit'
-  default_prompt: 'Use $project-security-audit to perform a full project security and risk audit.'

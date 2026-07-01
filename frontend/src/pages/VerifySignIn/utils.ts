@@ -1,8 +1,15 @@
 import { type VerificationMethod, type VerificationMethodName } from '@/lib/auth';
 import { routePath } from '@/router';
+import { AuthMfaMethod, authVerificationMethodValues } from '@tilty/shared/auth';
 import { isSafeRelativePath } from '@tilty/shared/paths';
 
-const fallbackMethods: VerificationMethodName[] = ['totp', 'passkey', 'sms', 'email'];
+const fallbackMethods: VerificationMethodName[] = [
+  AuthMfaMethod.Totp,
+  AuthMfaMethod.Passkey,
+  AuthMfaMethod.Sms,
+  AuthMfaMethod.Email,
+];
+const verificationMethodSet = new Set<string>(authVerificationMethodValues);
 
 export function getMethodOptions(methodsValue: string | null, detailsValue: string | null): VerificationMethod[] {
   const details = parseMethodDetails(detailsValue);
@@ -13,7 +20,10 @@ export function getMethodOptions(methodsValue: string | null, detailsValue: stri
       ? details.map((item) => item.method)
       : fallbackMethods;
 
-  return methods.map((method) => detailMap.get(method) ?? { method, label: getMethodLabel(method) });
+  return methods.map((method) => ({
+    ...detailMap.get(method),
+    method,
+  }));
 }
 
 export function getInitialMethod(value: string | null, methods: VerificationMethodName[]) {
@@ -54,7 +64,6 @@ function parseMethodDetails(value: string | null): VerificationMethod[] {
       return [
         {
           method: item.method,
-          label: item.label,
           ...(typeof item.maskedTarget === 'string' ? { maskedTarget: item.maskedTarget } : {}),
         },
       ];
@@ -65,27 +74,7 @@ function parseMethodDetails(value: string | null): VerificationMethod[] {
 }
 
 function isVerificationMethod(value: string): value is VerificationMethodName {
-  return value === 'email' || value === 'passkey' || value === 'password' || value === 'sms' || value === 'totp';
-}
-
-function getMethodLabel(method: VerificationMethodName) {
-  if (method === 'password') {
-    return 'Password';
-  }
-
-  if (method === 'passkey') {
-    return 'Passkey';
-  }
-
-  if (method === 'totp') {
-    return 'Authenticator app';
-  }
-
-  if (method === 'sms') {
-    return 'SMS';
-  }
-
-  return 'Email';
+  return verificationMethodSet.has(value);
 }
 
 function isMethodDetail(value: unknown): value is VerificationMethod {
@@ -95,9 +84,5 @@ function isMethodDetail(value: unknown): value is VerificationMethod {
 
   const candidate = value as Partial<VerificationMethod>;
 
-  return (
-    typeof candidate.method === 'string' &&
-    isVerificationMethod(candidate.method) &&
-    typeof candidate.label === 'string'
-  );
+  return typeof candidate.method === 'string' && isVerificationMethod(candidate.method);
 }

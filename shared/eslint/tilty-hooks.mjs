@@ -48,6 +48,11 @@ export const reactHookGroups = [
     ],
   },
   {
+    name: 'i18n',
+    hooks: ['useAppI18n', 'useIntl'],
+    patterns: ['^use.*(?:I18n|Intl|Locale|Messages|Translation)$'],
+  },
+  {
     fallback: true,
     name: 'setup',
   },

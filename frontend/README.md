@@ -27,6 +27,17 @@ Run commands from `frontend/`.
 The frontend uses relative API paths. During development, Vite proxies `/api`
 and `/uploads` to `http://localhost:3000`.
 
+## Internationalization
+
+React Intl provides runtime localization. Supported locale catalogs live under
+`src/i18n/messages/`; each catalog must keep the same message keys as
+`en-US.ts`. The application stores the selected locale in localStorage, updates
+`html lang` and `dir`, and sends `X-Tilty-Locale` with API requests.
+
+When adding user-facing text, use message ids instead of inline literals.
+Technical contracts such as API paths, environment variable names, permission
+keys, role keys, cookie names, and storage keys must remain untranslated.
+
 ## Backend Integration
 
 Setup routing is controlled by the backend. While setup is required, browser
@@ -89,7 +100,8 @@ has `USER_LIST` or `ROOT`, has a passkey or authenticator app configured, and
 has completed a `user_management` step-up challenge. Users with `USER_ADMIN` or
 `ROOT` can update managed user profile fields, password, account status, and
 role assignments through `/api/users/:id` after the same `user_management`
-verification.
+verification. The user edit dialog lists managed login devices and can revoke
+one device session or all revocable device sessions through `/api/users/:id/devices`.
 
 The system settings page calls `/api/system-settings/` and is available only
 when the current user has `ROOT`. Before loading settings, the page creates a

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { localeRequestHeader } from '@tilty/shared/i18n';
+
 import { ApiError, apiRequest, getApiErrorMessage } from '../src/lib/api';
 import { createStorageBlockedTestWindow, createTestWindow } from './support/auth';
 
@@ -39,6 +41,33 @@ describe('apiRequest', () => {
     expect(init?.signal).toBeInstanceOf(AbortSignal);
     expect(headers.get('Content-Type')).toBe('application/json');
     expect(headers.get('X-Device-Id')).toMatch(/^[A-Za-z0-9._:-]{1,128}$/);
+    expect(headers.get(localeRequestHeader)).toBe('en-US');
+  });
+
+  it('preserves an explicit locale request header', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 200,
+          error: null,
+          data: { ok: true },
+        }),
+        { status: 200 },
+      );
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiRequest<{ ok: boolean }>('/api/health', {
+      headers: {
+        [localeRequestHeader]: 'zh-CN',
+      },
+    });
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const headers = init?.headers as Headers;
+
+    expect(headers.get(localeRequestHeader)).toBe('zh-CN');
   });
 
   it('sends FormData requests without JSON content headers', async () => {
@@ -215,8 +244,10 @@ describe('apiRequest', () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
-  it('returns normalized API error messages', () => {
+  it('returns API error messages', () => {
     expect(getApiErrorMessage(new ApiError(400, 'FIELD_VALIDATE_ERROR', 'Invalid.'), 'Fallback.')).toBe('Invalid.');
+    expect(getApiErrorMessage(new ApiError(400, 'UNKNOWN_ERROR', 'Unknown.'), 'Fallback.')).toBe('Unknown.');
+    expect(getApiErrorMessage(new ApiError(400, 'EMPTY_ERROR', ''), 'Fallback.')).toBe('Fallback.');
     expect(getApiErrorMessage(new Error('plain'), 'Fallback.')).toBe('Fallback.');
   });
 });

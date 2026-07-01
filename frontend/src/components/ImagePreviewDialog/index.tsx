@@ -9,6 +9,7 @@ import {
   type WheelEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { useIntl } from 'react-intl';
 
 import { EyeIcon, XIcon } from 'lucide-react';
 
@@ -210,6 +211,8 @@ function ImagePreviewOverlay({
   scale: number;
   title: string;
 }) {
+  const intl = useIntl();
+
   if (typeof document === 'undefined') {
     return null;
   }
@@ -239,7 +242,7 @@ function ImagePreviewOverlay({
       }}
     >
       <Button
-        aria-label="Close image preview"
+        aria-label={intl.formatMessage({ id: 'common.close.image.preview' })}
         className={`absolute right-5 top-5 rounded-full bg-black/25 text-white opacity-0 transition-opacity duration-200 hover:bg-black/45 hover:text-white ${
           active ? 'opacity-100' : ''
         }`}

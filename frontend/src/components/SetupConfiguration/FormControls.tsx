@@ -1,4 +1,5 @@
 import { type ComponentPropsWithoutRef, useState } from 'react';
+import { useIntl } from 'react-intl';
 
 import { EyeIcon, EyeOffIcon } from 'lucide-react';
 
@@ -14,6 +15,12 @@ import {
   SelectValue,
 } from '@/shadcn/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shadcn/components/ui/tooltip';
+
+export interface SelectControlOption {
+  disabled?: boolean;
+  label: string;
+  value: string;
+}
 
 export function ConfigurationTextInput({
   disabled,
@@ -52,7 +59,10 @@ export function ConfigurationTextInput({
 
 export function PasswordInput({ className, disabled, ...props }: ComponentPropsWithoutRef<typeof Input>) {
   const [passwordVisible, setPasswordVisible] = useState(false);
-  const toggleLabel = passwordVisible ? 'Hide password' : 'Show password';
+  const intl = useIntl();
+  const toggleLabel = intl.formatMessage({
+    id: passwordVisible ? 'common.hide.password' : 'common.show.password',
+  });
   const ToggleIcon = passwordVisible ? EyeOffIcon : EyeIcon;
 
   return (
@@ -68,7 +78,7 @@ export function PasswordInput({ className, disabled, ...props }: ComponentPropsW
           <Button
             aria-label={toggleLabel}
             aria-pressed={passwordVisible}
-            className="absolute top-1/2 right-0.5 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            className="absolute top-1/2 right-0.5 -translate-y-1/2 text-muted-foreground hover:text-foreground active:not-aria-[haspopup]:-translate-y-1/2"
             disabled={disabled}
             onClick={() => setPasswordVisible((current) => !current)}
             size="icon-xs"
@@ -82,12 +92,6 @@ export function PasswordInput({ className, disabled, ...props }: ComponentPropsW
       </Tooltip>
     </div>
   );
-}
-
-export interface SelectControlOption {
-  disabled?: boolean;
-  label: string;
-  value: string;
 }
 
 export function SelectControl({

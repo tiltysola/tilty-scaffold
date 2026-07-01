@@ -1,10 +1,12 @@
 import { createHash, createHmac } from 'crypto';
 import { Op } from 'sequelize';
 
+import { AuthSessionDeviceType, type AuthSessionDeviceTypeValue } from '@tilty/shared/auth';
+
 import { AppError } from '../../core/errors';
 import { type AuthSessionModel } from './auth-session.model';
 
-type DeviceType = 'desktop' | 'mobile' | 'tablet';
+type DeviceType = AuthSessionDeviceTypeValue;
 
 export interface AuthSessionRequestContext {
   deviceId?: string | undefined;
@@ -75,7 +77,7 @@ export class AuthSessionService {
     });
 
     if (!session || session.revokedAt || session.expiresAt.getTime() <= Date.now()) {
-      throw new AppError('AUTH_SESSION_INVALID', 'Authentication session is invalid or expired.', 401);
+      throw new AppError('AUTH_SESSION_INVALID', 'error.AUTH_SESSION_INVALID', 401);
     }
   }
 
@@ -89,7 +91,7 @@ export class AuthSessionService {
     });
 
     if (!session || session.expiresAt.getTime() <= Date.now()) {
-      throw new AppError('AUTH_SESSION_INVALID', 'Authentication session is invalid or expired.', 401);
+      throw new AppError('AUTH_SESSION_INVALID', 'error.AUTH_SESSION_INVALID', 401);
     }
 
     const parsedDevice = parseUserAgent(context.userAgent);
@@ -125,9 +127,9 @@ export class AuthSessionService {
     );
   }
 
-  async revokeUserSession(userId: string, sessionId: string, currentSessionId: string) {
-    if (sessionId === currentSessionId) {
-      throw new AppError('AUTH_CURRENT_SESSION_REVOKE_FORBIDDEN', 'Use logout to revoke the current session.', 400);
+  async revokeUserSession(userId: string, sessionId: string, currentSessionId?: string | undefined) {
+    if (currentSessionId && sessionId === currentSessionId) {
+      throw new AppError('AUTH_CURRENT_SESSION_REVOKE_FORBIDDEN', 'error.AUTH_CURRENT_SESSION_REVOKE_FORBIDDEN', 400);
     }
 
     const [updated] = await this.sessionModel.update(
@@ -144,7 +146,7 @@ export class AuthSessionService {
     );
 
     if (updated === 0) {
-      throw new AppError('AUTH_SESSION_NOT_FOUND', 'Authentication session was not found.', 404);
+      throw new AppError('AUTH_SESSION_NOT_FOUND', 'error.AUTH_SESSION_NOT_FOUND', 404);
     }
   }
 
@@ -287,22 +289,22 @@ function parseOs(userAgent: string) {
 
 function parseDeviceType(userAgent: string): DeviceType {
   if (/iPad|Tablet/i.test(userAgent)) {
-    return 'tablet';
+    return AuthSessionDeviceType.Tablet;
   }
 
   if (/Mobile|iPhone|Android/i.test(userAgent)) {
-    return 'mobile';
+    return AuthSessionDeviceType.Mobile;
   }
 
-  return 'desktop';
+  return AuthSessionDeviceType.Desktop;
 }
 
 function normalizeDeviceType(value: string): DeviceType {
-  if (value === 'mobile' || value === 'tablet') {
+  if (value === AuthSessionDeviceType.Mobile || value === AuthSessionDeviceType.Tablet) {
     return value;
   }
 
-  return 'desktop';
+  return AuthSessionDeviceType.Desktop;
 }
 
 export function getUserAgentFingerprint(userAgent: string) {

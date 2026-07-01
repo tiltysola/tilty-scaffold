@@ -18,7 +18,7 @@ export function csrfProtectionMiddleware(options: CsrfProtectionOptions): Middle
     const requestOrigin = getRequestOrigin(ctx.get('origin'), ctx.get('referer'));
 
     if (!requestOrigin || (requestOrigin !== ctx.origin && !options.allowedOrigins.includes(requestOrigin))) {
-      throw new AppError('CSRF_ORIGIN_INVALID', 'Request origin is not allowed.', 403);
+      throw new AppError('CSRF_ORIGIN_INVALID', 'error.CSRF_ORIGIN_INVALID', 403);
     }
 
     await next();

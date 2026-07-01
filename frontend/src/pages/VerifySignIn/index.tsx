@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { useAsyncAction } from '@/hooks/useAsyncAction';
@@ -24,6 +25,7 @@ const Index = () => {
   const [delivery, setDelivery] = useState<VerificationCodeDelivery | null>(null);
   const navigate = useNavigate();
   const [params] = useSearchParams();
+  const intl = useIntl();
   const action = useAsyncAction();
   const sendAction = useAsyncAction();
   const token = params.get('token') ?? '';
@@ -36,7 +38,7 @@ const Index = () => {
     sendAction.clearError();
 
     if (!token) {
-      sendAction.setError('Verification token is missing.');
+      sendAction.setError(intl.formatMessage({ id: 'identity.verification.token.missing' }));
       return null;
     }
 
@@ -46,7 +48,7 @@ const Index = () => {
           method,
           verificationToken: token,
         }),
-      'Verification code could not be sent.',
+      intl.formatMessage({ id: 'identity.verification.code.send.failed' }),
     );
   };
 
@@ -54,7 +56,7 @@ const Index = () => {
     action.clearError();
 
     if (!token) {
-      action.setError('Verification token is missing.');
+      action.setError(intl.formatMessage({ id: 'identity.verification.token.missing' }));
       return;
     }
 
@@ -67,8 +69,8 @@ const Index = () => {
               ...input,
             }),
       input.method === 'passkey'
-        ? 'Passkey verification could not be completed.'
-        : 'Verification could not be completed.',
+        ? intl.formatMessage({ id: 'identity.passkey.verification.failed' })
+        : intl.formatMessage({ id: 'identity.verification.failed' }),
     );
 
     if (result && 'accessTokenExpiresAt' in result) {
@@ -82,7 +84,10 @@ const Index = () => {
         delivery ? (
           <VerificationCodeDeliveryDescription delivery={delivery} />
         ) : (
-          getIdentityVerificationDescription(context ?? { method: defaultMethod, usingRecoveryCode: false })
+          getIdentityVerificationDescription(
+            context ?? { method: defaultMethod, usingRecoveryCode: false },
+            intl.formatMessage,
+          )
         )
       }
       footer={
@@ -90,11 +95,11 @@ const Index = () => {
           className="font-medium text-muted-foreground hover:text-foreground hover:underline"
           to={routePath('login')}
         >
-          Return to login
+          {intl.formatMessage({ id: 'sso.return.to.login' })}
         </Link>
       }
       footerClassName="justify-center text-sm"
-      title="Verify sign-in"
+      title={intl.formatMessage({ id: 'route.verify.sign.in' })}
     >
       <IdentityVerificationForm
         allowRecoveryCode

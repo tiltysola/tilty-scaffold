@@ -1,4 +1,5 @@
 import { type SubmitEventHandler, useCallback, useEffect, useState } from 'react';
+import { useIntl } from 'react-intl';
 
 import { FingerprintIcon, KeyRoundIcon, LogOutIcon } from 'lucide-react';
 import { toast } from 'sonner';
@@ -30,16 +31,7 @@ import {
   verifyAuthenticationChallenge,
   verifyWithPasskey,
 } from '@/lib/auth';
-import { changePasswordSchema } from '@/lib/auth-validation';
 import { Button } from '@/shadcn/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/shadcn/components/ui/dialog';
 import { Input } from '@/shadcn/components/ui/input';
 import {
   Item,
@@ -51,13 +43,15 @@ import {
   ItemTitle,
 } from '@/shadcn/components/ui/item';
 import { Label } from '@/shadcn/components/ui/label';
+import { changePasswordSchema } from '@tilty/shared/validation';
 
+import { AppDialog } from '@/components/AppDialog';
+import { AuthDeviceItem } from '@/components/AuthDeviceItem';
 import { ConfirmActionDialog } from '@/components/ConfirmActionDialog';
 import FormMessage from '@/components/FormMessage';
 import { IdentityVerificationDialog, type IdentityVerificationSubmitInput } from '@/components/IdentityVerification';
 
 import { ChangePasswordDialog, type ChangePasswordFormState } from './components/ChangePasswordDialog';
-import { DeviceItem } from './components/DeviceItem';
 import { RecoveryCodesDialog } from './components/RecoveryCodesDialog';
 import { SecuritySection } from './components/SecuritySection';
 import { TotpSetupDialog } from './components/TotpSetupDialog';
@@ -103,6 +97,7 @@ const Index = () => {
   const [setupCode, setSetupCode] = useState('');
   const [totpStatus, setTotpStatus] = useState<TotpStatus>(defaultTotpStatus);
   const [dialogMode, setDialogMode] = useState<TotpDialogMode>(null);
+  const intl = useIntl();
   const action = useAsyncAction();
   const passwordAction = useAsyncAction();
 
@@ -128,7 +123,7 @@ const Index = () => {
       })
       .catch((error: unknown) => {
         if (isActive) {
-          toast.error(getApiErrorMessage(error, 'Security settings could not be loaded.'));
+          toast.error(getApiErrorMessage(error, intl.formatMessage({ id: 'security.settings.load.failed' })));
         }
       })
       .finally(() => {
@@ -140,7 +135,7 @@ const Index = () => {
     return () => {
       isActive = false;
     };
-  }, [applySecurityState]);
+  }, [applySecurityState, intl]);
 
   const startVerifiedAction = async (
     purpose: Parameters<typeof createVerificationChallenge>[0],
@@ -150,7 +145,7 @@ const Index = () => {
 
     const challenge = await action.run(
       () => createVerificationChallenge(purpose),
-      'Security verification could not be started.',
+      intl.formatMessage({ id: 'identity.security.verification.start.failed' }),
     );
 
     if (challenge) {
@@ -175,7 +170,10 @@ const Index = () => {
     setRecoveryCodes([]);
     setSetupCode('');
 
-    const nextSetup = await action.run(() => createTotpSetup(), 'Two-step setup could not be created.');
+    const nextSetup = await action.run(
+      () => createTotpSetup(),
+      intl.formatMessage({ id: 'security.totp.setup.create.failed' }),
+    );
 
     if (nextSetup) {
       setSetup(nextSetup);
@@ -188,7 +186,7 @@ const Index = () => {
     action.clearError();
 
     if (!setup) {
-      action.setError('Two-step setup is not available.');
+      action.setError(intl.formatMessage({ id: 'security.totp.setup.unavailable' }));
       return;
     }
 
@@ -198,7 +196,7 @@ const Index = () => {
           setupToken: setup.setupToken,
           code: setupCode,
         }),
-      'Two-step authentication could not be enabled.',
+      intl.formatMessage({ id: 'security.totp.enable.failed' }),
     );
 
     if (result) {
@@ -210,26 +208,29 @@ const Index = () => {
       setSetupCode('');
       await refreshCurrentUser();
       await loadSecurityState();
-      toast.success('Two-step authentication enabled.');
+      toast.success(intl.formatMessage({ id: 'security.two.step.authentication.enabled' }));
     }
   };
 
   const disableTotpAfterVerification = async () => {
-    const result = await action.run(() => disableTotp(), 'Two-step authentication could not be disabled.');
+    const result = await action.run(() => disableTotp(), intl.formatMessage({ id: 'security.totp.disable.failed' }));
 
     if (result) {
       setTotpStatus(result);
       closeDialog();
       await refreshCurrentUser();
       await loadSecurityState();
-      toast.success('Two-step authentication disabled.');
+      toast.success(intl.formatMessage({ id: 'security.two.step.authentication.disabled' }));
     }
   };
 
   const handleRegenerateRecoveryCodes = async () => {
     action.clearError();
 
-    const result = await action.run(() => regenerateTotpRecoveryCodes(), 'Recovery codes could not be regenerated.');
+    const result = await action.run(
+      () => regenerateTotpRecoveryCodes(),
+      intl.formatMessage({ id: 'security.recovery.codes.regenerate.failed' }),
+    );
 
     if (result) {
       setRecoveryCodes(result.recoveryCodes);
@@ -237,7 +238,7 @@ const Index = () => {
         ...current,
         recoveryCodesRemaining: result.recoveryCodes.length,
       }));
-      toast.success('Recovery codes regenerated.');
+      toast.success(intl.formatMessage({ id: 'security.recovery.codes.regenerated' }));
     }
   };
 
@@ -259,13 +260,13 @@ const Index = () => {
 
   const handleTwoStepEnabledChange = async (checked: boolean) => {
     if (checked && !mfaSettings.twoStepCanEnable) {
-      toast.error('No two-step verification method is available.');
+      toast.error(intl.formatMessage({ id: 'security.no.verification.method' }));
       return;
     }
 
     await updateMfaSettingsAfterVerification(
       { enabled: checked },
-      'Two-step authentication setting could not be updated.',
+      intl.formatMessage({ id: 'security.mfa.setting.update.failed' }),
     );
   };
 
@@ -274,7 +275,7 @@ const Index = () => {
       {
         requiredForSso: checked,
       },
-      'SSO two-step setting could not be updated.',
+      intl.formatMessage({ id: 'security.sso.mfa.update.failed' }),
     );
   };
 
@@ -286,7 +287,7 @@ const Index = () => {
     const name = `Passkey ${passkeys.length + 1}`;
     const result = await action.run(
       () => createPasskeyRegistrationOptions(),
-      'Passkey registration could not be started.',
+      intl.formatMessage({ id: 'security.passkey.registration.start.failed' }),
     );
 
     if (!result) {
@@ -311,7 +312,7 @@ const Index = () => {
     const name = normalizedRemark ? `Remark: ${normalizedRemark}` : pendingPasskeyRegistration.placeholderName;
     const passkey = await action.run(
       () => completePasskeyRegistration(name, pendingPasskeyRegistration.result),
-      'Passkey could not be added.',
+      intl.formatMessage({ id: 'security.passkey.add.failed' }),
     );
 
     if (!passkey) {
@@ -322,12 +323,15 @@ const Index = () => {
     setPasskeyRegistrationRemark('');
     await loadSecurityState();
     await refreshCurrentUser();
-    toast.success('Passkey added.');
+    toast.success(intl.formatMessage({ id: 'security.passkey.added' }));
   };
 
   const handleDeletePasskey = async (passkeyId: string) => {
     await startVerifiedAction('manage_passkey', async () => {
-      const deleted = await action.run(() => deletePasskey(passkeyId), 'Passkey could not be removed.');
+      const deleted = await action.run(
+        () => deletePasskey(passkeyId),
+        intl.formatMessage({ id: 'security.passkey.remove.failed' }),
+      );
 
       if (!deleted) {
         return;
@@ -335,7 +339,7 @@ const Index = () => {
 
       await loadSecurityState();
       await refreshCurrentUser();
-      toast.success('Passkey removed.');
+      toast.success(intl.formatMessage({ id: 'security.passkey.removed' }));
     });
   };
 
@@ -350,7 +354,7 @@ const Index = () => {
           method,
           verificationToken: pendingVerification.challenge.verificationToken,
         }),
-      'Verification code could not be sent.',
+      intl.formatMessage({ id: 'identity.verification.code.send.failed' }),
     );
   };
 
@@ -363,7 +367,7 @@ const Index = () => {
       input.method === 'passkey'
         ? await action.run(
             () => verifyWithPasskey(pendingVerification.challenge.verificationToken),
-            'Passkey verification could not be completed.',
+            intl.formatMessage({ id: 'identity.passkey.verification.failed' }),
           )
         : await action.run(
             () =>
@@ -371,7 +375,7 @@ const Index = () => {
                 verificationToken: pendingVerification.challenge.verificationToken,
                 ...input,
               }),
-            'Verification could not be completed.',
+            intl.formatMessage({ id: 'identity.verification.failed' }),
           );
 
     if (!verified) {
@@ -386,25 +390,31 @@ const Index = () => {
   };
 
   const handleRevokeDevice = async (sessionId: string) => {
-    const revoked = await action.run(() => revokeAuthDeviceSession(sessionId), 'Device session could not be revoked.');
+    const revoked = await action.run(
+      () => revokeAuthDeviceSession(sessionId),
+      intl.formatMessage({ id: 'security.device.session.revoke.failed' }),
+    );
 
     if (!revoked) {
       return;
     }
 
     await loadSecurityState();
-    toast.success('Device session revoked.');
+    toast.success(intl.formatMessage({ id: 'security.session.revoked' }));
   };
 
   const handleRevokeOtherDevices = async () => {
-    const revoked = await action.run(() => revokeOtherAuthDeviceSessions(), 'Device sessions could not be revoked.');
+    const revoked = await action.run(
+      () => revokeOtherAuthDeviceSessions(),
+      intl.formatMessage({ id: 'security.device.sessions.revoke.failed' }),
+    );
 
     if (!revoked) {
       return;
     }
 
     await loadSecurityState();
-    toast.success('Other device sessions revoked.');
+    toast.success(intl.formatMessage({ id: 'security.sessions.revoked' }));
   };
 
   const handleChangePasswordOpenChange = (open: boolean) => {
@@ -439,26 +449,31 @@ const Index = () => {
     const parsed = changePasswordSchema.safeParse(changePasswordForm);
 
     if (!parsed.success) {
-      passwordAction.setError(parsed.error.issues[0]?.message ?? 'Password change details are invalid.');
+      passwordAction.setError(
+        intl.formatMessage({ id: parsed.error.issues[0]?.message ?? 'validation.password.reset.invalid' }),
+      );
       return;
     }
 
-    const result = await passwordAction.run(() => changePassword(parsed.data), 'Password could not be changed.');
+    const result = await passwordAction.run(
+      () => changePassword(parsed.data),
+      intl.formatMessage({ id: 'security.password.change.failed' }),
+    );
 
     if (result) {
       setChangePasswordDialogOpen(false);
       setChangePasswordForm(emptyChangePasswordForm);
       await loadSecurityState();
-      toast.success('Password changed. Other devices have been signed out.');
+      toast.success(intl.formatMessage({ id: 'security.password.changed' }));
     }
   };
 
   const copyRecoveryCodes = async () => {
     try {
       await navigator.clipboard.writeText(recoveryCodes.join('\n'));
-      toast.success('Recovery codes copied.');
+      toast.success(intl.formatMessage({ id: 'security.recovery.codes.copied' }));
     } catch {
-      toast.error('Recovery codes could not be copied.');
+      toast.error(intl.formatMessage({ id: 'security.recovery.codes.copy.failed' }));
     }
   };
 
@@ -478,10 +493,8 @@ const Index = () => {
   return (
     <div className="grid gap-6 p-4 lg:p-6">
       <div className="grid gap-1">
-        <h1 className="text-2xl font-semibold tracking-normal">Security</h1>
-        <p className="max-w-3xl text-sm text-muted-foreground">
-          Password, two-step authentication, and active device sessions.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-normal">{intl.formatMessage({ id: 'security.title' })}</h1>
+        <p className="max-w-3xl text-sm text-muted-foreground">{intl.formatMessage({ id: 'security.description' })}</p>
       </div>
 
       <div className="grid gap-8">
@@ -500,14 +513,17 @@ const Index = () => {
           twoStepSwitchDisabled={twoStepSwitchDisabled}
         />
 
-        <SecuritySection description="Update the local password for this account." title="Password">
+        <SecuritySection
+          description={intl.formatMessage({ id: 'security.password.section.description' })}
+          title={intl.formatMessage({ id: 'security.password.section' })}
+        >
           <Item>
             <ItemMedia>
               <KeyRoundIcon className="size-4" />
             </ItemMedia>
             <ItemContent>
-              <ItemTitle>Account password</ItemTitle>
-              <ItemDescription>Change the password used for email or username sign-in.</ItemDescription>
+              <ItemTitle>{intl.formatMessage({ id: 'security.account.password' })}</ItemTitle>
+              <ItemDescription>{intl.formatMessage({ id: 'security.account.password.description' })}</ItemDescription>
             </ItemContent>
             <ItemActions>
               <Button
@@ -517,7 +533,7 @@ const Index = () => {
                 type="button"
               >
                 <KeyRoundIcon />
-                Change
+                {intl.formatMessage({ id: 'common.change' })}
               </Button>
             </ItemActions>
           </Item>
@@ -527,29 +543,40 @@ const Index = () => {
           actions={
             otherDeviceCount > 0 ? (
               <ConfirmActionDialog
-                confirmLabel="Sign out devices"
-                description="All other active sessions will be revoked immediately. Those devices will need to sign in again."
+                confirmLabel={intl.formatMessage({ id: 'security.sign.out.devices' })}
+                description={intl.formatMessage({ id: 'security.other.devices.sign.out.description' })}
                 onConfirm={handleRevokeOtherDevices}
-                title="Sign out other devices?"
+                title={intl.formatMessage({ id: 'security.other.devices.sign.out.title' })}
               >
                 <Button disabled={action.pending} type="button" variant="destructive">
                   <LogOutIcon />
-                  Sign out other devices
+                  {intl.formatMessage({ id: 'security.sign.out.other.devices' })}
                 </Button>
               </ConfirmActionDialog>
             ) : undefined
           }
-          description="Review browsers and devices with active sessions."
-          title="Login Devices"
+          description={intl.formatMessage({ id: 'security.login.devices.description' })}
+          title={intl.formatMessage({ id: 'security.login.devices' })}
         >
           {loading ? (
-            <div className="p-4 text-sm text-muted-foreground">Loading devices.</div>
+            <div className="p-4 text-sm text-muted-foreground">
+              {intl.formatMessage({ id: 'security.login.devices.loading' })}
+            </div>
           ) : devices.length === 0 ? (
-            <div className="p-4 text-sm text-muted-foreground">No active devices.</div>
+            <div className="p-4 text-sm text-muted-foreground">
+              {intl.formatMessage({ id: 'security.login.devices.none' })}
+            </div>
           ) : (
             devices.map((device, index) => (
               <div key={device.id}>
-                <DeviceItem device={device} disabled={action.pending} onRevoke={handleRevokeDevice} />
+                <AuthDeviceItem
+                  device={device}
+                  disabled={action.pending}
+                  onRevoke={handleRevokeDevice}
+                  revokeDescription={intl.formatMessage({ id: 'security.device.revoke.description' })}
+                  revokeLabel={intl.formatMessage({ id: 'profile.sign.out' })}
+                  revokeTitle={intl.formatMessage({ id: 'security.device.revoke.title' })}
+                />
                 {index < devices.length - 1 ? <ItemSeparator className="!my-0" /> : null}
               </div>
             ))
@@ -573,37 +600,11 @@ const Index = () => {
         />
       ) : null}
 
-      <Dialog
-        open={Boolean(pendingPasskeyRegistration)}
-        onOpenChange={(open: boolean) => {
-          if (!open) {
-            setPendingPasskeyRegistration(null);
-            setPasskeyRegistrationRemark('');
-            action.clearError();
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create passkey</DialogTitle>
-            <DialogDescription>Continue with your device or password manager to create a passkey.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2">
-            <Label htmlFor="passkeyRegistrationRemark">Remark</Label>
-            <Input
-              disabled={action.pending}
-              id="passkeyRegistrationRemark"
-              maxLength={passkeyRemarkMaxLength}
-              onChange={(event) => {
-                action.clearError();
-                setPasskeyRegistrationRemark(event.target.value);
-              }}
-              placeholder={pendingPasskeyRegistration?.placeholderName ?? 'Passkey'}
-              value={passkeyRegistrationRemark}
-            />
-          </div>
-          <FormMessage message={action.error} variant="error" />
-          <DialogFooter>
+      <AppDialog
+        bodyContentClassName="grid gap-4"
+        description={intl.formatMessage({ id: 'security.create.passkey.description' })}
+        footer={
+          <>
             <Button
               disabled={action.pending}
               onClick={() => {
@@ -613,15 +614,45 @@ const Index = () => {
               type="button"
               variant="outline"
             >
-              Cancel
+              {intl.formatMessage({ id: 'common.cancel' })}
             </Button>
             <Button disabled={action.pending} onClick={handleCompletePasskeyRegistration} type="button">
               <FingerprintIcon />
-              {action.pending ? 'Creating' : 'Create passkey'}
+              {intl.formatMessage({
+                id: action.pending ? 'security.create.passkey.creating' : 'security.create.passkey',
+              })}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        open={Boolean(pendingPasskeyRegistration)}
+        onOpenChange={(open: boolean) => {
+          if (!open) {
+            setPendingPasskeyRegistration(null);
+            setPasskeyRegistrationRemark('');
+            action.clearError();
+          }
+        }}
+        title={intl.formatMessage({ id: 'security.create.passkey' })}
+      >
+        <div className="grid gap-2">
+          <Label htmlFor="passkeyRegistrationRemark">{intl.formatMessage({ id: 'security.passkey.remark' })}</Label>
+          <Input
+            disabled={action.pending}
+            id="passkeyRegistrationRemark"
+            maxLength={passkeyRemarkMaxLength}
+            onChange={(event) => {
+              action.clearError();
+              setPasskeyRegistrationRemark(event.target.value);
+            }}
+            placeholder={
+              pendingPasskeyRegistration?.placeholderName ??
+              intl.formatMessage({ id: 'security.passkey.remark.placeholder' })
+            }
+            value={passkeyRegistrationRemark}
+          />
+        </div>
+        <FormMessage message={action.error} variant="error" />
+      </AppDialog>
 
       <ChangePasswordDialog
         disabled={passwordAction.pending}

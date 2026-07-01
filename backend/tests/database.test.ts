@@ -3,6 +3,7 @@ import { resolve } from 'path';
 import { DataTypes, Model, type Sequelize } from 'sequelize';
 import { describe, expect, it } from 'vitest';
 
+import { initModels } from '../src/composition/models';
 import { connectDatabase, createSequelize } from '../src/infra/database';
 import { initUserModel } from '../src/modules/users/user.model';
 
@@ -95,6 +96,76 @@ describe('database configuration', () => {
       const indexes = await sequelize.getQueryInterface().showIndex('users');
 
       expect(indexes.some((index) => index.name === 'users_email' && index.unique)).toBe(true);
+    } finally {
+      await sequelize?.close().catch(() => undefined);
+      const databasePath = resolve(process.cwd(), storage);
+
+      if (existsSync(databasePath)) {
+        rmSync(databasePath);
+      }
+    }
+  });
+
+  it('keeps sqlite alter sync usable when composite unique indexes have repeated leading fields', async () => {
+    const storage = `./data/test-sqlite-composite-unique-alter-${process.pid}-${Date.now()}.sqlite`;
+    let sequelize: Sequelize | undefined;
+
+    try {
+      sequelize = createSequelize({ dialect: 'sqlite', storage });
+      const models = initModels(sequelize);
+      await connectDatabase(sequelize, 'force');
+      const role = await models.role.create({
+        key: 'composite_unique_role',
+        name: 'Composite Unique Role',
+        description: 'Composite unique role.',
+      });
+      await models.permission.bulkCreate([
+        {
+          key: 'composite_unique:first',
+          name: 'First permission',
+          description: 'First permission.',
+        },
+        {
+          key: 'composite_unique:second',
+          name: 'Second permission',
+          description: 'Second permission.',
+        },
+      ]);
+      await models.rolePermission.bulkCreate([
+        {
+          roleId: role.id,
+          permissionKey: 'composite_unique:first',
+        },
+        {
+          roleId: role.id,
+          permissionKey: 'composite_unique:second',
+        },
+      ]);
+      await sequelize.query(
+        [
+          'CREATE TABLE role_permissions_backup (',
+          '`id` UUID NOT NULL UNIQUE PRIMARY KEY,',
+          '`roleId` UUID NOT NULL UNIQUE,',
+          '`permissionKey` VARCHAR(64) NOT NULL UNIQUE,',
+          '`createdAt` DATETIME NOT NULL,',
+          '`updatedAt` DATETIME NOT NULL',
+          ')',
+        ].join(' '),
+      );
+      await sequelize.close();
+
+      sequelize = createSequelize({ dialect: 'sqlite', storage });
+      const alteredModels = initModels(sequelize);
+      await expect(connectDatabase(sequelize, 'alter')).resolves.toBeUndefined();
+
+      const indexes = await sequelize.getQueryInterface().showIndex('role_permissions');
+      const tables = await sequelize.getQueryInterface().showAllTables();
+
+      expect(tables).not.toContain('role_permissions_backup');
+      expect(indexes.some((index) => index.name === 'role_permissions_role_id_permission_key' && index.unique)).toBe(
+        true,
+      );
+      await expect(alteredModels.rolePermission.count()).resolves.toBe(2);
     } finally {
       await sequelize?.close().catch(() => undefined);
       const databasePath = resolve(process.cwd(), storage);

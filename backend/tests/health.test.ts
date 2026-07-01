@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { createHealthModule } from '../src/modules/health';
-import { createTestContext, getTestRoute, runMiddleware } from './support/http';
+import { localeRequestHeader } from '@tilty/shared/i18n';
+
+import { localeMiddleware } from '../src/middleware/locale';
+import { createHealthModule, ReadinessCheckStatus } from '../src/modules/health';
+import { createTestContext, getTestRoute, runMiddleware, runMiddlewares } from './support/http';
 
 describe('health API', () => {
   it('returns service health', async () => {
@@ -14,7 +17,7 @@ describe('health API', () => {
       code: 200,
       error: null,
       data: {
-        status: 'ok',
+        status: ReadinessCheckStatus.Ok,
       },
     });
     expect(Date.parse((context.body as { data: { time: string } }).data.time)).not.toBeNaN();
@@ -36,9 +39,9 @@ describe('health API', () => {
       error: null,
       data: {
         checks: {
-          database: 'ok',
+          database: ReadinessCheckStatus.Ok,
         },
-        status: 'ok',
+        status: ReadinessCheckStatus.Ok,
       },
     });
   });
@@ -62,9 +65,39 @@ describe('health API', () => {
       error: 'SERVICE_NOT_READY',
       details: {
         checks: {
-          database: 'error',
+          database: ReadinessCheckStatus.Error,
         },
       },
+    });
+  });
+
+  it('localizes readiness failure messages from the request locale', async () => {
+    const route = getTestRoute(
+      createHealthModule({
+        readinessChecks: [
+          {
+            name: 'database',
+            check: async () => {
+              throw new Error('database unavailable');
+            },
+          },
+        ],
+      }).routes,
+      'get',
+      '/ready',
+    );
+    const context = await runMiddlewares(
+      [localeMiddleware(), route.handlers[0]!],
+      createTestContext(undefined, {
+        [localeRequestHeader]: 'zh-CN',
+      }),
+    );
+
+    expect(context.status).toBe(503);
+    expect(context.body).toMatchObject({
+      code: 503,
+      error: 'SERVICE_NOT_READY',
+      message: '服务尚未就绪。',
     });
   });
 });

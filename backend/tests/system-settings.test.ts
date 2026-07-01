@@ -3,6 +3,8 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { localeRequestHeader } from '@tilty/shared/i18n';
+
 import { initModels } from '../src/composition/models';
 import { createServices } from '../src/composition/services';
 import { getSetupEnvironmentDefaults } from '../src/config/setup-environment';
@@ -10,12 +12,20 @@ import { type RouteDefinition } from '../src/core/module';
 import { createSequelize } from '../src/infra/database';
 import { createMigrator } from '../src/infra/migrator';
 import { errorMiddleware } from '../src/middleware/error';
+import { localeMiddleware } from '../src/middleware/locale';
 import { defaultAuthCookieConfig } from '../src/modules/auth/auth.http';
 import { defaultAuthSessionRequestContext } from '../src/modules/auth/auth.service';
 import { createSystemSettingsModule } from '../src/modules/system-settings';
 import { registerTestUser } from './support/auth';
 import { createTestContext, getTestRoute, runMiddlewares } from './support/http';
 import { createTotpCode } from './support/totp';
+
+interface SystemSettingsBody {
+  data: {
+    environment: Record<string, string>;
+    environmentFileLoaded: boolean;
+  };
+}
 
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
 
@@ -92,17 +102,25 @@ describe('system settings API', () => {
     );
     const readRoute = getTestRoute(routes, 'get', '/');
     const context = await runMiddlewares(
-      [errorMiddleware(), ...readRoute.handlers],
-      createTestContext(undefined, {}, undefined, {
-        cookies: {
-          tilty_scaffold_access_token: rootSession.accessToken,
+      [errorMiddleware(), localeMiddleware(), ...readRoute.handlers],
+      createTestContext(
+        undefined,
+        {
+          [localeRequestHeader]: 'zh-CN',
         },
-      }),
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
     );
 
     expect(context.status).toBe(403);
     expect(context.body).toMatchObject({
       error: 'SYSTEM_SETTINGS_STRONG_VERIFICATION_REQUIRED',
+      message: '访问系统设置前需要配置通行密钥或认证器应用。',
     });
   });
 
@@ -266,10 +284,3 @@ describe('system settings API', () => {
     return session;
   }
 });
-
-interface SystemSettingsBody {
-  data: {
-    environment: Record<string, string>;
-    environmentFileLoaded: boolean;
-  };
-}

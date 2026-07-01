@@ -1,3 +1,5 @@
+import { useIntl } from 'react-intl';
+
 import { CheckCircle2Icon, CommandIcon } from 'lucide-react';
 
 import {
@@ -12,6 +14,7 @@ import {
 import { cn } from '@/shadcn/lib/utils';
 
 import { setupSteps } from '@/components/SetupConfiguration/definitions';
+import { formatSetupStepTitle } from '@/components/SetupConfiguration/utils';
 
 export function SetupSidebar({
   activeStep,
@@ -22,22 +25,23 @@ export function SetupSidebar({
   maxUnlockedStepIndex: number;
   onNavigate: (stepId: string, stepIndex: number) => void;
 }) {
+  const intl = useIntl();
   const { setOpenMobile } = useSidebar();
 
   return (
-    <Sidebar className="border-r" collapsible="offcanvas" variant="inset">
+    <Sidebar collapsible="offcanvas" variant="inset">
       <SidebarHeader className="border-b border-sidebar-border px-3 py-3">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton>
               <CommandIcon />
-              <span className="text-base font-semibold">Tilty Scaffold</span>
+              <span className="text-base font-semibold">{intl.formatMessage({ id: 'app.name' })}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
         <div className="grid gap-0.5 px-2 pt-2">
-          <h2 className="text-sm font-medium">Setup</h2>
-          <p className="text-xs text-muted-foreground">Initial system configuration</p>
+          <h2 className="text-sm font-medium">{intl.formatMessage({ id: 'route.setup' })}</h2>
+          <p className="text-xs text-muted-foreground">{intl.formatMessage({ id: 'setup.initial.configuration' })}</p>
         </div>
       </SidebarHeader>
       <SidebarContent className="px-2 py-3">
@@ -66,7 +70,7 @@ export function SetupSidebar({
                   type="button"
                 >
                   {completedStep ? <CheckCircle2Icon className="text-primary" /> : <StepIcon />}
-                  <span>{step.title}</span>
+                  <span>{formatSetupStepTitle(step, intl)}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             );

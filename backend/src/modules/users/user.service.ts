@@ -166,7 +166,7 @@ export class UserService {
     });
 
     if (deleted === 0) {
-      throw new AppError('USER_SSO_IDENTITY_NOT_FOUND', 'SSO identity was not found for this account.', 404);
+      throw new AppError('USER_SSO_IDENTITY_NOT_FOUND', 'error.USER_SSO_IDENTITY_NOT_FOUND', 404);
     }
 
     return {
@@ -218,19 +218,19 @@ export class UserService {
     const existingBySubject = await this.findBySsoIdentity(input.providerId, input.providerSubject);
 
     if (existingBySubject) {
-      throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
+      throw new AppError('SSO_SUBJECT_EXISTS', 'error.SSO_SUBJECT_EXISTS', 409);
     }
 
     const existingByEmail = await this.findByEmail(input.email);
 
     if (existingByEmail) {
-      throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+      throw new AppError('USER_EMAIL_EXISTS', 'error.USER_EMAIL_EXISTS', 409);
     }
 
     const existingByUsername = await this.findByUsername(input.username);
 
     if (existingByUsername) {
-      throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+      throw new AppError('USER_USERNAME_EXISTS', 'error.USER_USERNAME_EXISTS', 409);
     }
 
     try {
@@ -254,18 +254,18 @@ export class UserService {
     } catch (error) {
       if (error instanceof UniqueConstraintError) {
         if (await this.findBySsoIdentity(input.providerId, input.providerSubject)) {
-          throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
+          throw new AppError('SSO_SUBJECT_EXISTS', 'error.SSO_SUBJECT_EXISTS', 409);
         }
 
         if (await this.findByEmail(input.email)) {
-          throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+          throw new AppError('USER_EMAIL_EXISTS', 'error.USER_EMAIL_EXISTS', 409);
         }
 
         if (await this.findByUsername(input.username)) {
-          throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+          throw new AppError('USER_USERNAME_EXISTS', 'error.USER_USERNAME_EXISTS', 409);
         }
 
-        throw new AppError('SSO_ACCOUNT_CREATE_CONFLICT', 'The SSO account could not be created.', 409);
+        throw new AppError('SSO_ACCOUNT_CREATE_CONFLICT', 'error.SSO_ACCOUNT_CREATE_CONFLICT', 409);
       }
 
       throw error;
@@ -314,7 +314,7 @@ export class UserService {
             return user;
           }
 
-          throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
+          throw new AppError('SSO_SUBJECT_EXISTS', 'error.SSO_SUBJECT_EXISTS', 409);
         }
 
         const existingForUserProvider = await this.ssoIdentityModel.findOne({
@@ -325,14 +325,10 @@ export class UserService {
         });
 
         if (existingForUserProvider) {
-          throw new AppError(
-            'USER_SSO_SUBJECT_EXISTS',
-            'The user is already associated with another SSO identity.',
-            409,
-          );
+          throw new AppError('USER_SSO_SUBJECT_EXISTS', 'error.USER_SSO_SUBJECT_EXISTS', 409);
         }
 
-        throw new AppError('SSO_BIND_CONFLICT', 'The SSO identity could not be associated with this account.', 409);
+        throw new AppError('SSO_BIND_CONFLICT', 'error.SSO_BIND_CONFLICT', 409);
       }
 
       throw error;
@@ -348,7 +344,7 @@ export class UserService {
     });
 
     if (existing && existing.userId !== user.id) {
-      throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
+      throw new AppError('SSO_SUBJECT_EXISTS', 'error.SSO_SUBJECT_EXISTS', 409);
     }
 
     const existingForUserProvider = await this.ssoIdentityModel.findOne({
@@ -363,7 +359,7 @@ export class UserService {
         return;
       }
 
-      throw new AppError('USER_SSO_SUBJECT_EXISTS', 'The user is already associated with another SSO identity.', 409);
+      throw new AppError('USER_SSO_SUBJECT_EXISTS', 'error.USER_SSO_SUBJECT_EXISTS', 409);
     }
   }
 
@@ -393,7 +389,7 @@ export class UserService {
       const existing = await this.findByPhoneNumber(phoneNumber);
 
       if (existing && existing.id !== user.id) {
-        throw new AppError('USER_PHONE_NUMBER_EXISTS', 'The phone number is already bound to another account.', 409);
+        throw new AppError('USER_PHONE_NUMBER_EXISTS', 'error.USER_PHONE_NUMBER_EXISTS', 409);
       }
     }
 
@@ -405,10 +401,10 @@ export class UserService {
     } catch (error) {
       if (error instanceof UniqueConstraintError) {
         if (await this.findByPhoneNumber(phoneNumber)) {
-          throw new AppError('USER_PHONE_NUMBER_EXISTS', 'The phone number is already bound to another account.', 409);
+          throw new AppError('USER_PHONE_NUMBER_EXISTS', 'error.USER_PHONE_NUMBER_EXISTS', 409);
         }
 
-        throw new AppError('USER_IDENTIFIER_CONFLICT', 'The account identifiers are already registered.', 409);
+        throw new AppError('USER_IDENTIFIER_CONFLICT', 'error.USER_IDENTIFIER_CONFLICT', 409);
       }
 
       throw error;
@@ -443,7 +439,7 @@ export class UserService {
         const existing = await this.findByPhoneNumber(input.phoneNumber);
 
         if (existing && existing.id !== user.id) {
-          throw new AppError('USER_PHONE_NUMBER_EXISTS', 'The phone number is already bound to another account.', 409);
+          throw new AppError('USER_PHONE_NUMBER_EXISTS', 'error.USER_PHONE_NUMBER_EXISTS', 409);
         }
       }
 
@@ -456,10 +452,10 @@ export class UserService {
     } catch (error) {
       if (error instanceof UniqueConstraintError) {
         if (input.phoneNumber && (await this.findByPhoneNumber(input.phoneNumber))) {
-          throw new AppError('USER_PHONE_NUMBER_EXISTS', 'The phone number is already bound to another account.', 409);
+          throw new AppError('USER_PHONE_NUMBER_EXISTS', 'error.USER_PHONE_NUMBER_EXISTS', 409);
         }
 
-        throw new AppError('USER_IDENTIFIER_CONFLICT', 'The account identifiers are already registered.', 409);
+        throw new AppError('USER_IDENTIFIER_CONFLICT', 'error.USER_IDENTIFIER_CONFLICT', 409);
       }
 
       throw error;
@@ -480,7 +476,7 @@ export class UserService {
       const existing = await this.findByUsername(nextUsername, options);
 
       if (existing && existing.id !== user.id) {
-        throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+        throw new AppError('USER_USERNAME_EXISTS', 'error.USER_USERNAME_EXISTS', 409);
       }
     }
 
@@ -488,7 +484,7 @@ export class UserService {
       const existing = await this.findByEmail(nextEmail, options);
 
       if (existing && existing.id !== user.id) {
-        throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+        throw new AppError('USER_EMAIL_EXISTS', 'error.USER_EMAIL_EXISTS', 409);
       }
     }
 
@@ -496,12 +492,12 @@ export class UserService {
       const existing = await this.findByPhoneNumber(nextPhoneNumber, options);
 
       if (existing && existing.id !== user.id) {
-        throw new AppError('USER_PHONE_NUMBER_EXISTS', 'The phone number is already bound to another account.', 409);
+        throw new AppError('USER_PHONE_NUMBER_EXISTS', 'error.USER_PHONE_NUMBER_EXISTS', 409);
       }
     }
 
     if (input.phoneVerified === true && !nextPhoneNumber) {
-      throw new AppError('USER_PHONE_NUMBER_REQUIRED', 'Phone number is required before marking it verified.', 400);
+      throw new AppError('USER_PHONE_NUMBER_REQUIRED', 'error.USER_PHONE_NUMBER_REQUIRED', 400);
     }
 
     const emailChanged = emailProvided && nextEmail !== user.email;
@@ -575,28 +571,24 @@ export class UserService {
         const existingUsername = await this.findByUsername(nextUsername, options);
 
         if (existingUsername && existingUsername.id !== user.id) {
-          throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+          throw new AppError('USER_USERNAME_EXISTS', 'error.USER_USERNAME_EXISTS', 409);
         }
 
         const existingEmail = await this.findByEmail(nextEmail, options);
 
         if (existingEmail && existingEmail.id !== user.id) {
-          throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+          throw new AppError('USER_EMAIL_EXISTS', 'error.USER_EMAIL_EXISTS', 409);
         }
 
         if (nextPhoneNumber) {
           const existingPhoneNumber = await this.findByPhoneNumber(nextPhoneNumber, options);
 
           if (existingPhoneNumber && existingPhoneNumber.id !== user.id) {
-            throw new AppError(
-              'USER_PHONE_NUMBER_EXISTS',
-              'The phone number is already bound to another account.',
-              409,
-            );
+            throw new AppError('USER_PHONE_NUMBER_EXISTS', 'error.USER_PHONE_NUMBER_EXISTS', 409);
           }
         }
 
-        throw new AppError('USER_IDENTIFIER_CONFLICT', 'The account identifiers are already registered.', 409);
+        throw new AppError('USER_IDENTIFIER_CONFLICT', 'error.USER_IDENTIFIER_CONFLICT', 409);
       }
 
       throw error;
@@ -657,24 +649,24 @@ export class UserService {
 
   private async assertUniqueAccountIdentifiers(input: { username: string; email: string }) {
     if (await this.findByEmail(input.email)) {
-      throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+      throw new AppError('USER_EMAIL_EXISTS', 'error.USER_EMAIL_EXISTS', 409);
     }
 
     if (await this.findByUsername(input.username)) {
-      throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+      throw new AppError('USER_USERNAME_EXISTS', 'error.USER_USERNAME_EXISTS', 409);
     }
   }
 
   private async throwAccountIdentifierConflict(input: { username: string; email: string }) {
     if (await this.findByEmail(input.email)) {
-      throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+      throw new AppError('USER_EMAIL_EXISTS', 'error.USER_EMAIL_EXISTS', 409);
     }
 
     if (await this.findByUsername(input.username)) {
-      throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+      throw new AppError('USER_USERNAME_EXISTS', 'error.USER_USERNAME_EXISTS', 409);
     }
 
-    throw new AppError('USER_IDENTIFIER_CONFLICT', 'The account identifiers are already registered.', 409);
+    throw new AppError('USER_IDENTIFIER_CONFLICT', 'error.USER_IDENTIFIER_CONFLICT', 409);
   }
 }
 

@@ -1,16 +1,17 @@
+import { useIntl } from 'react-intl';
+
 import { RefreshCwIcon } from 'lucide-react';
 
 import { Button } from '@/shadcn/components/ui/button';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/shadcn/components/ui/dialog';
 
+import {
+  AppDialogBody,
+  AppDialogClose,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogRoot,
+} from '@/components/AppDialog';
 import { ConfirmActionDialog } from '@/components/ConfirmActionDialog';
 import FormMessage from '@/components/FormMessage';
 
@@ -33,41 +34,43 @@ export function RecoveryCodesDialog({
   pending: boolean;
   recoveryCodes: string[];
 }) {
+  const intl = useIntl();
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Recovery codes</DialogTitle>
-          <DialogDescription>
-            Regenerate one-time recovery codes. Existing unused codes will stop working.
-          </DialogDescription>
-        </DialogHeader>
+    <AppDialogRoot open={open} onOpenChange={onOpenChange}>
+      <AppDialogContent>
+        <AppDialogHeader
+          description={intl.formatMessage({ id: 'security.recovery.codes.description' })}
+          title={intl.formatMessage({ id: 'security.recovery.codes' })}
+        />
         {recoveryCodes.length > 0 ? (
           <RecoveryCodes codes={recoveryCodes} onCopy={onCopy} />
         ) : (
-          <div className="grid gap-4">
-            <FormMessage message={error} variant="error" />
-            <DialogFooter>
-              <DialogClose asChild>
+          <>
+            <AppDialogBody contentClassName="grid gap-4">
+              <FormMessage message={error} variant="error" />
+            </AppDialogBody>
+            <AppDialogFooter>
+              <AppDialogClose asChild>
                 <Button disabled={pending} type="button" variant="outline">
-                  Cancel
+                  {intl.formatMessage({ id: 'common.cancel' })}
                 </Button>
-              </DialogClose>
+              </AppDialogClose>
               <ConfirmActionDialog
-                confirmLabel="Regenerate"
-                description="Existing unused recovery codes will stop working immediately."
+                confirmLabel={intl.formatMessage({ id: 'common.regenerate' })}
+                description={intl.formatMessage({ id: 'security.regenerate.recovery.codes.description' })}
                 onConfirm={onRegenerate}
-                title="Regenerate recovery codes?"
+                title={intl.formatMessage({ id: 'security.regenerate.recovery.codes.title' })}
               >
                 <Button disabled={pending} type="button">
                   <RefreshCwIcon />
-                  Regenerate
+                  {intl.formatMessage({ id: 'common.regenerate' })}
                 </Button>
               </ConfirmActionDialog>
-            </DialogFooter>
-          </div>
+            </AppDialogFooter>
+          </>
         )}
-      </DialogContent>
-    </Dialog>
+      </AppDialogContent>
+    </AppDialogRoot>
   );
 }

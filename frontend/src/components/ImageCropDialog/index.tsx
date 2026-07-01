@@ -1,22 +1,22 @@
 import { type ChangeEvent, type ComponentType, type CSSProperties, useRef, useState } from 'react';
 import CropperBase, { type Area, type Point } from 'react-easy-crop';
+import { useIntl } from 'react-intl';
 
 import { ImageUpIcon, Trash2Icon } from 'lucide-react';
 
 import { Button } from '@/shadcn/components/ui/button';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/shadcn/components/ui/dialog';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
 import { Slider } from '@/shadcn/components/ui/slider';
 
+import {
+  AppDialogBody,
+  AppDialogClose,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogRoot,
+} from '@/components/AppDialog';
 import { ConfirmActionDialog } from '@/components/ConfirmActionDialog';
 import FormMessage from '@/components/FormMessage';
 
@@ -65,6 +65,13 @@ interface ImageAdjustments {
   opacity: number;
 }
 
+interface ImageCropErrorMessages {
+  compressionFailed: (size: string) => string;
+  cropAreaInvalid: string;
+  cropFailed: string;
+  loadFailed: string;
+}
+
 interface ImageCropperProps {
   aspect: number;
   crop: Point;
@@ -96,8 +103,8 @@ const Index = ({
   description,
   error,
   imageUrl,
-  imageSelectDescription = 'JPEG, PNG, WebP, or GIF.',
-  imageSelectLabel = 'Select image',
+  imageSelectDescription,
+  imageSelectLabel,
   loading = false,
   maxFileBytes,
   onImageSelect,
@@ -113,20 +120,19 @@ const Index = ({
   submitLabel,
   title,
 }: ImageCropDialogProps) => {
+  const intl = useIntl();
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
+    <AppDialogRoot open={open} onOpenChange={onOpenChange}>
+      <AppDialogContent className="sm:max-w-lg">
+        <AppDialogHeader description={description} title={title} />
         <ImageCropDialogContent
           accept={accept}
           aspect={aspect}
           cropShape={cropShape}
           error={error}
-          imageSelectDescription={imageSelectDescription}
-          imageSelectLabel={imageSelectLabel}
+          imageSelectDescription={imageSelectDescription ?? intl.formatMessage({ id: 'profile.image.help' })}
+          imageSelectLabel={imageSelectLabel ?? intl.formatMessage({ id: 'profile.image.select' })}
           imageUrl={imageUrl}
           key={imageUrl ?? 'empty'}
           loading={loading}
@@ -141,8 +147,8 @@ const Index = ({
           showGrid={showGrid}
           submitLabel={submitLabel}
         />
-      </DialogContent>
-    </Dialog>
+      </AppDialogContent>
+    </AppDialogRoot>
   );
 };
 
@@ -172,16 +178,26 @@ const ImageCropDialogContent = ({
   const [cropError, setCropError] = useState<string | null>(null);
   const [adjustments, setAdjustments] = useState<ImageAdjustments>(defaultAdjustments);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const intl = useIntl();
   const busy = loading || removeLoading;
   const maxFileSizeLabel = maxFileBytes ? formatFileSize(maxFileBytes) : null;
   const imageSelectHelp = maxFileSizeLabel
-    ? `${imageSelectDescription} Maximum ${maxFileSizeLabel} after cropping.`
+    ? intl.formatMessage(
+        { id: 'profile.image.help.with.max.size' },
+        { description: imageSelectDescription, size: maxFileSizeLabel },
+      )
     : imageSelectDescription;
   const imageStyle = showAdjustments
     ? {
         mediaStyle: getImageAdjustmentStyle(adjustments),
       }
     : undefined;
+  const errorMessages: ImageCropErrorMessages = {
+    compressionFailed: (size) => intl.formatMessage({ id: 'profile.image.compress.failed.below' }, { size }),
+    cropAreaInvalid: intl.formatMessage({ id: 'profile.image.crop.area.invalid' }),
+    cropFailed: intl.formatMessage({ id: 'profile.image.crop.failed' }),
+    loadFailed: intl.formatMessage({ id: 'profile.image.load.failed' }),
+  };
 
   const handleCropComplete = (_croppedArea: Area, nextCroppedAreaPixels: Area) => {
     setCroppedAreaPixels(nextCroppedAreaPixels);
@@ -231,9 +247,10 @@ const ImageCropDialogContent = ({
         output,
         showAdjustments ? adjustments : undefined,
         maxFileBytes,
+        errorMessages,
       );
     } catch (error) {
-      setCropError(error instanceof Error ? error.message : 'Image could not be cropped.');
+      setCropError(error instanceof Error ? error.message : intl.formatMessage({ id: 'profile.image.crop.failed' }));
       return;
     }
 
@@ -242,7 +259,7 @@ const ImageCropDialogContent = ({
 
   return (
     <>
-      <div className="grid gap-4">
+      <AppDialogBody contentClassName="grid gap-4">
         <Input ref={fileInputRef} accept={accept} className="hidden" onChange={handleImageFileChange} type="file" />
         {imageUrl ? (
           <>
@@ -264,7 +281,7 @@ const ImageCropDialogContent = ({
             </div>
             <ImageAdjustmentSlider
               disabled={busy}
-              label="Zoom"
+              label={intl.formatMessage({ id: 'profile.image.zoom' })}
               max={3}
               min={1}
               onValueChange={handleZoomChange}
@@ -276,7 +293,7 @@ const ImageCropDialogContent = ({
               <div className="grid gap-3">
                 <ImageAdjustmentSlider
                   disabled={busy}
-                  label="Opacity"
+                  label={intl.formatMessage({ id: 'profile.image.opacity' })}
                   max={100}
                   min={0}
                   onValueChange={(value) => handleAdjustmentChange('opacity', value)}
@@ -285,7 +302,7 @@ const ImageCropDialogContent = ({
                 />
                 <ImageAdjustmentSlider
                   disabled={busy}
-                  label="Brightness"
+                  label={intl.formatMessage({ id: 'profile.image.brightness' })}
                   max={150}
                   min={50}
                   onValueChange={(value) => handleAdjustmentChange('brightness', value)}
@@ -294,7 +311,7 @@ const ImageCropDialogContent = ({
                 />
                 <ImageAdjustmentSlider
                   disabled={busy}
-                  label="Blur"
+                  label={intl.formatMessage({ id: 'profile.image.blur' })}
                   max={16}
                   min={0}
                   onValueChange={(value) => handleAdjustmentChange('blur', value)}
@@ -322,19 +339,21 @@ const ImageCropDialogContent = ({
           </Button>
         )}
         <FormMessage message={cropError ?? error} variant="error" />
-      </div>
-      <DialogFooter className="flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+      </AppDialogBody>
+      <AppDialogFooter className="flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         {onRemove ? (
           <div className="w-full sm:w-auto">
             <ConfirmActionDialog
-              confirmLabel={removeLabel ?? 'Remove image'}
-              description="This image will be removed immediately."
+              confirmLabel={removeLabel ?? intl.formatMessage({ id: 'profile.image.remove.image' })}
+              description={intl.formatMessage({ id: 'profile.image.remove.description' })}
               onConfirm={onRemove}
-              title="Remove image?"
+              title={intl.formatMessage({ id: 'profile.image.remove.title' })}
             >
               <Button className="w-full sm:w-auto" disabled={busy} type="button" variant="destructive">
                 <Trash2Icon />
-                {removeLoading ? 'Removing' : (removeLabel ?? 'Remove image')}
+                {removeLoading
+                  ? intl.formatMessage({ id: 'common.removing' })
+                  : (removeLabel ?? intl.formatMessage({ id: 'profile.image.remove.image' }))}
               </Button>
             </ConfirmActionDialog>
           </div>
@@ -349,14 +368,14 @@ const ImageCropDialogContent = ({
               variant="outline"
             >
               <ImageUpIcon />
-              Choose
+              {intl.formatMessage({ id: 'common.choose' })}
             </Button>
           ) : null}
-          <DialogClose asChild>
+          <AppDialogClose asChild>
             <Button className="w-full sm:w-auto" disabled={busy} type="button" variant="outline">
-              Cancel
+              {intl.formatMessage({ id: 'common.cancel' })}
             </Button>
-          </DialogClose>
+          </AppDialogClose>
           <Button
             className="w-full sm:w-auto"
             disabled={busy || !croppedAreaPixels}
@@ -364,10 +383,10 @@ const ImageCropDialogContent = ({
             type="button"
           >
             <ImageUpIcon />
-            {loading ? 'Uploading' : submitLabel}
+            {loading ? intl.formatMessage({ id: 'common.uploading' }) : submitLabel}
           </Button>
         </div>
-      </DialogFooter>
+      </AppDialogFooter>
     </>
   );
 };
@@ -420,17 +439,18 @@ async function createCroppedImageFile(
   imageUrl: string,
   cropArea: Area,
   output: CropOutput,
-  adjustments?: ImageAdjustments,
-  maxFileBytes?: number,
+  adjustments: ImageAdjustments | undefined,
+  maxFileBytes: number | undefined,
+  errorMessages: ImageCropErrorMessages,
 ) {
-  const image = await loadImage(imageUrl);
+  const image = await loadImage(imageUrl, errorMessages.loadFailed);
   const sourceX = Math.max(0, Math.round(cropArea.x));
   const sourceY = Math.max(0, Math.round(cropArea.y));
   const sourceWidth = Math.min(Math.round(cropArea.width), image.naturalWidth - sourceX);
   const sourceHeight = Math.min(Math.round(cropArea.height), image.naturalHeight - sourceY);
 
   if (sourceWidth <= 0 || sourceHeight <= 0) {
-    throw new Error('Image crop area is invalid.');
+    throw new Error(errorMessages.cropAreaInvalid);
   }
 
   const contentType = output.contentType ?? 'image/png';
@@ -444,6 +464,7 @@ async function createCroppedImageFile(
     sourceWidth,
     sourceX,
     sourceY,
+    errorMessages,
   });
 
   return new File([blob], getOutputFileName(output.fileName, blob.type || contentType), {
@@ -465,6 +486,7 @@ function getCanvasFilter(adjustments: ImageAdjustments) {
 async function createCompressedImageBlob({
   adjustments,
   contentType,
+  errorMessages,
   image,
   maxFileBytes,
   output,
@@ -475,6 +497,7 @@ async function createCompressedImageBlob({
 }: {
   adjustments?: ImageAdjustments;
   contentType: string;
+  errorMessages: ImageCropErrorMessages;
   image: HTMLImageElement;
   maxFileBytes?: number;
   output: CropOutput;
@@ -487,6 +510,7 @@ async function createCompressedImageBlob({
 
   const canvas = createCroppedCanvas({
     adjustments,
+    errorMessages,
     height: output.height,
     image,
     sourceHeight,
@@ -497,7 +521,7 @@ async function createCompressedImageBlob({
   });
 
   for (const quality of getCompressionQualities(contentType)) {
-    const blob = await createCanvasBlob(canvas, contentType, quality);
+    const blob = await createCanvasBlob(canvas, contentType, errorMessages.cropFailed, quality);
 
     if (!smallestBlob || blob.size < smallestBlob.size) {
       smallestBlob = blob;
@@ -510,13 +534,14 @@ async function createCompressedImageBlob({
 
   throw new Error(
     smallestBlob
-      ? `Image could not be compressed below ${formatFileSize(maxFileBytes ?? smallestBlob.size)}.`
-      : 'Image could not be cropped.',
+      ? errorMessages.compressionFailed(formatFileSize(maxFileBytes ?? smallestBlob.size))
+      : errorMessages.cropFailed,
   );
 }
 
 function createCroppedCanvas({
   adjustments,
+  errorMessages,
   height,
   image,
   sourceHeight,
@@ -526,6 +551,7 @@ function createCroppedCanvas({
   width,
 }: {
   adjustments?: ImageAdjustments;
+  errorMessages: ImageCropErrorMessages;
   height: number;
   image: HTMLImageElement;
   sourceHeight: number;
@@ -538,7 +564,7 @@ function createCroppedCanvas({
   const context = canvas.getContext('2d');
 
   if (!context) {
-    throw new Error('Image could not be cropped.');
+    throw new Error(errorMessages.cropFailed);
   }
 
   canvas.width = width;
@@ -564,22 +590,22 @@ function getCompressionQualities(contentType: string) {
   return [0.9, 0.8, 0.7, 0.6, 0.5];
 }
 
-function loadImage(source: string) {
+function loadImage(source: string, loadFailedMessage: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
 
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('Image could not be loaded.'));
+    image.onerror = () => reject(new Error(loadFailedMessage));
     image.src = source;
   });
 }
 
-function createCanvasBlob(canvas: HTMLCanvasElement, contentType: string, quality?: number) {
+function createCanvasBlob(canvas: HTMLCanvasElement, contentType: string, cropFailedMessage: string, quality?: number) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
         if (!blob) {
-          reject(new Error('Image could not be cropped.'));
+          reject(new Error(cropFailedMessage));
           return;
         }
 

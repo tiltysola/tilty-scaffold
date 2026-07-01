@@ -1,4 +1,0 @@
-interface:
-  display_name: 'Code Review Standards'
-  short_description: 'Strict review for code, docs, and tests'
-  default_prompt: 'Use $code-review-standards to review this change for code quality, security, documentation consistency, formal wording, and complete unit tests.'

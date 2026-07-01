@@ -1,4 +1,6 @@
+import { formatStaticMessage, getCurrentLocale } from '@/i18n';
 import { routePath } from '@/router';
+import { localeRequestHeader } from '@tilty/shared/i18n';
 
 import { getClientDeviceId } from './device';
 
@@ -15,6 +17,11 @@ interface ApiFailure {
   details?: unknown;
 }
 
+export interface ApiRequestOptions extends Omit<RequestInit, 'body' | 'headers'> {
+  body?: unknown;
+  headers?: Record<string, string>;
+}
+
 export class ApiError extends Error {
   readonly code: string;
   readonly details?: unknown;
@@ -29,11 +36,6 @@ export class ApiError extends Error {
   }
 }
 
-export interface ApiRequestOptions extends Omit<RequestInit, 'body' | 'headers'> {
-  body?: unknown;
-  headers?: Record<string, string>;
-}
-
 const defaultRequestTimeoutMs = 15_000;
 
 export async function apiRequest<T>(apiRequestPath: string, options: ApiRequestOptions = {}) {
@@ -42,6 +44,10 @@ export async function apiRequest<T>(apiRequestPath: string, options: ApiRequestO
   const headers = new Headers(inputHeaders);
   const requestBody = createRequestBody(body);
   const signal = createRequestSignal(inputSignal);
+
+  if (!headers.has(localeRequestHeader)) {
+    headers.set(localeRequestHeader, getCurrentLocale());
+  }
 
   if (body !== undefined && !isBodyInit(body) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
@@ -64,7 +70,7 @@ export async function apiRequest<T>(apiRequestPath: string, options: ApiRequestO
       signal,
     });
   } catch {
-    throw new ApiError(0, 'NETWORK_ERROR', 'The server could not be reached.');
+    throw new ApiError(0, 'NETWORK_ERROR', formatStaticMessage('api.error.NETWORK_ERROR'));
   }
 
   const responsePayload = await readJson(response);
@@ -75,11 +81,11 @@ export async function apiRequest<T>(apiRequestPath: string, options: ApiRequestO
       throw new ApiError(response.status, responsePayload.error, responsePayload.message, responsePayload.details);
     }
 
-    throw new ApiError(response.status, 'API_ERROR', 'The request could not be completed.');
+    throw new ApiError(response.status, 'API_ERROR', formatStaticMessage('api.error.API_ERROR'));
   }
 
   if (!isApiSuccess<T>(responsePayload)) {
-    throw new ApiError(response.status, 'API_RESPONSE_ERROR', 'The server response is invalid.');
+    throw new ApiError(response.status, 'API_RESPONSE_ERROR', formatStaticMessage('api.error.API_RESPONSE_ERROR'));
   }
 
   return responsePayload.data;
@@ -87,7 +93,7 @@ export async function apiRequest<T>(apiRequestPath: string, options: ApiRequestO
 
 export function getApiErrorMessage(error: unknown, fallback: string) {
   if (error instanceof ApiError) {
-    return error.message;
+    return error.message || fallback;
   }
 
   return fallback;
@@ -95,7 +101,7 @@ export function getApiErrorMessage(error: unknown, fallback: string) {
 
 function resolveSameOriginApiPath(apiRequestPath: string) {
   if (!apiRequestPath.startsWith('/api/')) {
-    throw new ApiError(0, 'API_PATH_INVALID', 'API requests must use same-origin /api/... paths.');
+    throw new ApiError(0, 'API_PATH_INVALID', formatStaticMessage('api.error.API_PATH_INVALID'));
   }
 
   return apiRequestPath;
@@ -141,7 +147,7 @@ async function readJson(response: Response) {
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    throw new ApiError(response.status, 'API_RESPONSE_ERROR', 'The server response is invalid.');
+    throw new ApiError(response.status, 'API_RESPONSE_ERROR', formatStaticMessage('api.error.API_RESPONSE_ERROR'));
   }
 }
 

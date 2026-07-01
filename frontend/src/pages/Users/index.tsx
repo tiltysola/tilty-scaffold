@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 
-import { RefreshCwIcon } from 'lucide-react';
+import { RefreshCwIcon, ShieldAlertIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuthenticatedSession } from '@/hooks/useAuth';
@@ -12,6 +13,7 @@ import { fetchUsers, type RoleSummary, updateUser, type UserListItem, type UserL
 import { Button } from '@/shadcn/components/ui/button';
 import { hasPermission, SystemPermission } from '@tilty/shared/access-control';
 
+import { AppEmptyState } from '@/components/AppEmptyState';
 import { IdentityVerificationDialog } from '@/components/IdentityVerification';
 
 import { EditUserDialog } from './components/EditUserDialog';
@@ -45,6 +47,7 @@ const Index = () => {
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
+  const intl = useIntl();
   const session = useAuthenticatedSession();
   const canManageUsers = hasPermission(session.user.permissions, SystemPermission.UserAdmin);
 
@@ -54,25 +57,6 @@ const Index = () => {
     setPagination(result.pagination);
   }, []);
 
-  const loadUsers = useCallback(
-    async (targetPage = page) => {
-      if (!accessVerified) {
-        return;
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        applyUserList(await fetchUsers({ page: targetPage, pageSize: userPageSize }));
-      } catch (loadError) {
-        setError(getApiErrorMessage(loadError, 'Users could not be loaded.'));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [accessVerified, applyUserList, page],
-  );
   const handleManagedUserChange = useCallback((updatedUser: UserListItem) => {
     setUsers((current) => current.map((user) => (user.id === updatedUser.id ? updatedUser : user)));
   }, []);
@@ -91,6 +75,23 @@ const Index = () => {
   const displayTotalPages = Math.max(pagination.totalPages, 1);
   const phoneBindingEnabled = phoneCountryCodes.length > 0;
 
+  const loadUsers = async (targetPage = page) => {
+    if (!accessVerified) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      applyUserList(await fetchUsers({ page: targetPage, pageSize: userPageSize }));
+    } catch (loadError) {
+      setError(getApiErrorMessage(loadError, intl.formatMessage({ id: 'users.load.failed' })));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     let isActive = true;
 
@@ -101,19 +102,20 @@ const Index = () => {
         }
 
         if (verified) {
+          setLoading(true);
           setAccessVerified(true);
         }
       })
       .catch((requestError: unknown) => {
         if (isActive) {
-          setError(getApiErrorMessage(requestError, 'User management access could not be verified.'));
+          setError(getApiErrorMessage(requestError, intl.formatMessage({ id: 'users.access.verification.failed' })));
         }
       });
 
     return () => {
       isActive = false;
     };
-  }, [requestChallenge]);
+  }, [intl, requestChallenge]);
 
   useEffect(() => {
     if (!accessVerified) {
@@ -130,7 +132,7 @@ const Index = () => {
       })
       .catch((loadError: unknown) => {
         if (isActive) {
-          setError(getApiErrorMessage(loadError, 'Users could not be loaded.'));
+          setError(getApiErrorMessage(loadError, intl.formatMessage({ id: 'users.load.failed' })));
         }
       })
       .finally(() => {
@@ -142,7 +144,7 @@ const Index = () => {
     return () => {
       isActive = false;
     };
-  }, [accessVerified, applyUserList, page]);
+  }, [accessVerified, applyUserList, intl, page]);
 
   useEffect(() => {
     if (!accessVerified) {
@@ -161,7 +163,7 @@ const Index = () => {
       })
       .catch((requestError: unknown) => {
         if (isActive) {
-          toast.error(getApiErrorMessage(requestError, 'Authentication configuration could not be loaded.'));
+          toast.error(getApiErrorMessage(requestError, intl.formatMessage({ id: 'users.auth.config.load.failed' })));
         }
       })
       .finally(() => {
@@ -173,12 +175,13 @@ const Index = () => {
     return () => {
       isActive = false;
     };
-  }, [accessVerified]);
+  }, [accessVerified, intl]);
 
   const handleConfirmVerification = async (input: VerificationGateSubmitInput) => {
     const verified = await confirmChallenge(input);
 
     if (verified) {
+      setLoading(true);
       setAccessVerified(true);
     }
   };
@@ -240,7 +243,7 @@ const Index = () => {
     const parsed = parseEditUserForm(editingForm, editingUser, phoneBindingEnabled, profileEmailVerificationEnabled);
 
     if (!parsed.success) {
-      setEditError(parsed.error);
+      setEditError(intl.formatMessage({ id: parsed.error ?? 'users.user.update.failed' }));
       return;
     }
 
@@ -258,9 +261,9 @@ const Index = () => {
       setUsers((current) => current.map((item) => (item.id === updatedUser.id ? updatedUser : item)));
       setEditingUser(null);
       setEditingRoleKeys([]);
-      toast.success('User updated.');
+      toast.success(intl.formatMessage({ id: 'users.user.updated' }));
     } catch (saveError) {
-      toast.error(getApiErrorMessage(saveError, 'User could not be updated.'));
+      toast.error(getApiErrorMessage(saveError, intl.formatMessage({ id: 'users.user.update.failed' })));
     } finally {
       setSavingUserId(null);
     }
@@ -274,32 +277,46 @@ const Index = () => {
     <div className="grid gap-6 p-4 lg:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="grid gap-1">
-          <h1 className="text-2xl font-semibold tracking-normal">Users</h1>
-          <p className="max-w-3xl text-sm text-muted-foreground">User directory and role assignments.</p>
+          <h1 className="text-2xl font-semibold tracking-normal">{intl.formatMessage({ id: 'users.title' })}</h1>
+          <p className="max-w-3xl text-sm text-muted-foreground">{intl.formatMessage({ id: 'users.description' })}</p>
         </div>
-        <Button className="shrink-0" variant="outline" onClick={() => void loadUsers()} disabled={loading}>
-          <RefreshCwIcon />
-          Refresh
-        </Button>
+        {accessVerified ? (
+          <Button className="shrink-0" disabled={loading} onClick={() => void loadUsers()} variant="outline">
+            <RefreshCwIcon />
+            {intl.formatMessage({ id: 'common.refresh' })}
+          </Button>
+        ) : null}
       </div>
       {!accessVerified ? (
-        <div className="flex min-h-64 items-center justify-center rounded-md border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-          {error
-            ? error
-            : pendingChallenge
-              ? 'Verify user management access to continue.'
-              : requestPending
-                ? 'Verifying user management access.'
-                : 'User management verification is required.'}
-        </div>
+        <AppEmptyState
+          className="min-h-64 p-0"
+          description={
+            error
+              ? error
+              : pendingChallenge
+                ? intl.formatMessage({ id: 'users.verify.access.continue' })
+                : requestPending
+                  ? intl.formatMessage({ id: 'users.verifying.access' })
+                  : intl.formatMessage({ id: 'users.verification.required' })
+          }
+          icon={<ShieldAlertIcon />}
+          title={intl.formatMessage({ id: 'users.verify.access.title' })}
+          tone="destructive"
+        />
       ) : error ? (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          <span>{error}</span>
-          <Button size="sm" variant="outline" onClick={() => void loadUsers()}>
-            <RefreshCwIcon />
-            Retry
-          </Button>
-        </div>
+        <AppEmptyState
+          actions={
+            <Button onClick={() => void loadUsers()} size="sm" variant="outline">
+              <RefreshCwIcon />
+              {intl.formatMessage({ id: 'common.retry' })}
+            </Button>
+          }
+          className="min-h-64 p-0"
+          description={error}
+          icon={<ShieldAlertIcon />}
+          title={intl.formatMessage({ id: 'users.verify.access.title' })}
+          tone="destructive"
+        />
       ) : (
         <UsersTable
           authConfigLoaded={authConfigLoaded}
@@ -345,13 +362,13 @@ const Index = () => {
           onOpenChange={(open: boolean) => {
             if (!open) {
               dismissChallenge();
-              setError('User management verification is required.');
+              setError(intl.formatMessage({ id: 'users.verification.required' }));
             }
           }}
           onSubmit={handleConfirmVerification}
           open={Boolean(pendingChallenge)}
           pending={submitPending}
-          title="Verify user management access"
+          title={intl.formatMessage({ id: 'users.verify.access.title' })}
         />
       ) : null}
     </div>

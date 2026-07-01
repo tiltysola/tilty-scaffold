@@ -1,7 +1,25 @@
+import { type IntlShape } from 'react-intl';
+
 import { type SetupAdministrator, type SetupEnvironment, type SetupEnvironmentStepId } from '@/lib/setup';
 import { routePath } from '@/router';
+import {
+  setupEnvironmentStepValues,
+  SetupSmsVerificationService,
+  SetupSsoProtocol,
+  type SetupSsoProtocolValue,
+} from '@tilty/shared/setup';
+import {
+  displayNameMaxLength,
+  displayNameMinLength,
+  emailMaxLength,
+  passwordMaxLength,
+  passwordMinLength,
+  usernameMaxLength,
+  usernameMinLength,
+  usernamePattern,
+} from '@tilty/shared/validation';
 
-import { hasLogTarget, type SetupFieldDefinition } from './definitions';
+import { hasLogTarget, type SetupFieldDefinition, type SetupStepDefinition } from './definitions';
 
 interface SetupFieldGroup {
   fields: SetupFieldDefinition[];
@@ -11,7 +29,7 @@ interface SetupFieldGroup {
 export interface SsoProfileDraft {
   id: string;
   name: string;
-  protocol: 'oauth2' | 'oidc';
+  protocol: SetupSsoProtocolValue;
   clientId: string;
   clientSecret: string;
   frontendCallbackUrl: string;
@@ -32,13 +50,21 @@ export interface SsoProfileDraft {
   bindingEnabled: boolean;
 }
 
+const setupEnvironmentStepSet = new Set<string>(setupEnvironmentStepValues);
+
 const fallbackAppDomain = 'http://localhost:8011';
+
+const setupCommonOptionMessageIds: Record<string, string> = {
+  false: 'common.disabled',
+  off: 'common.disabled',
+  true: 'common.enabled',
+};
 
 export function getFieldGroups(fields: SetupFieldDefinition[]) {
   const groups: SetupFieldGroup[] = [];
 
   for (const field of fields) {
-    const name = field.group ?? 'General';
+    const name = field.group ?? 'general';
     const existingGroup = groups.find((group) => group.name === name);
 
     if (existingGroup) {
@@ -55,109 +81,183 @@ export function getFieldGroups(fields: SetupFieldDefinition[]) {
 }
 
 export function fieldGroupsNeedHeader(groups: SetupFieldGroup[]) {
-  return groups.length > 1 || groups[0]?.name !== 'General';
+  return groups.length > 1 || groups[0]?.name !== 'general';
 }
 
-export function parseProfileArray<T>(value: string, isProfile: (profile: unknown) => profile is T) {
-  try {
-    const parsed = JSON.parse(value) as unknown;
+export function getAdministratorValidationError(administrator: SetupAdministrator, intl: IntlShape) {
+  const username = administrator.username.trim();
+  const displayName = administrator.displayName.trim();
+  const email = administrator.email.trim();
 
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed.filter(isProfile);
-  } catch {
-    return [];
-  }
-}
-
-export function isProfileObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
-
-export function getAdministratorValidationError(administrator: SetupAdministrator) {
-  if (!/^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$/.test(administrator.username.trim())) {
-    return 'The administrator username may contain letters, numbers, underscores, and hyphens.';
+  if (username.length < usernameMinLength) {
+    return intl.formatMessage({ id: 'setup.validation.username.min' });
   }
 
-  if (administrator.username.trim().length < 3) {
-    return 'The administrator username must contain at least 3 characters.';
+  if (username.length > usernameMaxLength) {
+    return intl.formatMessage({ id: 'setup.validation.username.max' });
   }
 
-  if (administrator.username.trim().length > 32) {
-    return 'The administrator username must contain at most 32 characters.';
+  if (!usernamePattern.test(username)) {
+    return intl.formatMessage({ id: 'setup.validation.username.pattern' });
   }
 
-  if (administrator.displayName.trim().length < 2) {
-    return 'The administrator display name must contain at least 2 characters.';
+  if (displayName.length < displayNameMinLength) {
+    return intl.formatMessage({ id: 'setup.validation.display.name.min' });
   }
 
-  if (administrator.displayName.trim().length > 64) {
-    return 'The administrator display name must contain at most 64 characters.';
+  if (displayName.length > displayNameMaxLength) {
+    return intl.formatMessage({ id: 'setup.validation.display.name.max' });
   }
 
-  if (!administrator.email.trim()) {
-    return 'The administrator email address is required.';
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return intl.formatMessage({ id: 'setup.validation.email.required' });
   }
 
-  if (administrator.password.length < 8) {
-    return 'The administrator password must contain at least 8 characters.';
+  if (email.length > emailMaxLength) {
+    return intl.formatMessage({ id: 'setup.validation.email.max' });
+  }
+
+  if (administrator.password.length < passwordMinLength) {
+    return intl.formatMessage({ id: 'setup.validation.password.min' });
+  }
+
+  if (administrator.password.length > passwordMaxLength) {
+    return intl.formatMessage({ id: 'setup.validation.password.max' });
   }
 
   if (administrator.password !== administrator.confirmPassword) {
-    return 'The administrator password confirmation does not match.';
+    return intl.formatMessage({ id: 'setup.validation.password.confirmation.mismatch' });
   }
 
   return null;
 }
 
-export function getPrimaryActionLabel(stepId: string, environment: SetupEnvironment, hasExistingUsers: boolean) {
+export function isProfileObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function parseProfileArray<T>(value: string, guard: (profile: unknown) => profile is T): T[] {
+  try {
+    const parsed = JSON.parse(value);
+
+    return Array.isArray(parsed) ? parsed.filter(guard) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function formatSetupStepTitle(step: Pick<SetupStepDefinition, 'id'>, intl: IntlShape) {
+  return intl.formatMessage({ id: `setup.step.${toMessagePathPart(step.id)}` });
+}
+
+export function formatSetupFieldGroupName(name: string, intl: IntlShape) {
+  return intl.formatMessage({ id: `setup.section.${toMessagePathPart(name)}` });
+}
+
+export function formatSetupFieldLabel(field: SetupFieldDefinition, intl: IntlShape) {
+  return intl.formatMessage({ id: `setup.field.${field.key}.label` });
+}
+
+export function formatSetupFieldDescription(key: string, intl: IntlShape) {
+  return intl.formatMessage({ id: `setup.field.${key}.description` });
+}
+
+export function formatSetupFieldPlaceholder(key: string, intl: IntlShape) {
+  return intl.formatMessage({ id: `setup.field.${key}.placeholder` });
+}
+
+export function formatSetupFieldOptions(field: SetupFieldDefinition, intl: IntlShape) {
+  return field.options?.map((option) => ({
+    ...option,
+    label: formatSetupOptionLabel(field.key, option, intl),
+  }));
+}
+
+function formatSetupOptionLabel(
+  fieldKey: string,
+  option: NonNullable<SetupFieldDefinition['options']>[number],
+  intl: IntlShape,
+) {
+  const commonId = setupCommonOptionMessageIds[option.value];
+
+  return intl.formatMessage({ id: commonId ?? `setup.option.${fieldKey}.${toMessageKeyPart(option.value)}` });
+}
+
+function toMessageKeyPart(value: string) {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'empty'
+  );
+}
+
+export function toMessagePathPart(value: string) {
+  return (
+    value
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1.$2')
+      .replace(/([a-z0-9])([A-Z])/g, '$1.$2')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '.')
+      .replace(/^\.+|\.+$/g, '') || 'empty'
+  );
+}
+
+export function getPrimaryActionLabel(
+  stepId: string,
+  environment: SetupEnvironment,
+  hasExistingUsers: boolean,
+  intl: IntlShape,
+) {
   if (stepId === 'database') {
-    return 'Verify database and continue';
+    return formatSetupUtilityMessage(intl, 'setup.action.verify.database.and.continue');
   }
 
   if (stepId === 'administrator' && hasExistingUsers) {
-    return 'Continue';
+    return formatSetupUtilityMessage(intl, 'common.continue');
   }
 
   if (stepId === 'cache' && environment.CACHE_STORE === 'redis') {
-    return 'Verify Redis and continue';
+    return formatSetupUtilityMessage(intl, 'setup.action.verify.redis.and.continue');
   }
 
   if (stepId === 'file-storage' && environment.FILE_STORAGE_DRIVER === 'oss') {
-    return 'Verify OSS and continue';
+    return formatSetupUtilityMessage(intl, 'setup.action.verify.oss.and.continue');
   }
 
   if (stepId === 'file-storage') {
-    return 'Verify storage and continue';
+    return formatSetupUtilityMessage(intl, 'setup.action.verify.storage.and.continue');
   }
 
   if (stepId === 'logging' && hasLogTarget(environment, 'sls')) {
-    return 'Verify SLS and continue';
+    return formatSetupUtilityMessage(intl, 'setup.action.verify.sls.and.continue');
   }
 
   if (stepId === 'email' && environment.EMAIL_VERIFICATION_SERVICE === 'smtp') {
-    return 'Verify SMTP and continue';
+    return formatSetupUtilityMessage(intl, 'setup.action.verify.smtp.and.continue');
   }
 
-  if (stepId === 'sms' && environment.SMS_VERIFICATION_SERVICE === 'aliyun') {
-    return 'Verify SMS and continue';
+  if (stepId === 'sms' && environment.SMS_VERIFICATION_SERVICE === SetupSmsVerificationService.Aliyun) {
+    return formatSetupUtilityMessage(intl, 'setup.action.verify.sms.and.continue');
   }
 
   if (stepId === 'sso' && environment.SSO_ENABLED === 'true') {
-    return 'Verify SSO and continue';
+    return formatSetupUtilityMessage(intl, 'setup.action.verify.sso.and.continue');
   }
 
   if (stepId === 'review') {
-    return 'Complete setup';
+    return formatSetupUtilityMessage(intl, 'setup.action.complete.setup');
   }
 
-  return 'Validate and continue';
+  return formatSetupUtilityMessage(intl, 'setup.action.validate.and.continue');
+}
+
+function formatSetupUtilityMessage(intl: IntlShape, id: string) {
+  return intl.formatMessage({ id });
 }
 
 export function isEnvironmentValidationStep(stepId: string): stepId is SetupEnvironmentStepId {
-  return stepId === 'administrator' || stepId === 'runtime' || stepId === 'scheduler' || stepId === 'security';
+  return setupEnvironmentStepSet.has(stepId);
 }
 
 export function getDefaultSsoProfileBase(appDomain?: string) {
@@ -165,7 +265,7 @@ export function getDefaultSsoProfileBase(appDomain?: string) {
 
   return {
     name: 'SSO',
-    protocol: 'oidc' as const,
+    protocol: SetupSsoProtocol.Oidc,
     clientId: '',
     clientSecret: '',
     frontendCallbackUrl: getUrlFromDomain(
@@ -204,7 +304,7 @@ export function normalizeSsoProfileDraft(profile: Record<string, unknown>, appDo
     id: typeof profile.id === 'string' ? profile.id : 'oidc',
     ...defaults,
     name: typeof profile.name === 'string' ? profile.name : defaults.name,
-    protocol: profile.protocol === 'oauth2' ? 'oauth2' : 'oidc',
+    protocol: profile.protocol === SetupSsoProtocol.Oauth2 ? SetupSsoProtocol.Oauth2 : SetupSsoProtocol.Oidc,
     clientId: typeof profile.clientId === 'string' ? profile.clientId : '',
     clientSecret: typeof profile.clientSecret === 'string' ? profile.clientSecret : '',
     frontendCallbackUrl:
@@ -263,7 +363,7 @@ export function normalizeSsoProfileForStorage(profile: SsoProfileDraft) {
       .filter(Boolean),
   };
 
-  if (profile.protocol === 'oauth2') {
+  if (profile.protocol === SetupSsoProtocol.Oauth2) {
     return {
       ...base,
       authorizationUrl: profile.authorizationUrl,

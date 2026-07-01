@@ -4,6 +4,9 @@ import simpleImportSort from 'eslint-plugin-simple-import-sort';
 import tseslint from 'typescript-eslint';
 import { defineConfig, globalIgnores } from 'eslint/config';
 
+import { tiltyI18nPlugin } from '../shared/eslint/tilty-i18n.mjs';
+import { tiltyModuleOrderPlugin } from '../shared/eslint/tilty-module-order.mjs';
+
 export default defineConfig([
   globalIgnores(['dist']),
   js.configs.recommended,
@@ -17,6 +20,7 @@ export default defineConfig([
     },
     plugins: {
       'simple-import-sort': simpleImportSort,
+      'tilty-module-order': tiltyModuleOrderPlugin,
     },
     rules: {
       '@typescript-eslint/no-unused-vars': [
@@ -30,6 +34,23 @@ export default defineConfig([
         'error',
         {
           groups: [['^node:'], ['^'], ['^@tilty'], ['^\\.'], ['^\\u0000']],
+        },
+      ],
+      'tilty-module-order/module-types-before-runtime': 'error',
+    },
+  },
+  {
+    files: ['src/i18n/messages/zh-CN.ts'],
+    plugins: {
+      'tilty-i18n': tiltyI18nPlugin,
+    },
+    rules: {
+      'tilty-i18n/message-catalog-order': [
+        'error',
+        {
+          referenceFile: 'src/i18n/messages/en-US.ts',
+          referenceObjectName: 'messages',
+          targetObjectName: 'messages',
         },
       ],
     },

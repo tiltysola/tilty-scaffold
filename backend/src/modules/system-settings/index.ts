@@ -13,6 +13,16 @@ interface SystemSettingsModuleOptions {
   cookies: AuthCookieConfig;
 }
 
+class SystemSettingsController {
+  get: Middleware = async (ctx) => {
+    ctx.body = ok(getSetupEnvironmentDefaults());
+  };
+
+  update: Middleware = async (ctx) => {
+    ctx.body = ok(await updateSetupEnvironmentConfig(ctx.request.body));
+  };
+}
+
 export function createSystemSettingsModule(
   authService: AuthService,
   options: SystemSettingsModuleOptions,
@@ -40,15 +50,5 @@ export function createSystemSettingsModule(
         handlers: [...requireVerifiedSystemSettingsAccess, controller.update],
       },
     ],
-  };
-}
-
-class SystemSettingsController {
-  get: Middleware = async (ctx) => {
-    ctx.body = ok(getSetupEnvironmentDefaults());
-  };
-
-  update: Middleware = async (ctx) => {
-    ctx.body = ok(await updateSetupEnvironmentConfig(ctx.request.body));
   };
 }

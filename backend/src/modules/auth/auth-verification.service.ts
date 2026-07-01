@@ -1,6 +1,17 @@
 import { type AuthenticationResponseJSON, type PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/server';
 import { createHmac, randomUUID } from 'crypto';
 
+import {
+  AuthMfaMethod,
+  type AuthSelectableVerificationPurposeValue,
+  type AuthVerificationCodeMethodValue,
+  AuthVerificationMethod,
+  type AuthVerificationMethodValue,
+  AuthVerificationPurpose as AuthVerificationPurposeContract,
+  type AuthVerificationPurposeValue,
+} from '@tilty/shared/auth';
+import { defaultLocale, type SupportedLocale } from '@tilty/shared/i18n';
+
 import { AppError } from '../../core/errors';
 import { type CacheStore } from '../../infra/cache';
 import { type UserModel } from '../users/user.model';
@@ -12,19 +23,12 @@ import { type TotpService, type VerifyTotpInput } from './auth.totp';
 import { type PasskeyService } from './auth-passkey.service';
 import { type AuthSessionRequestContext, getUserAgentFingerprint } from './auth-session.service';
 
-export type AuthVerificationPurpose =
-  | 'change_password'
-  | 'login'
-  | 'manage_sso'
-  | 'manage_mfa'
-  | 'manage_passkey'
-  | 'manage_totp'
-  | 'system_settings'
-  | 'sso'
-  | 'update_contact'
-  | 'user_management';
+export type AuthVerificationPurpose = AuthVerificationPurposeValue;
 
-export type VerificationMethod = MfaMethod | 'password';
+export type VerificationMethod = AuthVerificationMethodValue;
+export type StrongSudoPurpose =
+  | typeof AuthVerificationPurposeContract.SystemSettings
+  | typeof AuthVerificationPurposeContract.UserManagement;
 
 interface VerificationChallengeRecord {
   attempts: number;
@@ -55,7 +59,6 @@ export interface SsoBindVerificationIdentity {
 
 interface VerificationMethodDescriptor {
   method: VerificationMethod;
-  label: string;
   maskedTarget?: string | undefined;
 }
 
@@ -88,8 +91,8 @@ export interface AuthVerificationConfig {
 
 const challengeCacheKeyPrefix = 'auth:verification-challenge:';
 const sudoCacheKeyPrefix = 'auth:sudo:';
-const strongMfaMethods = new Set<MfaMethod>(['passkey', 'totp']);
-const weakMfaMethods = new Set<MfaMethod>(['sms', 'email']);
+const strongMfaMethods = new Set<MfaMethod>([AuthMfaMethod.Passkey, AuthMfaMethod.Totp]);
+const weakMfaMethods = new Set<MfaMethod>([AuthMfaMethod.Sms, AuthMfaMethod.Email]);
 
 export const defaultAuthVerificationConfig: AuthVerificationConfig = {
   challengeTtlMs: 5 * 60_000,
@@ -132,19 +135,11 @@ export class AuthVerificationService {
       const strongMethodConfigured = hasStrongMfaMethod(selectableMethods);
 
       if (!input.enabled && strongMethodConfigured) {
-        throw new AppError(
-          'MFA_REQUIRED_FOR_STRONG_VERIFIER',
-          'Two-step verification cannot be disabled while an authenticator app or passkey is configured.',
-          409,
-        );
+        throw new AppError('MFA_REQUIRED_FOR_STRONG_VERIFIER', 'error.MFA_REQUIRED_FOR_STRONG_VERIFIER', 409);
       }
 
       if (input.enabled && selectableMethods.length === 0) {
-        throw new AppError(
-          'MFA_VERIFICATION_UNAVAILABLE',
-          'No MFA verification method is available for this account.',
-          409,
-        );
+        throw new AppError('MFA_VERIFICATION_UNAVAILABLE', 'error.MFA_VERIFICATION_UNAVAILABLE', 409);
       }
 
       if (!strongMethodConfigured) {
@@ -174,7 +169,7 @@ export class AuthVerificationService {
   async createLoginChallenge(
     user: UserModel,
     context: AuthSessionRequestContext,
-    purpose: AuthVerificationPurpose = 'login',
+    purpose: AuthVerificationPurpose = AuthVerificationPurposeContract.Login,
   ) {
     return this.createChallenge(user, context, purpose);
   }
@@ -184,34 +179,40 @@ export class AuthVerificationService {
     context: AuthSessionRequestContext,
     ssoBindIdentity: SsoBindVerificationIdentity,
   ) {
-    return this.createChallenge(user, context, 'sso', undefined, ssoBindIdentity);
+    return this.createChallenge(user, context, AuthVerificationPurposeContract.Sso, undefined, ssoBindIdentity);
   }
 
   async createSudoChallenge(
     user: UserModel,
     sessionId: string,
-    purpose: Exclude<AuthVerificationPurpose, 'login' | 'sso'>,
+    purpose: AuthSelectableVerificationPurposeValue,
     context: AuthSessionRequestContext,
   ) {
     return this.createChallenge(user, context, purpose, sessionId);
   }
 
-  async sendChallengeCode(token: string, method: 'email' | 'sms', context: AuthSessionRequestContext, user: UserModel) {
+  async sendChallengeCode(
+    token: string,
+    method: AuthVerificationCodeMethodValue,
+    context: AuthSessionRequestContext,
+    user: UserModel,
+    locale: SupportedLocale = defaultLocale,
+  ) {
     const record = await this.requireChallengeRecord(token, context);
 
     if (record.userId !== user.id || !record.methods.includes(method)) {
       throwInvalidVerificationToken();
     }
 
-    if (method === 'email') {
+    if (method === AuthMfaMethod.Email) {
       return {
-        ...(await this.emailVerification.sendMfaCode(user.email)),
+        ...(await this.emailVerification.sendMfaCode(user.email, locale)),
         maskedTarget: maskEmail(user.email),
       };
     }
 
     if (!user.phoneNumber || !user.phoneVerified) {
-      throw new AppError('SMS_VERIFICATION_UNAVAILABLE', 'SMS verification is not available for this account.', 409);
+      throw new AppError('SMS_VERIFICATION_UNAVAILABLE', 'error.SMS_VERIFICATION_UNAVAILABLE', 409);
     }
 
     return {
@@ -236,8 +237,8 @@ export class AuthVerificationService {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const record = await this.requireChallengeRecord(token, context);
 
-      if (!record.methods.includes('passkey')) {
-        throw new AppError('PASSKEY_VERIFICATION_UNAVAILABLE', 'Passkey verification is not available.', 409);
+      if (!record.methods.includes(AuthMfaMethod.Passkey)) {
+        throw new AppError('PASSKEY_VERIFICATION_UNAVAILABLE', 'error.PASSKEY_VERIFICATION_UNAVAILABLE', 409);
       }
 
       const options = await this.passkeyService.createAuthenticationOptions(record.userId);
@@ -257,7 +258,7 @@ export class AuthVerificationService {
       }
     }
 
-    throw new AppError('AUTH_VERIFICATION_CONFLICT', 'Verification state changed. Submit the request again.', 409);
+    throw new AppError('AUTH_VERIFICATION_CONFLICT', 'error.AUTH_VERIFICATION_CONFLICT', 409);
   }
 
   async verifyChallenge(
@@ -283,7 +284,11 @@ export class AuthVerificationService {
 
         if (nextRecord.attempts >= this.config.maxChallengeAttempts) {
           await this.cacheStore.delete(getChallengeCacheKey(token));
-          throw new AppError('AUTH_VERIFICATION_ATTEMPT_LIMIT_EXCEEDED', 'Verification attempts are exhausted.', 429);
+          throw new AppError(
+            'AUTH_VERIFICATION_ATTEMPT_LIMIT_EXCEEDED',
+            'error.AUTH_VERIFICATION_ATTEMPT_LIMIT_EXCEEDED',
+            429,
+          );
         }
 
         await this.cacheStore.compareAndSet(
@@ -292,7 +297,7 @@ export class AuthVerificationService {
           nextRecord,
           record.expiresAt - Date.now(),
         );
-        throw new AppError('AUTH_VERIFICATION_INVALID', 'Verification code or response is invalid.', 401, {
+        throw new AppError('AUTH_VERIFICATION_INVALID', 'error.AUTH_VERIFICATION_INVALID', 401, {
           remainingAttempts: this.config.maxChallengeAttempts - nextRecord.attempts,
         });
       }
@@ -336,7 +341,7 @@ export class AuthVerificationService {
       };
     }
 
-    throw new AppError('AUTH_VERIFICATION_CONFLICT', 'Verification state changed. Submit the request again.', 409);
+    throw new AppError('AUTH_VERIFICATION_CONFLICT', 'error.AUTH_VERIFICATION_CONFLICT', 409);
   }
 
   async requireSudoGrant(sessionId: string, userId: string, purpose: AuthVerificationPurpose) {
@@ -348,7 +353,7 @@ export class AuthVerificationService {
       grant.expiresAt <= Date.now() ||
       !isSudoGrantValidForPurpose(grant, purpose)
     ) {
-      throw new AppError('AUTH_VERIFICATION_REQUIRED', 'Additional authentication is required.', 403, {
+      throw new AppError('AUTH_VERIFICATION_REQUIRED', 'error.AUTH_VERIFICATION_REQUIRED', 403, {
         purpose,
       });
     }
@@ -371,7 +376,7 @@ export class AuthVerificationService {
     const defaultMethod = methods[0];
 
     if (!defaultMethod) {
-      throw new AppError('AUTH_VERIFICATION_UNAVAILABLE', 'No verification method is available for this account.', 409);
+      throw new AppError('AUTH_VERIFICATION_UNAVAILABLE', 'error.AUTH_VERIFICATION_UNAVAILABLE', 409);
     }
 
     const verificationToken = randomUUID();
@@ -409,19 +414,19 @@ export class AuthVerificationService {
     const methods: MfaMethod[] = [];
 
     if ((await this.passkeyService.countUserPasskeys(user.id)) > 0) {
-      methods.push('passkey');
+      methods.push(AuthMfaMethod.Passkey);
     }
 
     if (user.totpEnabled) {
-      methods.push('totp');
+      methods.push(AuthMfaMethod.Totp);
     }
 
     if (this.smsVerification.isEnabled() && user.phoneNumber && user.phoneVerified) {
-      methods.push('sms');
+      methods.push(AuthMfaMethod.Sms);
     }
 
     if (this.emailVerification.isEnabled() && user.emailVerified) {
-      methods.push('email');
+      methods.push(AuthMfaMethod.Email);
     }
 
     return orderMfaMethods(methods);
@@ -460,14 +465,18 @@ export class AuthVerificationService {
 
     if (record.attempts >= this.config.maxChallengeAttempts) {
       await this.cacheStore.delete(key);
-      throw new AppError('AUTH_VERIFICATION_ATTEMPT_LIMIT_EXCEEDED', 'Verification attempts are exhausted.', 429);
+      throw new AppError(
+        'AUTH_VERIFICATION_ATTEMPT_LIMIT_EXCEEDED',
+        'error.AUTH_VERIFICATION_ATTEMPT_LIMIT_EXCEEDED',
+        429,
+      );
     }
 
     return record;
   }
 
   private async verifyMethod(record: VerificationChallengeRecord, input: VerifyChallengeInput, user: UserModel) {
-    if (input.method === 'password') {
+    if (input.method === AuthVerificationMethod.Password) {
       if (!input.password || !user.passwordHash || !user.passwordSalt) {
         return false;
       }
@@ -475,9 +484,9 @@ export class AuthVerificationService {
       return verifyPassword(input.password, user.passwordHash, user.passwordSalt);
     }
 
-    if (input.method === 'passkey') {
+    if (input.method === AuthVerificationMethod.Passkey) {
       if (!input.passkeyResponse || !record.passkeyChallenge) {
-        throw new AppError('PASSKEY_RESPONSE_REQUIRED', 'Passkey response is required.', 400);
+        throw new AppError('PASSKEY_RESPONSE_REQUIRED', 'error.PASSKEY_RESPONSE_REQUIRED', 400);
       }
 
       try {
@@ -492,11 +501,11 @@ export class AuthVerificationService {
       }
     }
 
-    if (input.method === 'totp') {
+    if (input.method === AuthVerificationMethod.Totp) {
       return this.totpService.verifyUserSecondFactor(user, input);
     }
 
-    if (input.method === 'email') {
+    if (input.method === AuthVerificationMethod.Email) {
       try {
         await this.emailVerification.verifyMfaCode(user.email, input.code);
         return true;
@@ -509,7 +518,7 @@ export class AuthVerificationService {
       }
     }
 
-    if (input.method === 'sms') {
+    if (input.method === AuthVerificationMethod.Sms) {
       if (!user.phoneNumber || !user.phoneVerified) {
         return false;
       }
@@ -530,38 +539,33 @@ export class AuthVerificationService {
   }
 
   private toMethodDescriptor(method: VerificationMethod, user: UserModel): VerificationMethodDescriptor {
-    if (method === 'password') {
+    if (method === AuthVerificationMethod.Password) {
       return {
         method,
-        label: 'Password',
       };
     }
 
-    if (method === 'passkey') {
+    if (method === AuthVerificationMethod.Passkey) {
       return {
         method,
-        label: 'Passkey',
       };
     }
 
-    if (method === 'totp') {
+    if (method === AuthVerificationMethod.Totp) {
       return {
         method,
-        label: 'Authenticator app',
       };
     }
 
-    if (method === 'sms') {
+    if (method === AuthVerificationMethod.Sms) {
       return {
         method,
-        label: 'SMS',
         ...(user.phoneNumber ? { maskedTarget: maskPhoneNumber(user.phoneNumber) } : {}),
       };
     }
 
     return {
       method,
-      label: 'Email',
       maskedTarget: maskEmail(user.email),
     };
   }
@@ -581,7 +585,7 @@ export class AuthVerificationService {
       return methods;
     }
 
-    return ['password'];
+    return [AuthVerificationMethod.Password];
   }
 }
 
@@ -604,7 +608,7 @@ function hasStrongMfaMethod(methods: MfaMethod[]) {
 }
 
 function throwInvalidVerificationToken(): never {
-  throw new AppError('AUTH_VERIFICATION_TOKEN_INVALID', 'Verification token is invalid or expired.', 401);
+  throw new AppError('AUTH_VERIFICATION_TOKEN_INVALID', 'error.AUTH_VERIFICATION_TOKEN_INVALID', 401);
 }
 
 function isAppErrorCode(error: unknown, ...codes: string[]) {
@@ -616,15 +620,22 @@ function isSudoGrantValidForPurpose(grant: SudoGrantRecord, purpose: AuthVerific
     return true;
   }
 
-  return grant.methods.some((method) => method === 'passkey' || method === 'totp');
+  return grant.methods.some(
+    (method) => method === AuthVerificationMethod.Passkey || method === AuthVerificationMethod.Totp,
+  );
 }
 
-export function isStrongSudoPurpose(purpose: AuthVerificationPurpose) {
-  return purpose === 'system_settings' || purpose === 'user_management';
+export function isStrongSudoPurpose(purpose: AuthVerificationPurpose): purpose is StrongSudoPurpose {
+  return (
+    purpose === AuthVerificationPurposeContract.SystemSettings ||
+    purpose === AuthVerificationPurposeContract.UserManagement
+  );
 }
 
 function isSelectableSudoPurpose(purpose: AuthVerificationPurpose) {
-  return purpose === 'change_password' || purpose === 'manage_sso';
+  return (
+    purpose === AuthVerificationPurposeContract.ChangePassword || purpose === AuthVerificationPurposeContract.ManageSso
+  );
 }
 
 function maskEmail(email: string) {

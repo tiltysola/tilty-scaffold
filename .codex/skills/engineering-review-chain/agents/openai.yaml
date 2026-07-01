@@ -1,0 +1,4 @@
+interface:
+  display_name: "Engineering Review Chain"
+  short_description: "Code, security, and repo review workflow"
+  default_prompt: "Use $engineering-review-chain to review this change or repository for code quality, security risk, documentation consistency, tests, and validation coverage."

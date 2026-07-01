@@ -1,3 +1,5 @@
+import { useIntl } from 'react-intl';
+
 import { type VerificationMethodName } from '@/lib/auth';
 import { Button } from '@/shadcn/components/ui/button';
 import {
@@ -27,6 +29,7 @@ const VerificationMethodSwitch = ({
   onChange,
   onOpen,
 }: VerificationMethodSwitchProps) => {
+  const intl = useIntl();
   const current = methods.find((method) => method.method === currentMethod);
   const alternatives = methods.filter((method) => method.method !== currentMethod);
 
@@ -36,11 +39,11 @@ const VerificationMethodSwitch = ({
 
   return (
     <span className="flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 text-right text-xs font-normal text-muted-foreground">
-      <span>{getUnavailableLabel(current)}</span>
+      <span>{getUnavailableLabel(current, intl.formatMessage)}</span>
       <DropdownMenu onOpenChange={(open: boolean) => (open ? onOpen?.() : undefined)}>
         <DropdownMenuTrigger asChild>
           <Button className="h-auto p-0 text-xs font-medium" disabled={disabled} type="button" variant="link">
-            Switch method
+            {intl.formatMessage({ id: 'identity.switch.method' })}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-44">
@@ -55,12 +58,18 @@ const VerificationMethodSwitch = ({
   );
 };
 
-function getUnavailableLabel(current: VerificationMethodSwitchOption | undefined) {
+function getUnavailableLabel(
+  current: VerificationMethodSwitchOption | undefined,
+  formatMessage: ReturnType<typeof useIntl>['formatMessage'],
+) {
   if (current?.method === 'totp') {
-    return 'App unavailable?';
+    return formatMessage({ id: 'identity.totp.unavailable' });
   }
 
-  return `${current?.label ?? 'This method'} unavailable?`;
+  return formatMessage(
+    { id: 'identity.method.unavailable' },
+    { name: current?.label ?? formatMessage({ id: 'identity.this.method' }) },
+  );
 }
 
 export default VerificationMethodSwitch;

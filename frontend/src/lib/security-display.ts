@@ -1,70 +1,75 @@
+import { type IntlShape } from 'react-intl';
+
 import { type MfaMethod, type MfaSettings } from './auth';
 
-const mfaMethodLabels: Record<MfaMethod, string> = {
-  email: 'Email',
-  passkey: 'Passkey',
-  sms: 'SMS',
-  totp: 'Authenticator app',
-};
-
-export function getTwoStepStatusDescription(settings: MfaSettings) {
+export function getTwoStepStatusDescription(settings: MfaSettings, intl: IntlShape) {
   if (settings.twoStepEnabled) {
-    return `Enabled methods: ${formatMfaMethodList(settings.effectiveMethods)}.`;
+    return intl.formatMessage(
+      { id: 'security.two.step.status.enabled.methods' },
+      { methods: formatMfaMethodList(settings.effectiveMethods, intl) },
+    );
   }
 
   if (!settings.twoStepCanEnable) {
-    return 'Add a verified contact method, authenticator app, or passkey.';
+    return intl.formatMessage({ id: 'security.two.step.status.add.method' });
   }
 
-  return `Enable to use ${formatMfaMethodList(settings.availableMethods)}.`;
+  return intl.formatMessage(
+    { id: 'security.two.step.status.enable.with.methods' },
+    { methods: formatMfaMethodList(settings.availableMethods, intl) },
+  );
 }
 
-export function formatMfaMethodList(methods: MfaMethod[]) {
+export function formatMfaMethodList(methods: MfaMethod[], intl: IntlShape) {
   if (methods.length === 0) {
-    return 'none';
+    return intl.formatMessage({ id: 'security.mfa.methods.none' });
   }
 
-  return methods.map((method) => mfaMethodLabels[method]).join(', ');
+  return methods.map((method) => intl.formatMessage({ id: `security.mfa.method.${method}` })).join(', ');
 }
 
-export function formatPasskeyDeviceType(deviceType: string) {
+export function formatPasskeyDeviceType(deviceType: string, intl: IntlShape) {
   if (deviceType === 'multiDevice') {
-    return 'Synced passkey';
+    return intl.formatMessage({ id: 'security.passkey.device.synced' });
   }
 
   if (deviceType === 'singleDevice') {
-    return 'Device-bound passkey';
+    return intl.formatMessage({ id: 'security.passkey.device.device.bound' });
   }
 
   return deviceType;
 }
 
-export function formatPasskeyCount(count: number) {
-  return `${count} ${count === 1 ? 'passkey' : 'passkeys'}`;
+export function formatPasskeyCount(count: number, intl: IntlShape) {
+  return intl.formatMessage({ id: 'security.passkey.count' }, { count });
 }
 
-export function formatPasskeyDisplayName(name: string) {
+export function formatPasskeyDisplayName(name: string, intl: IntlShape) {
   const normalizedName = name.trim();
 
   if (!normalizedName || normalizedName === 'Passkey' || /^Passkey \d+$/.test(normalizedName)) {
-    return normalizedName || 'Passkey';
+    const defaultNameMatch = /^Passkey (?<index>\d+)$/.exec(normalizedName);
+
+    return defaultNameMatch?.groups?.index
+      ? intl.formatMessage({ id: 'security.passkey.default.name' }, { index: defaultNameMatch.groups.index })
+      : intl.formatMessage({ id: 'security.passkey.remark.placeholder' });
   }
 
   if (normalizedName.startsWith('Remark: ')) {
-    return normalizedName;
+    return intl.formatMessage({ id: 'security.passkey.remark.display' }, { remark: normalizedName.slice(8) });
   }
 
-  return `Remark: ${normalizedName}`;
+  return intl.formatMessage({ id: 'security.passkey.remark.display' }, { remark: normalizedName });
 }
 
-export function formatSecurityDate(value: string) {
+export function formatSecurityDate(value: string, intl: IntlShape) {
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    return 'Unknown time';
+    return intl.formatMessage({ id: 'security.unknown.time' });
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(intl.locale, {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date);

@@ -61,14 +61,6 @@ export interface FileStorage {
   save(input: SaveFileInput): Promise<SavedFile>;
 }
 
-export function createFileStorage(config: FileStorageConfig): FileStorage {
-  if (config.driver === 'oss') {
-    return new OssFileStorage(config);
-  }
-
-  return new LocalFileStorage(config);
-}
-
 class LocalFileStorage implements FileStorage {
   private readonly root: string;
 
@@ -122,7 +114,7 @@ class OssFileStorage implements FileStorage {
         mime: input.contentType,
       });
     } catch {
-      throw new AppError('FILE_STORAGE_UPLOAD_FAILED', 'The file could not be uploaded.', 502);
+      throw new AppError('FILE_STORAGE_UPLOAD_FAILED', 'error.FILE_STORAGE_UPLOAD_FAILED', 502);
     }
 
     return {
@@ -137,7 +129,7 @@ class OssFileStorage implements FileStorage {
     try {
       await client.delete(normalizeStorageKey(key));
     } catch {
-      throw new AppError('FILE_STORAGE_DELETE_FAILED', 'The file could not be deleted.', 502);
+      throw new AppError('FILE_STORAGE_DELETE_FAILED', 'error.FILE_STORAGE_DELETE_FAILED', 502);
     }
   }
 
@@ -161,11 +153,19 @@ class OssFileStorage implements FileStorage {
   }
 }
 
+export function createFileStorage(config: FileStorageConfig): FileStorage {
+  if (config.driver === 'oss') {
+    return new OssFileStorage(config);
+  }
+
+  return new LocalFileStorage(config);
+}
+
 function normalizeStorageKey(key: string) {
   const normalized = posix.normalize(key).replace(/^\/+/, '');
 
   if (!normalized || normalized.startsWith('../') || normalized === '..') {
-    throw new AppError('FILE_STORAGE_KEY_INVALID', 'The file storage key is invalid.', 500);
+    throw new AppError('FILE_STORAGE_KEY_INVALID', 'error.FILE_STORAGE_KEY_INVALID', 500);
   }
 
   return normalized;

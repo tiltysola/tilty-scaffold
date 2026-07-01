@@ -1,4 +1,5 @@
 import { type SubmitEventHandler, useEffect, useRef, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { type z } from 'zod';
@@ -6,15 +7,15 @@ import { type z } from 'zod';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { useFormState } from '@/hooks/useFormState';
 import { bindSsoAccount, completeSsoLogin, createSsoAccount } from '@/lib/auth';
+import { routePath } from '@/router';
+import { Button } from '@/shadcn/components/ui/button';
+import { Spinner } from '@/shadcn/components/ui/spinner';
 import {
   createPasswordFormSchema,
   displayNameSchema,
   loginCredentialsSchema,
   usernameSchema,
-} from '@/lib/auth-validation';
-import { routePath } from '@/router';
-import { Button } from '@/shadcn/components/ui/button';
-import { Spinner } from '@/shadcn/components/ui/spinner';
+} from '@tilty/shared/validation';
 
 import { AuthCard } from '@/components/AuthCard';
 import FormMessage from '@/components/FormMessage';
@@ -32,13 +33,13 @@ import {
   withProfileBindResult,
 } from './utils';
 
+type LoginFormState = z.input<typeof loginCredentialsSchema>;
+type SsoCreateFormState = z.input<typeof ssoCreateSchema>;
+
 const ssoCreateSchema = createPasswordFormSchema({
   username: usernameSchema,
   displayName: displayNameSchema,
 });
-
-type LoginFormState = z.input<typeof loginCredentialsSchema>;
-type SsoCreateFormState = z.input<typeof ssoCreateSchema>;
 
 const Index = () => {
   const [callback] = useState<ParsedSsoCallback>(() => parseSsoCallback(getInitialCallbackHash()));
@@ -49,6 +50,7 @@ const Index = () => {
   );
   const handledCallbackRef = useRef(false);
   const navigate = useNavigate();
+  const intl = useIntl();
   const { error, pending: submitting, run, setError } = useAsyncAction();
   const { form, handleChange } = useFormState<LoginFormState>({
     identifier: '',
@@ -95,18 +97,20 @@ const Index = () => {
     }
 
     if (callback.type === 'session') {
-      void run(() => completeSsoLogin(callback.token), 'SSO authentication could not be completed.').then((session) => {
-        if (session) {
-          navigate(callback.redirectPath, { replace: true });
-          return;
-        }
+      void run(() => completeSsoLogin(callback.token), intl.formatMessage({ id: 'sso.authentication.invalid' })).then(
+        (session) => {
+          if (session) {
+            navigate(callback.redirectPath, { replace: true });
+            return;
+          }
 
-        setStatus('invalid');
-      });
+          setStatus('invalid');
+        },
+      );
 
       return;
     }
-  }, [callback, navigate, run]);
+  }, [callback, intl, navigate, run]);
 
   const handleSsoTabChange = (value: string) => {
     if (value !== 'create' && value !== 'bind') {
@@ -129,7 +133,7 @@ const Index = () => {
     const parsed = ssoCreateSchema.safeParse(ssoCreateForm);
 
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? 'Account registration details are invalid.');
+      setError(intl.formatMessage({ id: parsed.error.issues[0]?.message ?? 'sso.account.registration.invalid' }));
       return;
     }
 
@@ -139,7 +143,7 @@ const Index = () => {
           ...parsed.data,
           token: ssoBind.token,
         }),
-      'SSO account creation could not be completed.',
+      intl.formatMessage({ id: 'sso.create.account.failed' }),
     );
 
     if (session) {
@@ -159,7 +163,7 @@ const Index = () => {
     const parsed = loginCredentialsSchema.safeParse(form);
 
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? 'Account credentials are invalid.');
+      setError(intl.formatMessage({ id: parsed.error.issues[0]?.message ?? 'sso.account.credentials.invalid' }));
       return;
     }
 
@@ -169,7 +173,7 @@ const Index = () => {
           ...parsed.data,
           token: ssoBind.token,
         }),
-      'SSO account binding could not be completed.',
+      intl.formatMessage({ id: 'sso.bind.account.failed' }),
     );
 
     if (!result) {
@@ -194,9 +198,9 @@ const Index = () => {
 
   return (
     <AuthCard
-      description={getPageDescription(status, ssoBind)}
+      description={getPageDescription(status, ssoBind, intl.formatMessage)}
       maxWidth={status === 'bind' ? '2xl' : 'md'}
-      title={getPageTitle(status)}
+      title={getPageTitle(status, intl.formatMessage)}
     >
       {status === 'bind' && ssoBind ? (
         <SsoBindTabs
@@ -216,15 +220,15 @@ const Index = () => {
         <div className="flex flex-col items-center gap-4 text-center">
           {status === 'processing' ? <Spinner className="size-6 text-muted-foreground" /> : null}
           <FormMessage
-            message={error ?? (status === 'invalid' ? 'The SSO callback does not contain valid credentials.' : null)}
+            message={error ?? (status === 'invalid' ? intl.formatMessage({ id: 'sso.authentication.invalid' }) : null)}
             variant="error"
           />
           {status === 'invalid' ? (
             <Button asChild variant="outline">
-              <Link to={routePath('login')}>Return to login</Link>
+              <Link to={routePath('login')}>{intl.formatMessage({ id: 'sso.return.to.login' })}</Link>
             </Button>
           ) : (
-            <p className="text-sm text-muted-foreground">Please wait.</p>
+            <p className="text-sm text-muted-foreground">{intl.formatMessage({ id: 'sso.wait' })}</p>
           )}
         </div>
       )}

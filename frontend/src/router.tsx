@@ -1,26 +1,10 @@
 /* eslint-disable react-refresh/only-export-components -- Route helpers are intentionally exported from the router. */
 import { lazy, Suspense } from 'react';
+import { useIntl } from 'react-intl';
 import { type RouteObject, useRoutes } from 'react-router-dom';
 
 import { Spinner } from '@/shadcn/components/ui/spinner';
 import { hasPermission, SystemPermission, type SystemPermissionKey } from '@tilty/shared/access-control';
-
-const Layout = lazy(() => import('@/components/Layout'));
-const RequireAuth = lazy(() => import('@/components/RequireAuth'));
-const RequirePermission = lazy(() => import('@/components/RequirePermission'));
-
-const DashboardPage = lazy(() => import('@/pages/Dashboard'));
-const ProfilePage = lazy(() => import('@/pages/Profile'));
-const SecurityPage = lazy(() => import('@/pages/Security'));
-const SystemSettingsPage = lazy(() => import('@/pages/SystemSettings'));
-const UsersPage = lazy(() => import('@/pages/Users'));
-const SetupPage = lazy(() => import('@/pages/Setup'));
-const LoginPage = lazy(() => import('@/pages/Login'));
-const RegisterPage = lazy(() => import('@/pages/Register'));
-const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPassword'));
-const SsoCallbackPage = lazy(() => import('@/pages/SsoCallback'));
-const VerifySignInPage = lazy(() => import('@/pages/VerifySignIn'));
-const NotFoundPage = lazy(() => import('@/pages/NotFound'));
 
 export type NavigationGroupId = 'admin' | 'applications' | 'profile';
 export type NavigationIcon = 'apiDocs' | 'dashboard' | 'profile' | 'security' | 'settings' | 'users';
@@ -40,38 +24,70 @@ type RouteId =
 interface PageRoute {
   id: RouteId;
   path: string;
-  title: string;
+  titleMessageId: string;
   element: RouteObject['element'];
   layout: 'app' | 'standalone';
   permission?: SystemPermissionKey;
 }
 
+interface NavigationItem {
+  external?: boolean;
+  group: NavigationGroupId;
+  icon: NavigationIcon;
+  permission?: SystemPermissionKey;
+  titleMessageId: string;
+  url: string;
+}
+
+export interface NavigationGroup {
+  id: NavigationGroupId;
+  labelMessageId: string;
+  items: NavigationItem[];
+}
+
+const Layout = lazy(() => import('@/components/Layout'));
+const RequireAuth = lazy(() => import('@/components/RequireAuth'));
+const RequirePermission = lazy(() => import('@/components/RequirePermission'));
+
+const DashboardPage = lazy(() => import('@/pages/Dashboard'));
+const ProfilePage = lazy(() => import('@/pages/Profile'));
+const SecurityPage = lazy(() => import('@/pages/Security'));
+const SystemSettingsPage = lazy(() => import('@/pages/SystemSettings'));
+const UsersPage = lazy(() => import('@/pages/Users'));
+const SetupPage = lazy(() => import('@/pages/Setup'));
+const LoginPage = lazy(() => import('@/pages/Login'));
+const RegisterPage = lazy(() => import('@/pages/Register'));
+const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPassword'));
+const SsoCallbackPage = lazy(() => import('@/pages/SsoCallback'));
+const VerifySignInPage = lazy(() => import('@/pages/VerifySignIn'));
+const NotFoundPage = lazy(() => import('@/pages/NotFound'));
+
 const pageRoutes: PageRoute[] = [
   {
     id: 'dashboard',
     path: '/dashboard',
-    title: 'Dashboard',
+    titleMessageId: 'route.dashboard',
     element: <DashboardPage />,
     layout: 'app',
   },
   {
     id: 'profile',
     path: '/profile',
-    title: 'Profile',
+    titleMessageId: 'route.profile',
     element: <ProfilePage />,
     layout: 'app',
   },
   {
     id: 'security',
     path: '/security',
-    title: 'Security',
+    titleMessageId: 'route.security',
     element: <SecurityPage />,
     layout: 'app',
   },
   {
     id: 'users',
     path: '/users',
-    title: 'Users',
+    titleMessageId: 'route.users',
     element: <UsersPage />,
     layout: 'app',
     permission: SystemPermission.UserList,
@@ -79,7 +95,7 @@ const pageRoutes: PageRoute[] = [
   {
     id: 'systemSettings',
     path: '/settings',
-    title: 'System Settings',
+    titleMessageId: 'route.system.settings',
     element: <SystemSettingsPage />,
     layout: 'app',
     permission: SystemPermission.Root,
@@ -87,76 +103,61 @@ const pageRoutes: PageRoute[] = [
   {
     id: 'setup',
     path: '/setup',
-    title: 'Setup',
+    titleMessageId: 'route.setup',
     element: <SetupPage />,
     layout: 'standalone',
   },
   {
     id: 'login',
     path: '/login',
-    title: 'Log in',
+    titleMessageId: 'route.login',
     element: <LoginPage />,
     layout: 'standalone',
   },
   {
     id: 'register',
     path: '/register',
-    title: 'Account registration',
+    titleMessageId: 'route.account.registration',
     element: <RegisterPage />,
     layout: 'standalone',
   },
   {
     id: 'forgotPassword',
     path: '/forgot-password',
-    title: 'Password recovery',
+    titleMessageId: 'route.password.recovery',
     element: <ForgotPasswordPage />,
     layout: 'standalone',
   },
   {
     id: 'ssoCallback',
     path: '/sso/callback',
-    title: 'SSO callback',
+    titleMessageId: 'route.sso.callback',
     element: <SsoCallbackPage />,
     layout: 'standalone',
   },
   {
     id: 'verifySignIn',
     path: '/verify-sign-in',
-    title: 'Verify sign-in',
+    titleMessageId: 'route.verify.sign.in',
     element: <VerifySignInPage />,
     layout: 'standalone',
   },
 ];
 
-interface NavigationItem {
-  external?: boolean;
-  group: NavigationGroupId;
-  icon: NavigationIcon;
-  permission?: SystemPermissionKey;
-  title: string;
-  url: string;
-}
-
-export interface NavigationGroup {
-  id: NavigationGroupId;
-  label: string;
-  items: NavigationItem[];
-}
-
 const defaultRouteId: RouteId = 'dashboard';
 
-const navigationGroups: Array<Pick<NavigationGroup, 'id' | 'label'>> = [
+const navigationGroups: Array<Pick<NavigationGroup, 'id' | 'labelMessageId'>> = [
   {
     id: 'applications',
-    label: 'Applications',
+    labelMessageId: 'nav.group.applications',
   },
   {
     id: 'profile',
-    label: 'Account',
+    labelMessageId: 'nav.group.profile',
   },
   {
     id: 'admin',
-    label: 'Admin',
+    labelMessageId: 'nav.group.admin',
   },
 ];
 
@@ -166,7 +167,7 @@ const navigationItems: NavigationItem[] = [
     external: true,
     group: 'applications',
     icon: 'apiDocs',
-    title: 'API docs',
+    titleMessageId: 'nav.api.docs',
     url: '/api/docs',
   },
   createNavigationRouteItem('profile', 'profile', 'profile'),
@@ -225,20 +226,29 @@ const appRouteObjects: RouteObject[] = [
   },
 ];
 
+const Index = () => {
+  const routes = useRoutes(appRouteObjects);
+
+  return <Suspense fallback={<RouteFallback />}>{routes}</Suspense>;
+};
+
 export function routePath(id: RouteId) {
   return getPageRoute(id).path;
 }
 
-export function getPageTitle(pathname: string) {
+export function getPageTitleMessageId(pathname: string) {
+  return getPageRouteByPath(pathname).titleMessageId;
+}
+
+function getPageRouteByPath(pathname: string) {
   const normalizedPathname = normalizePathname(pathname);
 
   if (normalizedPathname === '/') {
-    return getPageRoute(defaultRouteId).title;
+    return getPageRoute(defaultRouteId);
   }
 
   return (
-    pageRoutes.find((route) => normalizePathname(route.path) === normalizedPathname)?.title ??
-    getPageRoute(defaultRouteId).title
+    pageRoutes.find((route) => normalizePathname(route.path) === normalizedPathname) ?? getPageRoute(defaultRouteId)
   );
 }
 
@@ -252,19 +262,15 @@ export function getMainNavigationGroups(permissionKeys?: string[]): NavigationGr
   return navigationGroups
     .map((group) => ({
       id: group.id,
-      label: group.label,
+      labelMessageId: group.labelMessageId,
       items: items.filter((item) => item.group === group.id),
     }))
     .filter((group) => group.items.length > 0);
 }
 
-const Index = () => {
-  const routes = useRoutes(appRouteObjects);
-
-  return <Suspense fallback={<RouteFallback />}>{routes}</Suspense>;
-};
-
 function RouteFallback() {
+  const intl = useIntl();
+
   return (
     <main
       aria-busy="true"
@@ -272,7 +278,7 @@ function RouteFallback() {
     >
       <div className="flex flex-col items-center gap-3 text-center">
         <Spinner className="size-5" />
-        <span>Loading</span>
+        <span>{intl.formatMessage({ id: 'common.loading' })}</span>
       </div>
     </main>
   );
@@ -300,7 +306,7 @@ function createNavigationRouteItem(
     group,
     icon,
     ...(permission ? { permission } : {}),
-    title: route.title,
+    titleMessageId: route.titleMessageId,
     url: route.path,
   };
 }

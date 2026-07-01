@@ -2,16 +2,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type RegistrationResponseJSON } from '@simplewebauthn/browser';
 
+import { completePasskeyRegistration, type PasskeyRegistrationOptionsResult } from '../src/lib/auth';
+import { createApiSuccessResponse } from './support/api';
+import { clearAuthSession, createSession, createTestWindow, seedAuthSession } from './support/auth';
+
 const startRegistrationMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@simplewebauthn/browser', () => ({
   startAuthentication: vi.fn(),
   startRegistration: startRegistrationMock,
 }));
-
-import { completePasskeyRegistration, type PasskeyRegistrationOptionsResult } from '../src/lib/auth';
-import { createApiSuccessResponse } from './support/api';
-import { clearAuthSession, createSession, createTestWindow, seedAuthSession } from './support/auth';
 
 describe('auth passkey client', () => {
   afterEach(() => {

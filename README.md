@@ -77,9 +77,17 @@ and route access. Backend synchronization and schema details are documented in
 `backend/README.md`.
 
 Runtime-neutral contracts and helpers belong in `shared/`, including
-access-control keys, safe path helpers, and validation helpers. Browser-only
-behavior belongs in `frontend/`, and server-only behavior belongs in
-`backend/`.
+access-control keys, safe path helpers, locale negotiation helpers, and
+validation helpers. Browser-only behavior belongs in `frontend/`, and
+server-only behavior belongs in `backend/`.
+
+Internationalization supports `en-US` and `zh-CN`. The frontend owns React Intl
+catalogs under `frontend/src/i18n/messages/` and sends `X-Tilty-Locale` on API
+requests. The backend uses that locale for server-generated user-facing text,
+including API error messages, setup gate responses, readiness failures, RBAC
+display names, and email verification templates. API errors remain code-first
+contracts; clients should localize known error codes and treat backend messages
+as fallbacks.
 
 ## Generated and Local Files
 

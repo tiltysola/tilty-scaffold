@@ -1,5 +1,6 @@
 import { createClient } from 'redis';
 
+import { withTimeout } from '../core/async';
 import { AppError } from '../core/errors';
 
 type CacheConfig =
@@ -75,14 +76,6 @@ const redisRateLimitScript = [
   "local ttl = redis.call('PTTL', KEYS[1])",
   'return { count, ttl }',
 ].join('\n');
-
-export function createCacheStore(config: CacheConfig): CacheStore {
-  if (config.store === 'redis') {
-    return new RedisCacheStore(config.url, config.timeoutMs);
-  }
-
-  return new MemoryCacheStore();
-}
 
 export class MemoryCacheStore implements CacheStore {
   private readonly records = new Map<string, MemoryCacheRecord>();
@@ -280,7 +273,7 @@ export class RedisCacheStore implements CacheStore {
     try {
       return JSON.parse(value) as T;
     } catch {
-      throw new AppError('CACHE_RESPONSE_INVALID', 'Cache backend returned an invalid response.', 502);
+      throw new AppError('CACHE_RESPONSE_INVALID', 'error.CACHE_RESPONSE_INVALID', 502);
     }
   }
 
@@ -325,7 +318,7 @@ export class RedisCacheStore implements CacheStore {
     );
 
     if (!Array.isArray(result)) {
-      throw new AppError('CACHE_RESPONSE_INVALID', 'Cache backend returned an invalid response.', 502);
+      throw new AppError('CACHE_RESPONSE_INVALID', 'error.CACHE_RESPONSE_INVALID', 502);
     }
 
     const [rawCount, rawExpiresInMs] = result;
@@ -333,7 +326,7 @@ export class RedisCacheStore implements CacheStore {
     const expiresInMs = Number(rawExpiresInMs);
 
     if (!Number.isSafeInteger(count) || count < 1 || !Number.isSafeInteger(expiresInMs)) {
-      throw new AppError('CACHE_RESPONSE_INVALID', 'Cache backend returned an invalid response.', 502);
+      throw new AppError('CACHE_RESPONSE_INVALID', 'error.CACHE_RESPONSE_INVALID', 502);
     }
 
     return {
@@ -386,36 +379,52 @@ export class RedisCacheStore implements CacheStore {
   private async command<T>(operation: () => Promise<T>) {
     try {
       await this.ensureConnected();
-      return await withTimeout(operation(), this.timeoutMs);
+      return await withTimeout(operation(), this.timeoutMs, createCacheTimeoutError);
     } catch (error) {
       if (error instanceof AppError) {
         throw error;
       }
 
-      throw new AppError('CACHE_UNAVAILABLE', 'Cache backend could not be reached.', 502);
+      throw new AppError('CACHE_UNAVAILABLE', 'error.CACHE_UNAVAILABLE', 502);
     }
   }
 
   private async ensureConnected() {
-    if (this.client.isOpen) {
+    if (this.client.isReady) {
       return;
     }
 
-    this.connectPromise ??= this.client.connect();
+    if (this.connectPromise) {
+      await withTimeout(this.connectPromise, this.timeoutMs, createCacheTimeoutError);
+      return;
+    }
+
+    const connectPromise = this.client.connect();
+    this.connectPromise = connectPromise;
 
     try {
-      await withTimeout(this.connectPromise, this.timeoutMs);
+      await withTimeout(connectPromise, this.timeoutMs, createCacheTimeoutError);
     } finally {
-      this.connectPromise = undefined;
+      if (this.connectPromise === connectPromise) {
+        this.connectPromise = undefined;
+      }
     }
   }
+}
+
+export function createCacheStore(config: CacheConfig): CacheStore {
+  if (config.store === 'redis') {
+    return new RedisCacheStore(config.url, config.timeoutMs);
+  }
+
+  return new MemoryCacheStore();
 }
 
 function validateRedisUrl(value: string) {
   const url = new URL(value);
 
   if (url.protocol !== 'redis:' && url.protocol !== 'rediss:') {
-    throw new AppError('CACHE_REDIS_URL_INVALID', 'Redis cache URL must use redis:// or rediss://.', 500);
+    throw new AppError('CACHE_REDIS_URL_INVALID', 'error.CACHE_REDIS_URL_INVALID', 500);
   }
 
   if (!url.pathname || url.pathname === '/') {
@@ -425,39 +434,24 @@ function validateRedisUrl(value: string) {
   const database = Number(url.pathname.slice(1));
 
   if (!Number.isInteger(database) || database < 0) {
-    throw new AppError('CACHE_REDIS_URL_INVALID', 'Redis cache URL database must be a non-negative integer.', 500);
+    throw new AppError('CACHE_REDIS_URL_INVALID', 'error.CACHE_REDIS_URL_INVALID', 500);
   }
 }
 
 function parseBooleanResponse(result: unknown) {
   if (result !== 0 && result !== 1) {
-    throw new AppError('CACHE_RESPONSE_INVALID', 'Cache backend returned an invalid response.', 502);
+    throw new AppError('CACHE_RESPONSE_INVALID', 'error.CACHE_RESPONSE_INVALID', 502);
   }
 
   return result === 1;
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
-  return new Promise<T>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new AppError('CACHE_TIMEOUT', 'Cache backend request timed out.', 502));
-    }, timeoutMs);
-
-    promise.then(
-      (value) => {
-        clearTimeout(timeout);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timeout);
-        reject(error);
-      },
-    );
-  });
+function createCacheTimeoutError() {
+  return new AppError('CACHE_TIMEOUT', 'error.CACHE_TIMEOUT', 502);
 }
 
 function validateTtl(ttlMs: number) {
   if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0) {
-    throw new AppError('CACHE_TTL_INVALID', 'Cache TTL must be a positive integer.', 500);
+    throw new AppError('CACHE_TTL_INVALID', 'error.CACHE_TTL_INVALID', 500);
   }
 }

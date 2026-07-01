@@ -1,8 +1,103 @@
 import { ReadStream } from 'fs';
 import { describe, expect, it } from 'vitest';
 
+import { systemPermissionKeys, systemRoleKeys } from '@tilty/shared/access-control';
+import {
+  authMfaMethodValues,
+  authSelectableVerificationPurposeValues,
+  authSessionDeviceTypeValues,
+  authVerificationCodeMethodValues,
+  authVerificationMethodValues,
+  authVerificationPurposeValues,
+} from '@tilty/shared/auth';
+import { localeRequestHeader, supportedLocales } from '@tilty/shared/i18n';
+import {
+  setupCacheStoreValues,
+  setupEmailVerificationServiceValues,
+  setupEnvironmentStepValues,
+  setupFileStorageDriverValues,
+  setupLogTargetValues,
+  setupSmsPhoneCountryCodeValues,
+  setupSmsVerificationServiceValues,
+  setupSsoProtocolValues,
+} from '@tilty/shared/setup';
+
+import { setupEnvironmentKeys } from '../src/config/setup-environment';
+import { backendMessages } from '../src/i18n';
 import { createDocsModule } from '../src/modules/docs';
+import { ReadinessCheckStatus, readinessCheckStatusValues } from '../src/modules/health';
 import { createTestContext, getTestRouteHandler, runMiddleware } from './support/http';
+
+interface OpenApiDocument {
+  components: {
+    parameters: Record<string, OpenApiParameter | undefined>;
+    responses: Record<string, OpenApiResponse | undefined>;
+    schemas: Record<string, OpenApiSchema | undefined>;
+  };
+  info: {
+    title: string;
+    version: string;
+  };
+  openapi: string;
+  paths: Record<string, OpenApiPathItem | undefined>;
+  servers: Array<{
+    description: string;
+    url: string;
+  }>;
+}
+
+type OpenApiMethod = 'delete' | 'get' | 'patch' | 'post' | 'put';
+
+interface OpenApiPathItem {
+  delete?: OpenApiOperation;
+  get?: OpenApiOperation;
+  parameters?: unknown[];
+  patch?: OpenApiOperation;
+  post?: OpenApiOperation;
+  put?: OpenApiOperation;
+}
+
+interface OpenApiOperation {
+  description?: string;
+  responses: Record<string, unknown>;
+}
+
+interface OpenApiParameter {
+  in: string;
+  name: string;
+  required: boolean;
+  schema: Record<string, unknown>;
+}
+
+interface OpenApiResponse {
+  description?: string;
+  content: {
+    'application/json': {
+      examples?: Record<string, { value: { error: string; message?: string } }>;
+    };
+  };
+}
+
+interface OpenApiSchema {
+  allOf?: OpenApiSchema[];
+  additionalProperties?: OpenApiSchema;
+  const?: unknown;
+  enum?: readonly string[];
+  items?: OpenApiSchema;
+  properties?: Record<string, OpenApiSchema | undefined>;
+  propertyNames?: {
+    enum?: string[];
+  };
+  required?: string[];
+}
+
+interface OpenApiSchemaResponse {
+  content: {
+    'application/json': {
+      schema: unknown;
+    };
+  };
+}
 
 describe('docs API', () => {
   const routes = createDocsModule().routes;
@@ -14,7 +109,7 @@ describe('docs API', () => {
     expect(body.openapi).toBe('3.1.0');
     expect(body.info).toEqual({
       title: 'Tilty Scaffold API',
-      version: '0.1.8',
+      version: '0.1.9',
     });
     expect(body.servers[0]).toEqual({
       url: '/',
@@ -51,6 +146,7 @@ describe('docs API', () => {
     expect(body.paths['/api/users/{id}/totp/disable']).toBeDefined();
     expect(body.paths['/api/users/{id}/passkeys/{passkeyId}']).toBeDefined();
     expect(body.paths['/api/users/{id}/devices']).toBeDefined();
+    expect(body.paths['/api/users/{id}/devices/{sessionId}']).toBeDefined();
     expect(body.paths['/api/users/{id}/sso-identities']).toBeDefined();
     expect(body.paths['/api/users/{id}/sso-identities/{providerId}']).toBeDefined();
     expect(body.paths['/api/users/{id}/avatar']).toBeDefined();
@@ -65,6 +161,21 @@ describe('docs API', () => {
     expect(body.paths['/api/health/ready']).toBeDefined();
     expect(body.paths['/api/openapi.json']).toBeDefined();
     expect(body.paths['/api/docs']).toBeDefined();
+    expect(body.paths['/api/auth/login']?.parameters).toEqual(localeRequestParameterRefs);
+    expect(body.paths['/api/users/{id}/roles']?.parameters).toEqual(localeRequestParameterRefs);
+    expect(body.components.parameters.LocaleHeader).toMatchObject({
+      name: localeRequestHeader,
+      in: 'header',
+      required: false,
+      schema: {
+        enum: supportedLocales,
+      },
+    });
+    expect(body.components.parameters.AcceptLanguageHeader).toMatchObject({
+      name: 'Accept-Language',
+      in: 'header',
+      required: false,
+    });
 
     expectResponseRefs(body, '/api/setup/defaults', 'get', {
       '403': 'SetupLocked',
@@ -337,8 +448,64 @@ describe('docs API', () => {
 
     expect(setupEnvironment).toBeDefined();
     expect(setupDefaults).toBeDefined();
+    expect(setupEnvironment?.required).toEqual(setupEnvironmentKeys);
     expect(setupEnvironment?.required).not.toContain('SETUP_LOCKED');
+    expect(setupEnvironment?.propertyNames?.enum).toEqual(setupEnvironment?.required);
     expect(setupDefaults?.required).toEqual(['environment', 'environmentFileLoaded']);
+    expect(body.components.schemas.SetupEnvironmentRequest?.properties?.stepId?.enum).toEqual(
+      setupEnvironmentStepValues,
+    );
+    expect(body.components.schemas.AuthUser?.properties?.roles?.items?.enum).toEqual(systemRoleKeys);
+    expect(body.components.schemas.AuthUser?.properties?.permissions?.items?.enum).toEqual(systemPermissionKeys);
+    expect(body.components.schemas.MfaMethod?.enum).toEqual(authMfaMethodValues);
+    expect(body.components.schemas.VerificationMethodName?.enum).toEqual(authVerificationMethodValues);
+    expect(body.components.schemas.VerificationPurpose?.enum).toEqual(authVerificationPurposeValues);
+    expect(verificationChallengeCreate?.properties?.purpose?.enum).toEqual(authSelectableVerificationPurposeValues);
+    expect(body.components.schemas.VerificationCodeSendRequest?.properties?.method?.enum).toEqual(
+      authVerificationCodeMethodValues,
+    );
+    expect(body.components.schemas.AuthDeviceSession?.properties?.deviceType?.enum).toEqual(
+      authSessionDeviceTypeValues,
+    );
+    expectSetupConnectionEnum(body, 'SetupCacheConnectionTestResponse', 'store', setupCacheStoreValues);
+    expectSetupConnectionEnum(body, 'SetupFileStorageConnectionTestResponse', 'driver', setupFileStorageDriverValues);
+    expectSetupConnectionEnum(body, 'SetupLoggingConnectionTestResponse', 'target', setupLogTargetValues);
+    expectSetupConnectionEnum(body, 'SetupEmailConnectionTestResponse', 'service', setupEmailVerificationServiceValues);
+    expectSetupConnectionEnum(body, 'SetupSmsConnectionTestResponse', 'service', setupSmsVerificationServiceValues);
+    expect(
+      body.components.schemas.SetupSmsConnectionTestResponse?.allOf?.[1]?.properties?.data?.properties
+        ?.profileCountryCodes?.items?.enum,
+    ).toEqual(setupSmsPhoneCountryCodeValues);
+    expect(body.components.schemas.AuthConfig?.properties?.phoneCountryCodes?.items?.enum).toEqual(
+      setupSmsPhoneCountryCodeValues,
+    );
+    expect(body.components.schemas.SsoProvider?.properties?.protocol?.enum).toEqual(setupSsoProtocolValues);
+    expect(body.components.schemas.Health?.properties?.status?.const).toBe(ReadinessCheckStatus.Ok);
+    expect(body.components.schemas.Readiness?.properties?.checks?.additionalProperties?.enum).toEqual(
+      readinessCheckStatusValues,
+    );
+    expect(body.components.schemas.Readiness?.properties?.status?.const).toBe(ReadinessCheckStatus.Ok);
+  });
+
+  it('keeps OpenAPI error examples aligned with backend catalog messages', async () => {
+    const context = await runMiddleware(getTestRouteHandler(routes, 'get', '/openapi.json'), createTestContext());
+    const body = context.body as OpenApiDocument;
+    const mismatchedExamples: string[] = [];
+
+    for (const [responseName, response] of Object.entries(body.components.responses)) {
+      const examples = response?.content['application/json'].examples ?? {};
+
+      for (const [exampleName, example] of Object.entries(examples)) {
+        const catalogMessage =
+          backendMessages['en-US'][`error.${example.value.error}` as keyof (typeof backendMessages)['en-US']];
+
+        if (catalogMessage && example.value.message !== catalogMessage) {
+          mismatchedExamples.push(`${responseName}.${exampleName}: ${example.value.error}`);
+        }
+      }
+    }
+
+    expect(mismatchedExamples).toEqual([]);
   });
 
   it('returns Swagger UI HTML', async () => {
@@ -371,33 +538,6 @@ describe('docs API', () => {
   });
 });
 
-function expectResponseRefs(
-  document: OpenApiDocument,
-  path: string,
-  method: OpenApiMethod,
-  responseRefs: Record<string, string>,
-) {
-  const operation = document.paths[path]?.[method];
-
-  expect(operation).toBeDefined();
-
-  for (const [status, response] of Object.entries(responseRefs)) {
-    expect(operation?.responses[status]).toEqual({
-      $ref: `#/components/responses/${response}`,
-    });
-  }
-}
-
-function expectSuccessSchemaRef(document: OpenApiDocument, path: string, method: OpenApiMethod, schema: string) {
-  const operation = document.paths[path]?.[method];
-  const successResponse = operation?.responses['200'] as OpenApiSchemaResponse | undefined;
-
-  expect(operation).toBeDefined();
-  expect(successResponse?.content['application/json'].schema).toEqual({
-    $ref: `#/components/schemas/${schema}`,
-  });
-}
-
 const setupUnsafePaths = [
   '/api/setup/validate',
   '/api/setup/validate/environment',
@@ -429,61 +569,49 @@ const csrfProtectedOperations = [
   ['/api/auth/sso/account', 'post'],
   ['/api/auth/sso/bind', 'post'],
 ] as const satisfies ReadonlyArray<readonly [string, OpenApiMethod]>;
+const localeRequestParameterRefs = [
+  {
+    $ref: '#/components/parameters/LocaleHeader',
+  },
+  {
+    $ref: '#/components/parameters/AcceptLanguageHeader',
+  },
+];
 
-interface OpenApiDocument {
-  components: {
-    responses: Record<string, OpenApiResponse | undefined>;
-    schemas: Record<string, OpenApiSchema | undefined>;
-  };
-  info: {
-    title: string;
-    version: string;
-  };
-  openapi: string;
-  paths: Record<string, OpenApiPathItem | undefined>;
-  servers: Array<{
-    description: string;
-    url: string;
-  }>;
+function expectResponseRefs(
+  document: OpenApiDocument,
+  path: string,
+  method: OpenApiMethod,
+  responseRefs: Record<string, string>,
+) {
+  const operation = document.paths[path]?.[method];
+
+  expect(operation).toBeDefined();
+
+  for (const [status, response] of Object.entries(responseRefs)) {
+    expect(operation?.responses[status]).toEqual({
+      $ref: `#/components/responses/${response}`,
+    });
+  }
 }
 
-type OpenApiMethod = 'delete' | 'get' | 'patch' | 'post' | 'put';
+function expectSuccessSchemaRef(document: OpenApiDocument, path: string, method: OpenApiMethod, schema: string) {
+  const operation = document.paths[path]?.[method];
+  const successResponse = operation?.responses['200'] as OpenApiSchemaResponse | undefined;
 
-interface OpenApiPathItem {
-  delete?: OpenApiOperation;
-  get?: OpenApiOperation;
-  patch?: OpenApiOperation;
-  post?: OpenApiOperation;
-  put?: OpenApiOperation;
+  expect(operation).toBeDefined();
+  expect(successResponse?.content['application/json'].schema).toEqual({
+    $ref: `#/components/schemas/${schema}`,
+  });
 }
 
-interface OpenApiOperation {
-  description?: string;
-  responses: Record<string, unknown>;
-}
+function expectSetupConnectionEnum(
+  document: OpenApiDocument,
+  schemaName: string,
+  propertyName: string,
+  expectedValues: readonly string[],
+) {
+  const dataSchema = document.components.schemas[schemaName]?.allOf?.[1]?.properties?.data;
 
-interface OpenApiResponse {
-  description?: string;
-  content: {
-    'application/json': {
-      examples?: Record<string, { value: { error: string } }>;
-    };
-  };
-}
-
-interface OpenApiSchema {
-  properties?: Record<string, OpenApiSchemaProperty | undefined>;
-  required?: string[];
-}
-
-interface OpenApiSchemaProperty {
-  description?: string;
-}
-
-interface OpenApiSchemaResponse {
-  content: {
-    'application/json': {
-      schema: unknown;
-    };
-  };
+  expect(dataSchema?.properties?.[propertyName]?.enum).toEqual(expectedValues);
 }

@@ -1,243 +1,41 @@
-const setupEnvironmentKeys = [
-  'NODE_ENV',
-  'SERVER_HOST',
-  'SERVER_PORT',
-  'APP_DOMAIN',
-  'APP_CORS_ORIGINS',
-  'SERVER_TRUST_PROXY',
-  'SERVER_MULTI_INSTANCE_ENABLED',
-  'DATABASE_DIALECT',
-  'DATABASE_STORAGE',
-  'DATABASE_URL',
-  'DATABASE_SSL',
-  'DATABASE_CONNECT_TIMEOUT_MS',
-  'DATABASE_POOL_MAX',
-  'DATABASE_POOL_MIN',
-  'DATABASE_POOL_ACQUIRE_MS',
-  'DATABASE_POOL_IDLE_MS',
-  'DATABASE_SYNC',
-  'CACHE_STORE',
-  'CACHE_REDIS_URL',
-  'CACHE_REDIS_REQUEST_TIMEOUT_MS',
-  'FILE_STORAGE_DRIVER',
-  'FILE_UPLOAD_MAX_BYTES',
-  'FILE_PUBLIC_BASE_URL',
-  'FILE_LOCAL_ROOT',
-  'FILE_OSS_ACCESS_KEY_ID',
-  'FILE_OSS_ACCESS_KEY_SECRET',
-  'FILE_OSS_BUCKET',
-  'FILE_OSS_ENDPOINT',
-  'FILE_OSS_REGION',
-  'FILE_OSS_PUBLIC_BASE_URL',
-  'SCHEDULER_ENABLED',
-  'SCHEDULER_LOCK_TTL_MS',
-  'AUTH_TOKEN_SECRET',
-  'AUTH_ACCESS_TOKEN_TTL_SECONDS',
-  'AUTH_REFRESH_TOKEN_TTL_SECONDS',
-  'AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS',
-  'AUTH_VERIFICATION_MAX_ATTEMPTS',
-  'AUTH_VERIFICATION_SUDO_TTL_SECONDS',
-  'AUTH_PASSKEY_RP_NAME',
-  'AUTH_PASSKEY_REGISTRATION_TTL_SECONDS',
-  'AUTH_PASSKEY_OPERATION_TIMEOUT_MS',
-  'AUTH_TOTP_ISSUER',
-  'AUTH_TOTP_SETUP_TTL_SECONDS',
-  'AUTH_ACCESS_TOKEN_COOKIE_NAME',
-  'AUTH_REFRESH_TOKEN_COOKIE_NAME',
-  'AUTH_COOKIE_SAME_SITE',
-  'AUTH_COOKIE_SECURE',
-  'AUTH_RATE_LIMIT_WINDOW_MS',
-  'AUTH_RATE_LIMIT_MAX',
-  'GLOBAL_RATE_LIMIT_WINDOW_MS',
-  'GLOBAL_RATE_LIMIT_MAX',
-  'LOG_REQUEST_ENABLED',
-  'LOG_TARGETS',
-  'LOG_PENDING_WRITE_MAX',
-  'LOG_WRITE_TIMEOUT_MS',
-  'LOG_LOCAL_PATH',
-  'LOG_SLS_ENDPOINT',
-  'LOG_SLS_PROJECT',
-  'LOG_SLS_LOGSTORE',
-  'LOG_SLS_ACCESS_KEY_ID',
-  'LOG_SLS_ACCESS_KEY_SECRET',
-  'LOG_SLS_TOPIC',
-  'LOG_SLS_SOURCE',
-  'EMAIL_VERIFICATION_SERVICE',
-  'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS',
-  'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
-  'EMAIL_SMTP_PROFILES',
-  'SMS_VERIFICATION_SERVICE',
-  'SMS_VERIFICATION_CODE_EXPIRES_IN_MS',
-  'SMS_VERIFICATION_CODE_COOLDOWN_MS',
-  'SMS_ALICLOUD_PROFILES',
-  'SSO_ENABLED',
-  'SSO_PROFILES',
+import { systemPermissionKeys, systemRoleKeys } from '@tilty/shared/access-control';
+import {
+  authMfaMethodValues,
+  authSelectableVerificationPurposeValues,
+  authSessionDeviceTypeValues,
+  authVerificationCodeMethodValues,
+  authVerificationMethodValues,
+  authVerificationPurposeValues,
+} from '@tilty/shared/auth';
+import { localeRequestHeader, supportedLocales } from '@tilty/shared/i18n';
+import {
+  setupCacheStoreValues,
+  setupEmailVerificationServiceValues,
+  setupEnvironmentStepValues,
+  setupFileStorageDriverValues,
+  setupLogTargetValues,
+  setupSmsPhoneCountryCodeValues,
+  setupSmsVerificationServiceValues,
+  setupSsoProtocolValues,
+} from '@tilty/shared/setup';
+
+import { setupEnvironmentKeys } from '../../config/setup-environment';
+import { ReadinessCheckStatus, readinessCheckStatusValues } from '../health';
+
+const localeRequestParameters = [
+  {
+    $ref: '#/components/parameters/LocaleHeader',
+  },
+  {
+    $ref: '#/components/parameters/AcceptLanguageHeader',
+  },
 ] as const;
-
-function createProfileOptionsOperation(
-  summary: string,
-  parameters: Array<{ description: string; name: string; required?: boolean }>,
-  options: { authenticated?: boolean } = {},
-) {
-  return {
-    tags: ['Profile Options'],
-    summary,
-    ...(options.authenticated
-      ? {
-          security: [
-            {
-              accessCookieAuth: [],
-            },
-          ],
-        }
-      : {}),
-    parameters: parameters.map((parameter) => ({
-      name: parameter.name,
-      in: 'query',
-      required: parameter.required ?? false,
-      schema: {
-        type: 'string',
-      },
-      description: parameter.description,
-    })),
-    responses: {
-      '200': {
-        description: 'Profile options',
-        content: {
-          'application/json': {
-            schema: {
-              $ref: '#/components/schemas/ProfileOptionsResponse',
-            },
-          },
-        },
-      },
-      ...(options.authenticated
-        ? {
-            '401': {
-              $ref: '#/components/responses/AuthRequired',
-            },
-          }
-        : {}),
-    },
-  };
-}
-
-function createManagedUserImageOperation(summary: string, fieldName: string) {
-  return {
-    tags: ['Users'],
-    summary,
-    security: [
-      {
-        accessCookieAuth: [],
-      },
-    ],
-    parameters: [
-      {
-        name: 'id',
-        in: 'path',
-        required: true,
-        schema: {
-          type: 'string',
-          format: 'uuid',
-        },
-      },
-    ],
-    requestBody: {
-      required: true,
-      content: {
-        'multipart/form-data': {
-          schema: {
-            type: 'object',
-            required: [fieldName],
-            properties: {
-              [fieldName]: {
-                type: 'string',
-                format: 'binary',
-              },
-            },
-          },
-        },
-      },
-    },
-    responses: {
-      '200': {
-        description: 'Managed user details',
-        content: {
-          'application/json': {
-            schema: {
-              $ref: '#/components/schemas/ManagedUserDetailsResponse',
-            },
-          },
-        },
-      },
-      '400': {
-        $ref: '#/components/responses/ValidationError',
-      },
-      '401': {
-        $ref: '#/components/responses/AuthRequired',
-      },
-      '403': {
-        $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
-      },
-      '404': {
-        $ref: '#/components/responses/NotFound',
-      },
-      '413': {
-        $ref: '#/components/responses/ValidationError',
-      },
-    },
-  };
-}
-
-function createManagedUserImageDeleteOperation(summary: string) {
-  return {
-    tags: ['Users'],
-    summary,
-    security: [
-      {
-        accessCookieAuth: [],
-      },
-    ],
-    parameters: [
-      {
-        name: 'id',
-        in: 'path',
-        required: true,
-        schema: {
-          type: 'string',
-          format: 'uuid',
-        },
-      },
-    ],
-    responses: {
-      '200': {
-        description: 'Managed user details',
-        content: {
-          'application/json': {
-            schema: {
-              $ref: '#/components/schemas/ManagedUserDetailsResponse',
-            },
-          },
-        },
-      },
-      '401': {
-        $ref: '#/components/responses/AuthRequired',
-      },
-      '403': {
-        $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
-      },
-      '404': {
-        $ref: '#/components/responses/NotFound',
-      },
-    },
-  };
-}
 
 export const openApiDocument = {
   openapi: '3.1.0',
   info: {
     title: 'Tilty Scaffold API',
-    version: '0.1.8',
+    version: '0.1.9',
   },
   servers: [
     {
@@ -275,7 +73,7 @@ export const openApiDocument = {
       description: 'API documentation endpoints',
     },
   ],
-  paths: {
+  paths: withLocaleRequestParameters({
     '/api/setup/defaults': {
       get: {
         tags: ['Setup'],
@@ -3260,6 +3058,99 @@ export const openApiDocument = {
           },
         },
       },
+      delete: {
+        tags: ['Users'],
+        summary: 'Revoke managed user login device sessions',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Managed user device sessions revoked',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/RevokeAuthDeviceSessionsResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
+          },
+          '404': {
+            $ref: '#/components/responses/NotFound',
+          },
+        },
+      },
+    },
+    '/api/users/{id}/devices/{sessionId}': {
+      delete: {
+        tags: ['Users'],
+        summary: 'Revoke a managed user login device session',
+        security: [
+          {
+            accessCookieAuth: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+          {
+            name: 'sessionId',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Managed user device session revoked',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/RevokeAuthDeviceSessionsResponse',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/AuthRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
+          },
+          '404': {
+            $ref: '#/components/responses/NotFound',
+          },
+        },
+      },
     },
     '/api/users/{id}/sso-identities': {
       get: {
@@ -3526,7 +3417,7 @@ export const openApiDocument = {
         },
       },
     },
-  },
+  }),
   components: {
     securitySchemes: {
       accessCookieAuth: {
@@ -3538,6 +3429,28 @@ export const openApiDocument = {
         type: 'apiKey',
         in: 'cookie',
         name: 'tilty_scaffold_refresh_token',
+      },
+    },
+    parameters: {
+      LocaleHeader: {
+        name: localeRequestHeader,
+        in: 'header',
+        required: false,
+        description: 'Preferred response locale. This header takes precedence over Accept-Language.',
+        schema: {
+          type: 'string',
+          enum: supportedLocales,
+        },
+      },
+      AcceptLanguageHeader: {
+        name: 'Accept-Language',
+        in: 'header',
+        required: false,
+        description: 'Fallback locale negotiation header used when X-Tilty-Locale is absent or unsupported.',
+        schema: {
+          type: 'string',
+          example: 'zh-CN, en-US;q=0.8',
+        },
       },
     },
     responses: {
@@ -3588,7 +3501,7 @@ export const openApiDocument = {
                 value: {
                   code: 401,
                   error: 'AUTH_TOKEN_EXPIRED',
-                  message: 'Authentication token has expired.',
+                  message: 'Authentication has expired.',
                 },
               },
             },
@@ -3976,7 +3889,7 @@ export const openApiDocument = {
                 value: {
                   code: 401,
                   error: 'AUTH_TOKEN_EXPIRED',
-                  message: 'Authentication token has expired.',
+                  message: 'Authentication has expired.',
                 },
               },
             },
@@ -4212,7 +4125,7 @@ export const openApiDocument = {
           },
           stepId: {
             type: 'string',
-            enum: ['administrator', 'runtime', 'scheduler', 'security'],
+            enum: setupEnvironmentStepValues,
             description: 'When provided, validates only the setup step represented by this identifier.',
           },
         },
@@ -4295,7 +4208,7 @@ export const openApiDocument = {
                   },
                   store: {
                     type: 'string',
-                    enum: ['memory', 'redis'],
+                    enum: setupCacheStoreValues,
                   },
                 },
               },
@@ -4321,7 +4234,7 @@ export const openApiDocument = {
                   },
                   driver: {
                     type: 'string',
-                    enum: ['local', 'oss'],
+                    enum: setupFileStorageDriverValues,
                   },
                 },
               },
@@ -4347,7 +4260,7 @@ export const openApiDocument = {
                   },
                   target: {
                     type: 'string',
-                    enum: ['console', 'local', 'sls'],
+                    enum: setupLogTargetValues,
                   },
                 },
               },
@@ -4373,7 +4286,7 @@ export const openApiDocument = {
                   },
                   service: {
                     type: 'string',
-                    enum: ['off', 'smtp'],
+                    enum: setupEmailVerificationServiceValues,
                   },
                 },
               },
@@ -4399,13 +4312,13 @@ export const openApiDocument = {
                   },
                   service: {
                     type: 'string',
-                    enum: ['aliyun', 'off'],
+                    enum: setupSmsVerificationServiceValues,
                   },
                   profileCountryCodes: {
                     type: 'array',
                     items: {
                       type: 'string',
-                      enum: ['+86', '+852', '+853'],
+                      enum: setupSmsPhoneCountryCodeValues,
                     },
                   },
                 },
@@ -4518,38 +4431,24 @@ export const openApiDocument = {
       },
       MfaMethod: {
         type: 'string',
-        enum: ['passkey', 'totp', 'sms', 'email'],
+        enum: authMfaMethodValues,
       },
       VerificationMethodName: {
         type: 'string',
-        enum: ['passkey', 'totp', 'sms', 'email', 'password'],
+        enum: authVerificationMethodValues,
       },
       VerificationPurpose: {
         type: 'string',
         description:
           'Verification challenge purpose. Use manage_sso before profile SSO binding. system_settings and user_management require a configured passkey or authenticator app.',
-        enum: [
-          'change_password',
-          'login',
-          'manage_mfa',
-          'manage_passkey',
-          'manage_sso',
-          'manage_totp',
-          'system_settings',
-          'sso',
-          'update_contact',
-          'user_management',
-        ],
+        enum: authVerificationPurposeValues,
       },
       VerificationMethod: {
         type: 'object',
-        required: ['method', 'label'],
+        required: ['method'],
         properties: {
           method: {
             $ref: '#/components/schemas/VerificationMethodName',
-          },
-          label: {
-            type: 'string',
           },
           maskedTarget: {
             type: 'string',
@@ -4636,16 +4535,7 @@ export const openApiDocument = {
             type: 'string',
             description:
               'Use manage_sso before profile SSO binding, system_settings before reading or updating system settings, and user_management before opening user administration. Only passkey and authenticator app verification are accepted for system_settings and user_management.',
-            enum: [
-              'change_password',
-              'manage_mfa',
-              'manage_passkey',
-              'manage_sso',
-              'manage_totp',
-              'system_settings',
-              'update_contact',
-              'user_management',
-            ],
+            enum: authSelectableVerificationPurposeValues,
           },
         },
       },
@@ -4678,7 +4568,7 @@ export const openApiDocument = {
         properties: {
           method: {
             type: 'string',
-            enum: ['email', 'sms'],
+            enum: authVerificationCodeMethodValues,
           },
           verificationToken: {
             type: 'string',
@@ -5172,7 +5062,7 @@ export const openApiDocument = {
           },
           deviceType: {
             type: 'string',
-            enum: ['desktop', 'mobile', 'tablet'],
+            enum: authSessionDeviceTypeValues,
           },
           browser: {
             type: 'string',
@@ -5420,14 +5310,14 @@ export const openApiDocument = {
             type: 'array',
             items: {
               type: 'string',
-              enum: ['ROOT', 'USER_ADMIN', 'USER_LIST'],
+              enum: systemRoleKeys,
             },
           },
           permissions: {
             type: 'array',
             items: {
               type: 'string',
-              enum: ['ROOT', 'USER_ADMIN', 'USER_LIST'],
+              enum: systemPermissionKeys,
             },
           },
         },
@@ -5795,7 +5685,7 @@ export const openApiDocument = {
             type: 'array',
             items: {
               type: 'string',
-              enum: ['+86', '+852', '+853'],
+              enum: setupSmsPhoneCountryCodeValues,
             },
           },
           profileEmailVerificationEnabled: {
@@ -5926,7 +5816,7 @@ export const openApiDocument = {
           },
           protocol: {
             type: 'string',
-            enum: ['oauth2', 'oidc'],
+            enum: setupSsoProtocolValues,
           },
           loginEnabled: {
             type: 'boolean',
@@ -6051,7 +5941,7 @@ export const openApiDocument = {
         properties: {
           status: {
             type: 'string',
-            const: 'ok',
+            const: ReadinessCheckStatus.Ok,
           },
           time: {
             type: 'string',
@@ -6067,12 +5957,12 @@ export const openApiDocument = {
             type: 'object',
             additionalProperties: {
               type: 'string',
-              enum: ['error', 'ok'],
+              enum: readinessCheckStatusValues,
             },
           },
           status: {
             type: 'string',
-            const: 'ok',
+            const: ReadinessCheckStatus.Ok,
           },
           time: {
             type: 'string',
@@ -6182,3 +6072,176 @@ export const openApiDocument = {
     },
   },
 } as const;
+
+function createProfileOptionsOperation(
+  summary: string,
+  parameters: Array<{ description: string; name: string; required?: boolean }>,
+  options: { authenticated?: boolean } = {},
+) {
+  return {
+    tags: ['Profile Options'],
+    summary,
+    ...(options.authenticated
+      ? {
+          security: [
+            {
+              accessCookieAuth: [],
+            },
+          ],
+        }
+      : {}),
+    parameters: parameters.map((parameter) => ({
+      name: parameter.name,
+      in: 'query',
+      required: parameter.required ?? false,
+      schema: {
+        type: 'string',
+      },
+      description: parameter.description,
+    })),
+    responses: {
+      '200': {
+        description: 'Profile options',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ProfileOptionsResponse',
+            },
+          },
+        },
+      },
+      ...(options.authenticated
+        ? {
+            '401': {
+              $ref: '#/components/responses/AuthRequired',
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+function createManagedUserImageOperation(summary: string, fieldName: string) {
+  return {
+    tags: ['Users'],
+    summary,
+    security: [
+      {
+        accessCookieAuth: [],
+      },
+    ],
+    parameters: [
+      {
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: {
+          type: 'string',
+          format: 'uuid',
+        },
+      },
+    ],
+    requestBody: {
+      required: true,
+      content: {
+        'multipart/form-data': {
+          schema: {
+            type: 'object',
+            required: [fieldName],
+            properties: {
+              [fieldName]: {
+                type: 'string',
+                format: 'binary',
+              },
+            },
+          },
+        },
+      },
+    },
+    responses: {
+      '200': {
+        description: 'Managed user details',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ManagedUserDetailsResponse',
+            },
+          },
+        },
+      },
+      '400': {
+        $ref: '#/components/responses/ValidationError',
+      },
+      '401': {
+        $ref: '#/components/responses/AuthRequired',
+      },
+      '403': {
+        $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
+      },
+      '404': {
+        $ref: '#/components/responses/NotFound',
+      },
+      '413': {
+        $ref: '#/components/responses/ValidationError',
+      },
+    },
+  };
+}
+
+function createManagedUserImageDeleteOperation(summary: string) {
+  return {
+    tags: ['Users'],
+    summary,
+    security: [
+      {
+        accessCookieAuth: [],
+      },
+    ],
+    parameters: [
+      {
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: {
+          type: 'string',
+          format: 'uuid',
+        },
+      },
+    ],
+    responses: {
+      '200': {
+        description: 'Managed user details',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ManagedUserDetailsResponse',
+            },
+          },
+        },
+      },
+      '401': {
+        $ref: '#/components/responses/AuthRequired',
+      },
+      '403': {
+        $ref: '#/components/responses/CsrfOrUserManagementAccessRequired',
+      },
+      '404': {
+        $ref: '#/components/responses/NotFound',
+      },
+    },
+  };
+}
+
+function withLocaleRequestParameters<T extends Record<string, Record<string, unknown>>>(paths: T) {
+  return Object.fromEntries(
+    Object.entries(paths).map(([path, pathItem]) => [
+      path,
+      {
+        parameters: localeRequestParameters,
+        ...pathItem,
+      },
+    ]),
+  ) as {
+    [K in keyof T]: T[K] & { parameters: typeof localeRequestParameters };
+  };
+}

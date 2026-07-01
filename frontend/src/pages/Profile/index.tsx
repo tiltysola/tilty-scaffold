@@ -1,4 +1,5 @@
 import { type SubmitEventHandler, useEffect, useMemo, useRef, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import {
@@ -20,6 +21,7 @@ import { toast } from 'sonner';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { useAuthenticatedSession } from '@/hooks/useAuth';
 import { useImageTextTone } from '@/hooks/useImageTextTone';
+import { formatDateOnlyValue } from '@/i18n';
 import { getApiErrorMessage } from '@/lib/api';
 import {
   type AuthUser,
@@ -50,6 +52,11 @@ import {
   verifyProfilePhone,
   verifyWithPasskey,
 } from '@/lib/auth';
+import { createImageObjectUrl } from '@/lib/image-upload';
+import { composePhoneNumber, getPhoneCountryCode, getPhoneLocalNumber, supportedPhoneCountryCodes } from '@/lib/phone';
+import { getVerificationCodeDelivery, maskEmailAddress, maskPhoneNumber } from '@/lib/verification';
+import { Avatar, AvatarFallback, AvatarImage } from '@/shadcn/components/ui/avatar';
+import { ItemSeparator } from '@/shadcn/components/ui/item';
 import {
   displayNameSchema,
   phoneNumberSchema,
@@ -59,17 +66,7 @@ import {
   profileLocationSchema,
   profileWebsiteUrlSchema,
   verificationCodeSchema,
-} from '@/lib/auth-validation';
-import { getPhoneCountryCode, getPhoneLocalNumber, supportedPhoneCountryCodes } from '@/lib/phone';
-import {
-  getVerificationCodeDelivery,
-  maskEmailAddress,
-  maskPhoneNumber,
-  type VerificationCodeDelivery,
-} from '@/lib/verification';
-import { Avatar, AvatarFallback, AvatarImage } from '@/shadcn/components/ui/avatar';
-import { ItemSeparator } from '@/shadcn/components/ui/item';
-import { cn } from '@/shadcn/lib/utils';
+} from '@tilty/shared/validation';
 
 import { IdentityVerificationDialog, type IdentityVerificationSubmitInput } from '@/components/IdentityVerification';
 import ImageCropDialog from '@/components/ImageCropDialog';
@@ -81,16 +78,14 @@ import { EmailVerificationDialog } from './components/EmailVerificationDialog';
 import { PhoneVerificationDialog } from './components/PhoneVerificationDialog';
 import { ProfileHeader } from './components/ProfileHeader';
 import { SsoProviderList } from './components/SsoProviderList';
-import { createProfileImageObjectUrl, formatRoleAccessSummary, getHashParams, syncPhoneDraft } from './utils';
+import { formatRoleAccessSummary, getHashParams, syncPhoneDraft } from './utils';
 
-interface PendingVerification {
+interface PendingProfileVerification {
   challenge: VerificationRequired;
   onVerified: () => Promise<void>;
 }
 
-type ProfilePreviewTarget = 'avatar' | 'profileBanner' | 'profileBackground';
-
-const defaultProfileImageMaxBytes = 2 * 1024 * 1024;
+type ProfilePreviewTarget = 'avatar' | 'profileBackground' | 'profileBanner' | null;
 
 const Index = () => {
   const { user } = useAuthenticatedSession();
@@ -99,51 +94,51 @@ const Index = () => {
 };
 
 const ProfileContent = ({ user }: { user: AuthUser }) => {
-  const initialPhoneCountryCode = getPhoneCountryCode(user.phoneNumber, supportedPhoneCountryCodes);
-  const [profileDetailsDraft, setProfileDetailsDraft] = useState(() => createProfileDetailsDraft(user));
-  const [phoneCountryCodes, setPhoneCountryCodes] = useState<PhoneCountryCode[]>([]);
-  const [phoneCountryCodeDraft, setPhoneCountryCodeDraft] = useState<PhoneCountryCode>(
-    initialPhoneCountryCode ?? '+86',
+  const [profileDetailsDraft, setProfileDetailsDraft] = useState<ProfileDetailsDraft>(() =>
+    createProfileDetailsDraft(user),
   );
+  const [editingProfileDetails, setEditingProfileDetails] = useState(false);
+  const [avatarCropDialogOpen, setAvatarCropDialogOpen] = useState(false);
+  const [avatarCropImageUrl, setAvatarCropImageUrl] = useState<string | null>(null);
+  const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [deletingAvatar, setDeletingAvatar] = useState(false);
+  const [profileBannerCropDialogOpen, setProfileBannerCropDialogOpen] = useState(false);
+  const [profileBannerCropImageUrl, setProfileBannerCropImageUrl] = useState<string | null>(null);
+  const [profileBannerUploadError, setProfileBannerUploadError] = useState<string | null>(null);
+  const [uploadingProfileBanner, setUploadingProfileBanner] = useState(false);
+  const [deletingProfileBanner, setDeletingProfileBanner] = useState(false);
+  const [profileBackgroundCropDialogOpen, setProfileBackgroundCropDialogOpen] = useState(false);
+  const [profileBackgroundCropImageUrl, setProfileBackgroundCropImageUrl] = useState<string | null>(null);
+  const [profileBackgroundUploadError, setProfileBackgroundUploadError] = useState<string | null>(null);
+  const [uploadingProfileBackground, setUploadingProfileBackground] = useState(false);
+  const [deletingProfileBackground, setDeletingProfileBackground] = useState(false);
+  const [profilePreviewTarget, setProfilePreviewTarget] = useState<ProfilePreviewTarget>(null);
+  const [authConfigLoaded, setAuthConfigLoaded] = useState(false);
+  const [profileImageMaxBytes, setProfileImageMaxBytes] = useState<number | null>(null);
+  const [profileEmailVerificationEnabled, setProfileEmailVerificationEnabled] = useState(false);
+  const [verifyingEmail, setVerifyingEmail] = useState(false);
+  const [emailVerificationCodeDraft, setEmailVerificationCodeDraft] = useState('');
+  const [emailVerificationNotice, setEmailVerificationNotice] =
+    useState<ReturnType<typeof getVerificationCodeDelivery>>(null);
+  const initialPhoneCountryCode = getPhoneCountryCode(user.phoneNumber, supportedPhoneCountryCodes) ?? '+86';
+  const [phoneCountryCodes, setPhoneCountryCodes] = useState<PhoneCountryCode[]>([]);
+  const [phoneCountryCodeDraft, setPhoneCountryCodeDraft] = useState<PhoneCountryCode>(initialPhoneCountryCode);
   const [phoneLocalNumberDraft, setPhoneLocalNumberDraft] = useState(
     getPhoneLocalNumber(user.phoneNumber, initialPhoneCountryCode),
   );
-  const [phoneVerificationCodeDraft, setPhoneVerificationCodeDraft] = useState('');
-  const [phoneVerificationNotice, setPhoneVerificationNotice] = useState<VerificationCodeDelivery | null>(null);
-  const [profileEmailVerificationEnabled, setProfileEmailVerificationEnabled] = useState(false);
-  const [ssoConfig, setSsoConfig] = useState<SsoPublicConfig>({
-    enabled: false,
-    loginEnabled: false,
-    providers: [],
-  });
-  const [ssoIdentities, setSsoIdentities] = useState<SsoIdentityPublic[]>([]);
-  const [editingProfileDetails, setEditingProfileDetails] = useState(false);
   const [editingPhoneNumber, setEditingPhoneNumber] = useState(false);
-  const [verifyingEmail, setVerifyingEmail] = useState(false);
-  const [emailVerificationCodeDraft, setEmailVerificationCodeDraft] = useState('');
-  const [emailVerificationNotice, setEmailVerificationNotice] = useState<VerificationCodeDelivery | null>(null);
-  const [pendingVerification, setPendingVerification] = useState<PendingVerification | null>(null);
-  const [profileImageMaxBytes, setProfileImageMaxBytes] = useState(defaultProfileImageMaxBytes);
-  const [avatarCropDialogOpen, setAvatarCropDialogOpen] = useState(false);
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const [deletingAvatar, setDeletingAvatar] = useState(false);
-  const [avatarCropImageUrl, setAvatarCropImageUrl] = useState<string | null>(null);
-  const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
-  const [profileBannerCropDialogOpen, setProfileBannerCropDialogOpen] = useState(false);
-  const [uploadingProfileBanner, setUploadingProfileBanner] = useState(false);
-  const [deletingProfileBanner, setDeletingProfileBanner] = useState(false);
-  const [profileBannerCropImageUrl, setProfileBannerCropImageUrl] = useState<string | null>(null);
-  const [profileBannerUploadError, setProfileBannerUploadError] = useState<string | null>(null);
-  const [profileBackgroundCropDialogOpen, setProfileBackgroundCropDialogOpen] = useState(false);
-  const [uploadingProfileBackground, setUploadingProfileBackground] = useState(false);
-  const [deletingProfileBackground, setDeletingProfileBackground] = useState(false);
-  const [profileBackgroundCropImageUrl, setProfileBackgroundCropImageUrl] = useState<string | null>(null);
-  const [profileBackgroundUploadError, setProfileBackgroundUploadError] = useState<string | null>(null);
-  const [profilePreviewTarget, setProfilePreviewTarget] = useState<ProfilePreviewTarget | null>(null);
-  const profileHeaderRef = useRef<HTMLElement>(null);
-  const profileHeaderTextRef = useRef<HTMLDivElement>(null);
+  const [phoneVerificationCodeDraft, setPhoneVerificationCodeDraft] = useState('');
+  const [phoneVerificationNotice, setPhoneVerificationNotice] =
+    useState<ReturnType<typeof getVerificationCodeDelivery>>(null);
+  const [ssoConfig, setSsoConfig] = useState<SsoPublicConfig | null>(null);
+  const [ssoIdentities, setSsoIdentities] = useState<SsoIdentityPublic[]>([]);
+  const [pendingVerification, setPendingVerification] = useState<PendingProfileVerification | null>(null);
+  const profileHeaderRef = useRef<HTMLElement | null>(null);
+  const profileHeaderTextRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
+  const intl = useIntl();
   const profileAction = useAsyncAction();
   const emailVerificationSendAction = useAsyncAction();
   const emailVerificationConfirmAction = useAsyncAction();
@@ -157,73 +152,74 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     containerRef: profileHeaderRef,
     targetRef: profileHeaderTextRef,
   });
+  const phoneNumberDraft = useMemo(
+    () => composePhoneNumber({ phoneCountryCode: phoneCountryCodeDraft, phoneLocalNumber: phoneLocalNumberDraft }),
+    [phoneCountryCodeDraft, phoneLocalNumberDraft],
+  );
+  const bindableSsoProviders = useMemo(() => {
+    const boundProviderIds = new Set(ssoIdentities.map((identity) => identity.providerId));
+
+    return (ssoConfig?.providers ?? []).filter(
+      (provider) => provider.bindingEnabled && !boundProviderIds.has(provider.id),
+    );
+  }, [ssoConfig?.providers, ssoIdentities]);
   const fallback = getUserInitials(user.displayName);
   const userHandle = getUserHandle(user.username);
+  const profileDetailsChanged = hasProfileDetailsChanged(profileDetailsDraft, createProfileDetailsDraft(user));
+  const profileImageUploadEnabled = profileImageMaxBytes !== null;
+  const emailNeedsVerification = !user.emailVerified;
+  const emailVerificationAvailable = emailNeedsVerification && profileEmailVerificationEnabled;
+  const emailVerificationActionVisible = authConfigLoaded && emailNeedsVerification;
+  const phoneActionVisible = authConfigLoaded;
+  const phoneBindingEnabled = authConfigLoaded && phoneCountryCodes.length > 0;
+  const phoneVerificationRequired = phoneBindingEnabled && phoneLocalNumberDraft.trim().length > 0;
+  const avatarBusy = uploadingAvatar || deletingAvatar;
+  const profileBannerBusy = uploadingProfileBanner || deletingProfileBanner;
+  const profileBackgroundBusy = uploadingProfileBackground || deletingProfileBackground;
   const savingProfile = profileAction.pending;
   const sendingEmailVerification = emailVerificationSendAction.pending;
   const confirmingEmailVerification = emailVerificationConfirmAction.pending;
   const sendingPhoneVerification = phoneVerificationSendAction.pending;
   const confirmingPhoneVerification = phoneVerificationConfirmAction.pending;
   const phoneVerificationPending = sendingPhoneVerification || confirmingPhoneVerification;
-  const savedProfileDetails = useMemo(() => createProfileDetailsDraft(user), [user]);
-  const profileDetailsChanged = hasProfileDetailsChanged(profileDetailsDraft, savedProfileDetails);
-  const phoneNumberDraft = useMemo(
-    () => `${phoneCountryCodeDraft}${phoneLocalNumberDraft.trim()}`,
-    [phoneCountryCodeDraft, phoneLocalNumberDraft],
-  );
-  const emailNeedsVerification = Boolean(user.email && !user.emailVerified);
-  const emailVerificationAvailable = emailNeedsVerification && profileEmailVerificationEnabled;
-  const phoneBindingEnabled = phoneCountryCodes.length > 0;
-  const phoneNumberChanged = phoneBindingEnabled && phoneNumberDraft !== (user.phoneNumber ?? '');
-  const phoneVerificationRequired = phoneBindingEnabled && (phoneNumberChanged || !user.phoneVerified);
-  const avatarBusy = uploadingAvatar || deletingAvatar;
-  const profileBannerBusy = uploadingProfileBanner || deletingProfileBanner;
-  const profileBackgroundBusy = uploadingProfileBackground || deletingProfileBackground;
-  const profileHeaderTitleClassName = cn(
-    'truncate text-lg font-semibold',
-    profileBannerUrl && profileHeaderTextTone === 'light'
-      ? 'text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.65)]'
-      : undefined,
-    profileBannerUrl && profileHeaderTextTone === 'dark' ? 'text-zinc-950' : undefined,
-  );
-  const profileHeaderDescriptionClassName = cn(
-    'truncate text-sm text-muted-foreground',
-    profileBannerUrl && profileHeaderTextTone === 'light'
-      ? 'text-white/85 drop-shadow-[0_1px_2px_rgba(0,0,0,0.65)]'
-      : undefined,
-    profileBannerUrl && profileHeaderTextTone === 'dark' ? 'text-zinc-800' : undefined,
-  );
-  const profileHeaderActionClassName = cn(
-    profileBannerUrl && profileHeaderTextTone === 'light'
-      ? 'text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.65)] hover:bg-white/15 hover:text-white'
-      : undefined,
-    profileBannerUrl && profileHeaderTextTone === 'dark'
-      ? 'text-zinc-950 hover:bg-black/10 hover:text-zinc-950'
-      : undefined,
-  );
-  const bindableSsoProviders = ssoConfig.enabled
-    ? ssoConfig.providers.filter((provider) => provider.bindingEnabled)
-    : [];
+  const profileHeaderTitleClassName =
+    profileHeaderTextTone === 'light'
+      ? 'truncate text-xl font-semibold tracking-normal text-white drop-shadow'
+      : profileHeaderTextTone === 'dark'
+        ? 'truncate text-xl font-semibold tracking-normal text-black'
+        : 'truncate text-xl font-semibold tracking-normal';
+  const profileHeaderDescriptionClassName =
+    profileHeaderTextTone === 'light'
+      ? 'truncate text-sm text-white/85 drop-shadow'
+      : profileHeaderTextTone === 'dark'
+        ? 'truncate text-sm text-black/70'
+        : 'truncate text-sm text-muted-foreground';
+  const profileHeaderActionClassName =
+    profileHeaderTextTone === 'light'
+      ? 'text-white hover:bg-white/15 hover:text-white'
+      : profileHeaderTextTone === 'dark'
+        ? 'text-black hover:bg-black/10 hover:text-black'
+        : undefined;
   const syncProfileState = (updatedUser: AuthUser) => {
     setProfileDetailsDraft(createProfileDetailsDraft(updatedUser));
     syncPhoneDraft(updatedUser.phoneNumber, phoneCountryCodes, setPhoneCountryCodeDraft, setPhoneLocalNumberDraft);
   };
 
   useEffect(() => {
-    const params = getHashParams(location.hash);
+    const hashParams = getHashParams(location.hash);
 
-    if (params.get('sso_profile_bind') !== 'success') {
+    if (hashParams.get('sso_profile_bind') !== 'success') {
       return;
     }
 
-    toast.success('SSO provider bound.');
+    toast.success(intl.formatMessage({ id: 'profile.sso.bound.success' }));
     navigate(location.pathname, { replace: true });
     void fetchSsoIdentities()
       .then((result) => setSsoIdentities(result.identities))
       .catch((error: unknown) => {
-        toast.error(getApiErrorMessage(error, 'SSO identities could not be loaded.'));
+        toast.error(getApiErrorMessage(error, intl.formatMessage({ id: 'profile.sso.identities.load.failed' })));
       });
-  }, [location.hash, location.pathname, navigate]);
+  }, [intl, location.hash, location.pathname, navigate]);
 
   useEffect(() => {
     let isActive = true;
@@ -234,6 +230,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
           return;
         }
 
+        setAuthConfigLoaded(true);
         setPhoneCountryCodes(config.phoneCountryCodes);
         setProfileImageMaxBytes(config.fileUploadMaxBytes);
         setProfileEmailVerificationEnabled(config.profileEmailVerificationEnabled);
@@ -246,14 +243,14 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       })
       .catch((error: unknown) => {
         if (isActive) {
-          toast.error(getApiErrorMessage(error, 'Profile configuration could not be loaded.'));
+          toast.error(getApiErrorMessage(error, intl.formatMessage({ id: 'profile.configuration.load.failed' })));
         }
       });
 
     return () => {
       isActive = false;
     };
-  }, [user.phoneNumber]);
+  }, [intl, user.phoneNumber]);
 
   useEffect(() => {
     let isActive = true;
@@ -269,14 +266,14 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       })
       .catch((error: unknown) => {
         if (isActive) {
-          toast.error(getApiErrorMessage(error, 'SSO configuration could not be loaded.'));
+          toast.error(getApiErrorMessage(error, intl.formatMessage({ id: 'profile.sso.configuration.load.failed' })));
         }
       });
 
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [intl]);
 
   useEffect(() => {
     return () => {
@@ -303,12 +300,20 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
   }, [profileBackgroundCropImageUrl]);
 
   const handleOpenAvatarCropDialog = () => {
+    if (!profileImageUploadEnabled) {
+      return;
+    }
+
     setAvatarUploadError(null);
     setAvatarCropDialogOpen(true);
   };
 
   const handleAvatarSelect = (file: File) => {
-    const imageUrl = createProfileImageObjectUrl(file, setAvatarUploadError);
+    const imageUrl = createImageObjectUrl(
+      file,
+      setAvatarUploadError,
+      intl.formatMessage({ id: 'profile.image.type.error' }),
+    );
 
     if (!imageUrl) {
       setAvatarCropImageUrl(null);
@@ -347,9 +352,9 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       syncProfileState(updatedUser);
       setAvatarCropDialogOpen(false);
       resetAvatarCropDialog();
-      toast.success('Avatar updated.');
+      toast.success(intl.formatMessage({ id: 'profile.avatar.updated' }));
     } catch (error) {
-      const message = getApiErrorMessage(error, 'Avatar could not be uploaded.');
+      const message = getApiErrorMessage(error, intl.formatMessage({ id: 'profile.avatar.upload.failed' }));
 
       setAvatarUploadError(message);
       toast.error(message);
@@ -367,21 +372,37 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       syncProfileState(updatedUser);
       setAvatarCropDialogOpen(false);
       resetAvatarCropDialog();
-      toast.success('Avatar removed.');
+      toast.success(intl.formatMessage({ id: 'profile.avatar.removed' }));
     } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Avatar could not be removed.'));
+      toast.error(
+        getApiErrorMessage(
+          error,
+          intl.formatMessage(
+            { id: 'profile.image.remove.failed' },
+            { label: intl.formatMessage({ id: 'profile.avatar' }) },
+          ),
+        ),
+      );
     } finally {
       setDeletingAvatar(false);
     }
   };
 
   const handleOpenProfileBannerCropDialog = () => {
+    if (!profileImageUploadEnabled) {
+      return;
+    }
+
     setProfileBannerUploadError(null);
     setProfileBannerCropDialogOpen(true);
   };
 
   const handleProfileBannerSelect = (file: File) => {
-    const imageUrl = createProfileImageObjectUrl(file, setProfileBannerUploadError);
+    const imageUrl = createImageObjectUrl(
+      file,
+      setProfileBannerUploadError,
+      intl.formatMessage({ id: 'profile.image.type.error' }),
+    );
 
     if (!imageUrl) {
       setProfileBannerCropImageUrl(null);
@@ -420,9 +441,15 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       syncProfileState(updatedUser);
       setProfileBannerCropDialogOpen(false);
       resetProfileBannerCropDialog();
-      toast.success('Profile banner updated.');
+      toast.success(intl.formatMessage({ id: 'profile.banner.updated' }));
     } catch (error) {
-      const message = getApiErrorMessage(error, 'Profile banner could not be uploaded.');
+      const message = getApiErrorMessage(
+        error,
+        intl.formatMessage(
+          { id: 'profile.image.upload.failed' },
+          { label: intl.formatMessage({ id: 'profile.banner' }) },
+        ),
+      );
 
       setProfileBannerUploadError(message);
       toast.error(message);
@@ -440,21 +467,37 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       syncProfileState(updatedUser);
       setProfileBannerCropDialogOpen(false);
       resetProfileBannerCropDialog();
-      toast.success('Profile banner removed.');
+      toast.success(intl.formatMessage({ id: 'profile.banner.removed' }));
     } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Profile banner could not be removed.'));
+      toast.error(
+        getApiErrorMessage(
+          error,
+          intl.formatMessage(
+            { id: 'profile.image.remove.failed' },
+            { label: intl.formatMessage({ id: 'profile.banner' }) },
+          ),
+        ),
+      );
     } finally {
       setDeletingProfileBanner(false);
     }
   };
 
   const handleOpenProfileBackgroundCropDialog = () => {
+    if (!profileImageUploadEnabled) {
+      return;
+    }
+
     setProfileBackgroundUploadError(null);
     setProfileBackgroundCropDialogOpen(true);
   };
 
   const handleProfileBackgroundSelect = (file: File) => {
-    const imageUrl = createProfileImageObjectUrl(file, setProfileBackgroundUploadError);
+    const imageUrl = createImageObjectUrl(
+      file,
+      setProfileBackgroundUploadError,
+      intl.formatMessage({ id: 'profile.image.type.error' }),
+    );
 
     if (!imageUrl) {
       setProfileBackgroundCropImageUrl(null);
@@ -493,9 +536,15 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       syncProfileState(updatedUser);
       setProfileBackgroundCropDialogOpen(false);
       resetProfileBackgroundCropDialog();
-      toast.success('Profile background updated.');
+      toast.success(intl.formatMessage({ id: 'profile.background.updated' }));
     } catch (error) {
-      const message = getApiErrorMessage(error, 'Profile background could not be uploaded.');
+      const message = getApiErrorMessage(
+        error,
+        intl.formatMessage(
+          { id: 'profile.image.upload.failed' },
+          { label: intl.formatMessage({ id: 'profile.background' }) },
+        ),
+      );
 
       setProfileBackgroundUploadError(message);
       toast.error(message);
@@ -513,9 +562,17 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       syncProfileState(updatedUser);
       setProfileBackgroundCropDialogOpen(false);
       resetProfileBackgroundCropDialog();
-      toast.success('Profile background removed.');
+      toast.success(intl.formatMessage({ id: 'profile.background.removed' }));
     } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Profile background could not be removed.'));
+      toast.error(
+        getApiErrorMessage(
+          error,
+          intl.formatMessage(
+            { id: 'profile.image.remove.failed' },
+            { label: intl.formatMessage({ id: 'profile.background' }) },
+          ),
+        ),
+      );
     } finally {
       setDeletingProfileBackground(false);
     }
@@ -528,16 +585,19 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     const parsed = parseProfileDetailsDraft(profileDetailsDraft);
 
     if (!parsed.success) {
-      profileAction.setError(parsed.error);
+      profileAction.setError(intl.formatMessage({ id: parsed.error ?? 'profile.profile.update.failed' }));
       return;
     }
 
-    const updatedUser = await profileAction.run(() => updateCurrentUser(parsed.data), 'Profile could not be updated.');
+    const updatedUser = await profileAction.run(
+      () => updateCurrentUser(parsed.data),
+      intl.formatMessage({ id: 'profile.profile.update.failed' }),
+    );
 
     if (updatedUser) {
       syncProfileState(updatedUser);
       setEditingProfileDetails(false);
-      toast.success('Profile updated.');
+      toast.success(intl.formatMessage({ id: 'profile.profile.updated' }));
     }
   };
 
@@ -547,11 +607,13 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
 
     const result = await emailVerificationSendAction.run(
       () => sendProfileEmailVerification(),
-      'Verification code could not be sent.',
+      intl.formatMessage({ id: 'identity.verification.code.send.failed' }),
     );
 
     if (result) {
-      setEmailVerificationNotice(getVerificationCodeDelivery('email', maskEmailAddress(user.email)));
+      setEmailVerificationNotice(
+        getVerificationCodeDelivery('email', maskEmailAddress(user.email), intl.formatMessage),
+      );
     }
 
     return result;
@@ -590,7 +652,9 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     const parsed = verificationCodeSchema.safeParse(emailVerificationCodeDraft);
 
     if (!parsed.success) {
-      emailVerificationConfirmAction.setError(parsed.error.issues[0]?.message ?? 'Verification code is invalid.');
+      emailVerificationConfirmAction.setError(
+        intl.formatMessage({ id: parsed.error.issues[0]?.message ?? 'validation.verification.code.invalid' }),
+      );
       return;
     }
 
@@ -599,21 +663,21 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
         verifyProfileEmail({
           emailVerificationCode: parsed.data,
         }),
-      'Email could not be verified.',
+      intl.formatMessage({ id: 'profile.email.verification.failed' }),
     );
 
     if (updatedUser) {
       syncProfileState(updatedUser);
       setVerifyingEmail(false);
       setEmailVerificationNotice(null);
-      toast.success('Email verified.');
+      toast.success(intl.formatMessage({ id: 'profile.email.verified' }));
     }
   };
 
   const parsePhoneNumberDraft = () => {
     if (!phoneBindingEnabled) {
       return {
-        error: 'Phone binding is unavailable because no SMS country codes are configured.',
+        error: intl.formatMessage({ id: 'profile.phone.binding.unavailable' }),
         phoneNumber: undefined,
       };
     }
@@ -622,7 +686,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
 
     if (!parsed.success) {
       return {
-        error: parsed.error.issues[0]?.message ?? 'Phone number is invalid.',
+        error: intl.formatMessage({ id: parsed.error.issues[0]?.message ?? 'validation.phone.number.invalid' }),
         phoneNumber: undefined,
       };
     }
@@ -638,7 +702,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
 
     const challenge = await securityVerificationAction.run(
       () => createVerificationChallenge('update_contact'),
-      'Security verification could not be started.',
+      intl.formatMessage({ id: 'identity.security.verification.start.failed' }),
     );
 
     if (!challenge) {
@@ -661,7 +725,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
 
     const challenge = await securityVerificationAction.run(
       () => createVerificationChallenge('manage_sso'),
-      'Security verification could not be started.',
+      intl.formatMessage({ id: 'identity.security.verification.start.failed' }),
     );
 
     if (!challenge) {
@@ -691,7 +755,9 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     const parsed = parsePhoneNumberDraft();
 
     if (!parsed.phoneNumber) {
-      phoneVerificationSendAction.setError(parsed.error ?? 'Phone number is invalid.');
+      phoneVerificationSendAction.setError(
+        parsed.error ?? intl.formatMessage({ id: 'validation.phone.number.invalid' }),
+      );
       return;
     }
 
@@ -704,11 +770,11 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
         sendProfilePhoneVerification({
           phoneNumber,
         }),
-      'Verification code could not be sent.',
+      intl.formatMessage({ id: 'identity.verification.code.send.failed' }),
     );
 
     if (result) {
-      setPhoneVerificationNotice(getVerificationCodeDelivery('sms', maskPhoneNumber(phoneNumber)));
+      setPhoneVerificationNotice(getVerificationCodeDelivery('sms', maskPhoneNumber(phoneNumber), intl.formatMessage));
     }
   };
 
@@ -719,14 +785,18 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     const parsed = parsePhoneNumberDraft();
 
     if (!parsed.phoneNumber) {
-      phoneVerificationConfirmAction.setError(parsed.error ?? 'Phone number is invalid.');
+      phoneVerificationConfirmAction.setError(
+        parsed.error ?? intl.formatMessage({ id: 'validation.phone.number.invalid' }),
+      );
       return;
     }
 
     const parsedCode = verificationCodeSchema.safeParse(phoneVerificationCodeDraft);
 
     if (!parsedCode.success) {
-      phoneVerificationConfirmAction.setError(parsedCode.error.issues[0]?.message ?? 'Verification code is invalid.');
+      phoneVerificationConfirmAction.setError(
+        intl.formatMessage({ id: parsedCode.error.issues[0]?.message ?? 'validation.verification.code.invalid' }),
+      );
       return;
     }
 
@@ -740,7 +810,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
           phoneNumber,
           phoneVerificationCode,
         }),
-      'Phone number could not be verified.',
+      intl.formatMessage({ id: 'profile.phone.verification.failed' }),
     );
 
     if (updatedUser) {
@@ -748,7 +818,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       setPhoneVerificationCodeDraft('');
       setPhoneVerificationNotice(null);
       setEditingPhoneNumber(false);
-      toast.success('Phone number verified.');
+      toast.success(intl.formatMessage({ id: 'profile.phone.number.verified' }));
     }
   };
 
@@ -765,7 +835,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
           method,
           verificationToken,
         }),
-      'Verification code could not be sent.',
+      intl.formatMessage({ id: 'identity.verification.code.send.failed' }),
     );
   };
 
@@ -778,7 +848,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       input.method === 'passkey'
         ? await securityVerificationAction.run(
             () => verifyWithPasskey(pendingVerification.challenge.verificationToken),
-            'Passkey verification could not be completed.',
+            intl.formatMessage({ id: 'identity.passkey.verification.failed' }),
           )
         : await securityVerificationAction.run(
             () =>
@@ -786,7 +856,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
                 verificationToken: pendingVerification.challenge.verificationToken,
                 ...input,
               }),
-            'Verification could not be completed.',
+            intl.formatMessage({ id: 'identity.verification.failed' }),
           );
 
     if (!verified) {
@@ -830,8 +900,8 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
   return (
     <div className="grid gap-6 p-4 lg:p-6">
       <div className="grid gap-1">
-        <h1 className="text-2xl font-semibold tracking-normal">Profile</h1>
-        <p className="max-w-3xl text-sm text-muted-foreground">Account details, verification, and sign-in methods.</p>
+        <h1 className="text-2xl font-semibold tracking-normal">{intl.formatMessage({ id: 'profile.title' })}</h1>
+        <p className="max-w-3xl text-sm text-muted-foreground">{intl.formatMessage({ id: 'profile.description' })}</p>
       </div>
 
       <div className="grid gap-8">
@@ -840,18 +910,21 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
           avatarAlt={user.displayName}
           avatarBusy={avatarBusy}
           avatarUrl={avatarUrl}
+          backgroundBusy={profileBackgroundBusy}
           bannerBusy={profileBannerBusy}
           bannerUrl={profileBannerUrl}
           descriptionClassName={profileHeaderDescriptionClassName}
           fallback={fallback}
-          onChangeAvatar={handleOpenAvatarCropDialog}
-          onChangeBanner={handleOpenProfileBannerCropDialog}
+          onChangeAvatar={profileImageUploadEnabled ? handleOpenAvatarCropDialog : undefined}
+          onChangeBackground={profileImageUploadEnabled ? handleOpenProfileBackgroundCropDialog : undefined}
+          onChangeBanner={profileImageUploadEnabled ? handleOpenProfileBannerCropDialog : undefined}
           onEditProfileDetails={handleEditProfileDetails}
           sectionRef={profileHeaderRef}
           textRef={profileHeaderTextRef}
           title={user.displayName}
           titleClassName={profileHeaderTitleClassName}
           uploadingAvatar={uploadingAvatar}
+          uploadingBackground={uploadingProfileBackground}
           uploadingBanner={uploadingProfileBanner}
           userHandle={userHandle}
         />
@@ -859,71 +932,78 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
         <div className="grid gap-8">
           <ProfileSection
             actionIcon={<UserPenIcon />}
-            actionLabel="Edit"
-            description="Display name, bio, and public profile metadata."
+            actionLabel={intl.formatMessage({ id: 'common.edit' })}
+            description={intl.formatMessage({ id: 'profile.details.description' })}
             onAction={handleEditProfileDetails}
-            title="Profile details"
+            title={intl.formatMessage({ id: 'profile.details' })}
           >
             <ProfileItem
               description={user.displayName}
               icon={<UserPenIcon className="size-4" />}
-              title="Display name"
+              title={intl.formatMessage({ id: 'profile.display.name' })}
             />
 
             <ItemSeparator className="!my-0" />
 
             <ProfileItem
-              description={formatProfileDetail(user.bio)}
+              description={formatProfileDetail(user.bio, intl.formatMessage({ id: 'common.not.set' }))}
               icon={<FileTextIcon className="size-4" />}
-              title="Bio"
+              title={intl.formatMessage({ id: 'profile.bio' })}
             />
 
             <ItemSeparator className="!my-0" />
 
             <ProfileItem
-              description={formatProfileDetail(user.gender)}
+              description={formatProfileDetail(user.gender, intl.formatMessage({ id: 'common.not.set' }))}
               icon={<UserRoundIcon className="size-4" />}
-              title="Gender"
+              title={intl.formatMessage({ id: 'profile.gender' })}
             />
 
             <ItemSeparator className="!my-0" />
 
             <ProfileItem
-              description={formatProfileDetail(user.birthday)}
+              description={formatProfileBirthday(
+                user.birthday,
+                intl.formatMessage({ id: 'common.not.set' }),
+                intl.locale,
+              )}
               icon={<CalendarDaysIcon className="size-4" />}
-              title="Birthday"
+              title={intl.formatMessage({ id: 'profile.birthday' })}
             />
 
             <ItemSeparator className="!my-0" />
 
             <ProfileItem
-              description={formatProfileLocation(user.location)}
+              description={formatProfileLocation(user.location, intl.formatMessage({ id: 'common.not.set' }))}
               icon={<MapPinIcon className="size-4" />}
-              title="Location"
+              title={intl.formatMessage({ id: 'profile.location' })}
             />
 
             <ItemSeparator className="!my-0" />
 
             <ProfileItem
-              description={formatProfileDetail(user.websiteUrl)}
+              description={formatProfileDetail(user.websiteUrl, intl.formatMessage({ id: 'common.not.set' }))}
               icon={<LinkIcon className="size-4" />}
-              title="Homepage"
+              title={intl.formatMessage({ id: 'profile.homepage' })}
             />
           </ProfileSection>
 
-          <ProfileSection title="Personalization" description="Profile visuals.">
+          <ProfileSection
+            title={intl.formatMessage({ id: 'profile.personalization' })}
+            description={intl.formatMessage({ id: 'profile.personalization.description' })}
+          >
             <ProfileItem
               actionDisabled={avatarBusy}
               actionIcon={<ImageUpIcon />}
-              actionLabel="Change"
-              description="Shown on your profile and account menus."
+              actionLabel={profileImageUploadEnabled ? intl.formatMessage({ id: 'common.change' }) : undefined}
+              description={intl.formatMessage({ id: 'profile.personalization.avatar.description' })}
               media={
                 <ImagePreviewTrigger
-                  imageAlt={`${user.displayName} avatar`}
+                  imageAlt={intl.formatMessage({ id: 'profile.avatar.alt' }, { name: user.displayName })}
                   imageUrl={avatarUrl}
                   onOpenChange={(open) => setProfilePreviewTarget(open ? 'avatar' : null)}
                   open={profilePreviewTarget === 'avatar'}
-                  title="Avatar preview"
+                  title={intl.formatMessage({ id: 'profile.avatar.preview' })}
                 >
                   <Avatar className="size-full">
                     <AvatarImage alt={user.displayName} src={avatarUrl} />
@@ -933,10 +1013,10 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
               }
               mediaClassName="size-10 rounded-full"
               mediaVariant="default"
-              onAction={handleOpenAvatarCropDialog}
-              status={avatarUrl ? 'Custom' : 'Default'}
+              onAction={profileImageUploadEnabled ? handleOpenAvatarCropDialog : undefined}
+              status={intl.formatMessage({ id: avatarUrl ? 'common.custom' : 'common.default' })}
               statusVariant={avatarUrl ? 'secondary' : 'outline'}
-              title="Avatar"
+              title={intl.formatMessage({ id: 'profile.avatar' })}
             />
 
             <ItemSeparator className="!my-0" />
@@ -944,25 +1024,25 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
             <ProfileItem
               actionDisabled={profileBannerBusy}
               actionIcon={<ImageUpIcon />}
-              actionLabel="Change"
-              description="Displayed across the top of your profile."
+              actionLabel={profileImageUploadEnabled ? intl.formatMessage({ id: 'common.change' }) : undefined}
+              description={intl.formatMessage({ id: 'profile.personalization.banner.description' })}
               media={
                 <ImagePreviewTrigger
-                  imageAlt={`${user.displayName} profile banner`}
+                  imageAlt={intl.formatMessage({ id: 'profile.banner.alt' }, { name: user.displayName })}
                   imageUrl={profileBannerUrl}
                   onOpenChange={(open) => setProfilePreviewTarget(open ? 'profileBanner' : null)}
                   open={profilePreviewTarget === 'profileBanner'}
-                  title="Profile banner preview"
+                  title={intl.formatMessage({ id: 'profile.banner.preview' })}
                 >
                   <ImagePreviewMedia fallbackIcon={<ImageIcon className="size-4" />} imageUrl={profileBannerUrl} />
                 </ImagePreviewTrigger>
               }
               mediaClassName="size-10 rounded-full"
               mediaVariant="default"
-              onAction={handleOpenProfileBannerCropDialog}
-              status={profileBannerUrl ? 'Custom' : 'Default'}
+              onAction={profileImageUploadEnabled ? handleOpenProfileBannerCropDialog : undefined}
+              status={intl.formatMessage({ id: profileBannerUrl ? 'common.custom' : 'common.default' })}
               statusVariant={profileBannerUrl ? 'secondary' : 'outline'}
-              title="Profile banner"
+              title={intl.formatMessage({ id: 'profile.banner' })}
             />
 
             <ItemSeparator className="!my-0" />
@@ -970,15 +1050,15 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
             <ProfileItem
               actionDisabled={profileBackgroundBusy}
               actionIcon={<ImageUpIcon />}
-              actionLabel="Change"
-              description="Used as the app background while you are signed in."
+              actionLabel={profileImageUploadEnabled ? intl.formatMessage({ id: 'common.change' }) : undefined}
+              description={intl.formatMessage({ id: 'profile.personalization.background.description' })}
               media={
                 <ImagePreviewTrigger
-                  imageAlt={`${user.displayName} profile background`}
+                  imageAlt={intl.formatMessage({ id: 'profile.background.alt' }, { name: user.displayName })}
                   imageUrl={profileBackgroundUrl}
                   onOpenChange={(open) => setProfilePreviewTarget(open ? 'profileBackground' : null)}
                   open={profilePreviewTarget === 'profileBackground'}
-                  title="Profile background preview"
+                  title={intl.formatMessage({ id: 'profile.background.preview' })}
                 >
                   <ImagePreviewMedia
                     fallbackIcon={<WallpaperIcon className="size-4" />}
@@ -988,53 +1068,67 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
               }
               mediaClassName="size-10 rounded-full"
               mediaVariant="default"
-              onAction={handleOpenProfileBackgroundCropDialog}
-              status={profileBackgroundUrl ? 'Custom' : 'Default'}
+              onAction={profileImageUploadEnabled ? handleOpenProfileBackgroundCropDialog : undefined}
+              status={intl.formatMessage({ id: profileBackgroundUrl ? 'common.custom' : 'common.default' })}
               statusVariant={profileBackgroundUrl ? 'secondary' : 'outline'}
-              title="Profile background"
+              title={intl.formatMessage({ id: 'profile.background' })}
             />
           </ProfileSection>
 
-          <ProfileSection title="Contact" description="Recovery and verification contact methods.">
+          <ProfileSection
+            title={intl.formatMessage({ id: 'profile.contact' })}
+            description={intl.formatMessage({ id: 'profile.contact.description' })}
+          >
             <ProfileItem
               actionDisabled={!emailVerificationAvailable}
-              actionIcon={<MailIcon />}
-              actionLabel={emailNeedsVerification ? 'Verify' : undefined}
+              actionIcon={emailVerificationActionVisible ? <MailIcon /> : undefined}
+              actionLabel={emailVerificationActionVisible ? intl.formatMessage({ id: 'identity.verify' }) : undefined}
               actionTooltip={
-                emailNeedsVerification && !profileEmailVerificationEnabled
-                  ? 'Email verification is unavailable because SMTP email is not configured.'
+                emailVerificationActionVisible && !profileEmailVerificationEnabled
+                  ? intl.formatMessage({ id: 'profile.email.verification.unavailable' })
                   : undefined
               }
               description={user.email}
               icon={<MailIcon className="size-4" />}
-              onAction={emailNeedsVerification ? handleStartEmailVerification : undefined}
-              status={user.emailVerified ? 'Verified' : 'Unverified'}
+              onAction={emailVerificationActionVisible ? handleStartEmailVerification : undefined}
+              status={intl.formatMessage({ id: user.emailVerified ? 'common.verified' : 'common.unverified' })}
               statusVariant={user.emailVerified ? 'secondary' : 'outline'}
-              title="Email"
+              title={intl.formatMessage({ id: 'profile.email' })}
             />
 
             <ItemSeparator className="!my-0" />
 
             <ProfileItem
-              actionLabel={user.phoneNumber ? 'Change' : 'Bind'}
               actionDisabled={!phoneBindingEnabled}
-              actionIcon={<PhoneIcon />}
-              actionTooltip={
-                phoneBindingEnabled
-                  ? undefined
-                  : 'Phone binding is unavailable because SMS verification is not configured.'
+              actionIcon={phoneActionVisible ? <PhoneIcon /> : undefined}
+              actionLabel={
+                phoneActionVisible
+                  ? intl.formatMessage({ id: user.phoneNumber ? 'common.change' : 'common.bind' })
+                  : undefined
               }
-              description={user.phoneNumber ?? 'Not bound'}
+              actionTooltip={
+                phoneActionVisible && !phoneBindingEnabled
+                  ? intl.formatMessage({ id: 'profile.phone.binding.unavailable' })
+                  : undefined
+              }
+              description={user.phoneNumber ?? intl.formatMessage({ id: 'common.not.bound' })}
               icon={<PhoneIcon className="size-4" />}
-              onAction={handleEditPhoneNumber}
-              status={user.phoneNumber ? (user.phoneVerified ? 'Verified' : 'Unverified') : undefined}
+              onAction={phoneActionVisible ? handleEditPhoneNumber : undefined}
+              status={
+                user.phoneNumber
+                  ? intl.formatMessage({ id: user.phoneVerified ? 'common.verified' : 'common.unverified' })
+                  : undefined
+              }
               statusVariant={user.phoneVerified ? 'secondary' : 'outline'}
-              title="Phone"
+              title={intl.formatMessage({ id: 'profile.phone' })}
             />
           </ProfileSection>
 
           {bindableSsoProviders.length > 0 ? (
-            <ProfileSection title="Sign-in methods" description="Linked external sign-in providers.">
+            <ProfileSection
+              title={intl.formatMessage({ id: 'profile.sign.in.methods' })}
+              description={intl.formatMessage({ id: 'profile.sign.in.methods.description' })}
+            >
               <SsoProviderList
                 identities={ssoIdentities}
                 onBind={handleBindSsoProvider}
@@ -1043,11 +1137,18 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
             </ProfileSection>
           ) : null}
 
-          <ProfileSection title="Access" description="Assigned roles and permissions.">
+          <ProfileSection
+            title={intl.formatMessage({ id: 'profile.access' })}
+            description={intl.formatMessage({ id: 'profile.access.description' })}
+          >
             <ProfileItem
-              description={formatRoleAccessSummary(user.roles, user.permissions)}
+              description={formatRoleAccessSummary(
+                user.roles,
+                user.permissions,
+                intl.formatMessage({ id: 'profile.no.roles' }),
+              )}
               icon={<UserCogIcon className="size-4" />}
-              title="Roles"
+              title={intl.formatMessage({ id: 'profile.roles' })}
             />
           </ProfileSection>
         </div>
@@ -1055,12 +1156,12 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
       <ImageCropDialog
         aspect={1}
         cropShape="round"
-        description="Crop the avatar before uploading."
+        description={intl.formatMessage({ id: 'profile.personalization.avatar.upload.description' })}
         error={avatarUploadError}
-        imageSelectLabel="Select avatar"
+        imageSelectLabel={intl.formatMessage({ id: 'profile.image.select' })}
         imageUrl={avatarCropImageUrl}
         loading={uploadingAvatar}
-        maxFileBytes={profileImageMaxBytes}
+        maxFileBytes={profileImageMaxBytes ?? undefined}
         onImageSelect={handleAvatarSelect}
         onOpenChange={handleAvatarCropOpenChange}
         onRemove={avatarUrl ? handleDeleteAvatar : undefined}
@@ -1071,20 +1172,20 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
           height: 512,
           width: 512,
         }}
-        removeLabel="Remove"
+        removeLabel={intl.formatMessage({ id: 'common.remove' })}
         removeLoading={deletingAvatar}
         showGrid={false}
-        submitLabel="Upload"
-        title="Upload avatar"
+        submitLabel={intl.formatMessage({ id: 'common.upload' })}
+        title={intl.formatMessage({ id: 'profile.image.upload.avatar' })}
       />
       <ImageCropDialog
         aspect={4}
-        description="Crop and adjust the profile banner image."
+        description={intl.formatMessage({ id: 'profile.personalization.banner.upload.description' })}
         error={profileBannerUploadError}
-        imageSelectLabel="Select profile banner"
+        imageSelectLabel={intl.formatMessage({ id: 'profile.image.select' })}
         imageUrl={profileBannerCropImageUrl}
         loading={uploadingProfileBanner}
-        maxFileBytes={profileImageMaxBytes}
+        maxFileBytes={profileImageMaxBytes ?? undefined}
         onImageSelect={handleProfileBannerSelect}
         onOpenChange={handleProfileBannerCropOpenChange}
         onRemove={profileBannerUrl ? handleDeleteProfileBanner : undefined}
@@ -1096,20 +1197,20 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
           height: 400,
           width: 1600,
         }}
-        removeLabel="Remove"
+        removeLabel={intl.formatMessage({ id: 'common.remove' })}
         removeLoading={deletingProfileBanner}
         showAdjustments
-        submitLabel="Upload"
-        title="Upload profile banner"
+        submitLabel={intl.formatMessage({ id: 'common.upload' })}
+        title={intl.formatMessage({ id: 'profile.image.upload.banner' })}
       />
       <ImageCropDialog
         aspect={16 / 9}
-        description="Crop and adjust the profile background image."
+        description={intl.formatMessage({ id: 'profile.personalization.background.upload.description' })}
         error={profileBackgroundUploadError}
-        imageSelectLabel="Select profile background"
+        imageSelectLabel={intl.formatMessage({ id: 'profile.image.select' })}
         imageUrl={profileBackgroundCropImageUrl}
         loading={uploadingProfileBackground}
-        maxFileBytes={profileImageMaxBytes}
+        maxFileBytes={profileImageMaxBytes ?? undefined}
         onImageSelect={handleProfileBackgroundSelect}
         onOpenChange={handleProfileBackgroundCropOpenChange}
         onRemove={profileBackgroundUrl ? handleDeleteProfileBackground : undefined}
@@ -1121,11 +1222,11 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
           height: 1080,
           width: 1920,
         }}
-        removeLabel="Remove"
+        removeLabel={intl.formatMessage({ id: 'common.remove' })}
         removeLoading={deletingProfileBackground}
         showAdjustments
-        submitLabel="Upload"
-        title="Upload profile background"
+        submitLabel={intl.formatMessage({ id: 'common.upload' })}
+        title={intl.formatMessage({ id: 'profile.image.upload.background' })}
       />
       {pendingVerification ? (
         <IdentityVerificationDialog
@@ -1226,7 +1327,7 @@ function parseProfileDetailsDraft(draft: ProfileDetailsDraft) {
   if (!displayName.success) {
     return {
       success: false,
-      error: displayName.error.issues[0]?.message ?? 'Display name is invalid.',
+      error: displayName.error.issues[0]?.message ?? 'validation.display.name.invalid',
     } as const;
   }
 
@@ -1235,7 +1336,7 @@ function parseProfileDetailsDraft(draft: ProfileDetailsDraft) {
   if (!gender.success) {
     return {
       success: false,
-      error: gender.error.issues[0]?.message ?? 'Gender is invalid.',
+      error: gender.error.issues[0]?.message ?? 'validation.profile.gender.invalid',
     } as const;
   }
 
@@ -1244,7 +1345,7 @@ function parseProfileDetailsDraft(draft: ProfileDetailsDraft) {
   if (!birthday.success) {
     return {
       success: false,
-      error: birthday.error.issues[0]?.message ?? 'Birthday is invalid.',
+      error: birthday.error.issues[0]?.message ?? 'validation.birthday.invalid',
     } as const;
   }
 
@@ -1253,7 +1354,7 @@ function parseProfileDetailsDraft(draft: ProfileDetailsDraft) {
   if (!bio.success) {
     return {
       success: false,
-      error: bio.error.issues[0]?.message ?? 'Bio is invalid.',
+      error: bio.error.issues[0]?.message ?? 'validation.profile.bio.invalid',
     } as const;
   }
 
@@ -1262,7 +1363,7 @@ function parseProfileDetailsDraft(draft: ProfileDetailsDraft) {
   if (!location.success) {
     return {
       success: false,
-      error: location.error.issues[0]?.message ?? 'Location is invalid.',
+      error: location.error.issues[0]?.message ?? 'validation.profile.location.invalid',
     } as const;
   }
 
@@ -1271,7 +1372,7 @@ function parseProfileDetailsDraft(draft: ProfileDetailsDraft) {
   if (!websiteUrl.success) {
     return {
       success: false,
-      error: websiteUrl.error.issues[0]?.message ?? 'Homepage is invalid.',
+      error: websiteUrl.error.issues[0]?.message ?? 'validation.homepage.url.invalid',
     } as const;
   }
 
@@ -1288,17 +1389,23 @@ function parseProfileDetailsDraft(draft: ProfileDetailsDraft) {
   } as const;
 }
 
-function formatProfileDetail(value: string | undefined) {
-  return value?.trim() || 'Not set';
+function formatProfileDetail(value: string | undefined, fallback: string) {
+  return value?.trim() || fallback;
 }
 
-function formatProfileLocation(value: string | undefined) {
+function formatProfileBirthday(value: string | undefined, fallback: string, locale: string) {
+  const normalizedValue = value?.trim();
+
+  return normalizedValue ? formatDateOnlyValue(normalizedValue, locale) : fallback;
+}
+
+function formatProfileLocation(value: string | undefined, fallback: string) {
   const locationLevels = value
     ?.split(',')
     .map((level) => level.trim())
     .filter(Boolean);
 
-  return locationLevels?.length ? [...locationLevels].reverse().join(', ') : 'Not set';
+  return locationLevels?.length ? [...locationLevels].reverse().join(', ') : fallback;
 }
 
 export default Index;

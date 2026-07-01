@@ -76,6 +76,16 @@ export function createUsersModule(
         handlers: [...requireVerifiedUserAdmin, controller.devices],
       },
       {
+        method: 'delete',
+        path: '/:id/devices',
+        handlers: [...requireVerifiedUserAdmin, controller.revokeDevices],
+      },
+      {
+        method: 'delete',
+        path: '/:id/devices/:sessionId',
+        handlers: [...requireVerifiedUserAdmin, controller.revokeDevice],
+      },
+      {
         method: 'get',
         path: '/:id/sso-identities',
         handlers: [...requireVerifiedUserAdmin, controller.ssoIdentities],

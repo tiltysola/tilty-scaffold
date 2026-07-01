@@ -28,7 +28,7 @@ export function rateLimitMiddleware(options: RateLimitOptions): Middleware {
 
     if (record.count > options.max) {
       ctx.set('Retry-After', String(Math.ceil(record.expiresInMs / 1000)));
-      throw new AppError('RATE_LIMITED', 'The request rate limit has been exceeded.', 429);
+      throw new AppError('RATE_LIMITED', 'error.RATE_LIMITED', 429);
     }
 
     await next();

@@ -1,4 +1,5 @@
 import { type ChangeEvent } from 'react';
+import { useIntl } from 'react-intl';
 
 import { RefreshCwIcon } from 'lucide-react';
 
@@ -15,7 +16,15 @@ import { PasswordInput, SelectControl } from './FormControls';
 import { SmsProfilesField } from './SmsProfilesField';
 import { SmtpProfilesField } from './SmtpProfilesField';
 import { SsoProfilesField } from './SsoProfilesField';
-import { fieldGroupsNeedHeader, getFieldGroups } from './utils';
+import {
+  fieldGroupsNeedHeader,
+  formatSetupFieldDescription,
+  formatSetupFieldGroupName,
+  formatSetupFieldLabel,
+  formatSetupFieldOptions,
+  formatSetupFieldPlaceholder,
+  getFieldGroups,
+} from './utils';
 
 export function EnvironmentStep({
   disabled,
@@ -32,15 +41,18 @@ export function EnvironmentStep({
   onValueChange: (key: string, value: string) => void;
   onRegenerateSecret: () => void;
 }) {
-  const shouldShowGroupHeaders = fieldGroupsNeedHeader(getFieldGroups(fields));
+  const intl = useIntl();
   const visibleFields = fields.filter((field) => !field.visible || field.visible(environment));
   const fieldGroups = getFieldGroups(visibleFields);
+  const shouldShowGroupHeaders = fieldGroupsNeedHeader(fieldGroups);
 
   return (
     <div className="grid w-full max-w-5xl gap-6">
       {fieldGroups.map((group) => (
         <section className="grid gap-4 border-b border-border/70 pb-6 last:border-b-0 last:pb-0" key={group.name}>
-          {shouldShowGroupHeaders ? <h3 className="text-sm font-semibold text-foreground">{group.name}</h3> : null}
+          {shouldShowGroupHeaders ? (
+            <h3 className="text-sm font-semibold text-foreground">{formatSetupFieldGroupName(group.name, intl)}</h3>
+          ) : null}
           <div className="grid gap-4">
             {group.fields.map((field) => (
               <SetupField
@@ -78,9 +90,12 @@ function SetupField({
   onRegenerateSecret?: () => void;
   value: string;
 }) {
+  const intl = useIntl();
   const inputId = `setup-${field.key.toLowerCase().replaceAll('_', '-')}`;
   const descriptionId = `${inputId}-description`;
   const help = setupFieldHelp[field.key];
+  const description = formatSetupFieldDescription(field.key, intl);
+  const placeholder = help?.placeholderMessageId ? formatSetupFieldPlaceholder(field.key, intl) : help?.placeholder;
   const labelFor =
     field.kind === 'sms-profiles' || field.kind === 'smtp-profiles' || field.kind === 'sso-profiles'
       ? undefined
@@ -90,17 +105,17 @@ function SetupField({
     <div className="grid min-w-0 items-start gap-2 lg:grid-cols-[minmax(13rem,18rem)_minmax(0,1fr)] lg:gap-4">
       <div className="grid min-w-0 self-start content-start gap-1 lg:pt-2">
         <Label className="text-sm font-medium" htmlFor={labelFor}>
-          {field.label}
+          {formatSetupFieldLabel(field, intl)}
         </Label>
-        {help?.description ? (
+        {description ? (
           <p className="text-xs leading-5 text-muted-foreground" id={descriptionId}>
-            {help.description}
+            {description}
           </p>
         ) : null}
       </div>
       <div className="min-w-0">
         <SetupFieldControl
-          describedBy={help?.description ? descriptionId : undefined}
+          describedBy={descriptionId}
           disabled={disabled}
           environment={environment}
           field={field}
@@ -108,7 +123,7 @@ function SetupField({
           onChange={onChange}
           onRegenerateSecret={onRegenerateSecret}
           onValueChange={onValueChange}
-          placeholder={help?.placeholder ?? field.placeholder}
+          placeholder={placeholder}
           value={value}
         />
       </div>
@@ -139,6 +154,8 @@ function SetupFieldControl({
   placeholder?: string;
   value: string;
 }) {
+  const intl = useIntl();
+
   if (field.kind === 'select') {
     return (
       <SelectControl
@@ -146,7 +163,7 @@ function SetupFieldControl({
         disabled={disabled}
         id={inputId}
         onValueChange={onValueChange}
-        options={field.options ?? []}
+        options={formatSetupFieldOptions(field, intl) ?? []}
         value={value}
       />
     );
@@ -214,16 +231,16 @@ function SetupFieldControl({
 
   return (
     <div className="flex min-w-0 gap-2">
-      {input}
+      <div className="min-w-0 flex-1">{input}</div>
       <ConfirmActionDialog
-        confirmLabel="Regenerate"
-        description="The token signing secret will be replaced in this form. Saved changes can invalidate existing authentication tokens."
+        confirmLabel={intl.formatMessage({ id: 'setup.regenerate.secret' })}
+        description={intl.formatMessage({ id: 'setup.regenerate.secret.description' })}
         onConfirm={onRegenerateSecret}
-        title="Regenerate token signing secret?"
+        title={intl.formatMessage({ id: 'setup.regenerate.secret.title' })}
       >
         <Button disabled={disabled} size="icon" type="button" variant="outline">
           <RefreshCwIcon />
-          <span className="sr-only">Regenerate token signing secret</span>
+          <span className="sr-only">{intl.formatMessage({ id: 'setup.regenerate.secret.title' })}</span>
         </Button>
       </ConfirmActionDialog>
     </div>

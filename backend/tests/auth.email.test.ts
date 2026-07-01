@@ -125,6 +125,41 @@ describe('email verification service', () => {
 
     expect(selectedHosts).toEqual(['smtp-secondary.example.com', 'smtp-primary.example.com']);
   });
+
+  it('formats verification emails with the requested locale', async () => {
+    let sentSubject = '';
+    let sentText = '';
+    const cacheStore = new MemoryCacheStore();
+    const sender: EmailSender = {
+      send: async (input) => {
+        sentSubject = input.subject;
+        sentText = input.text;
+      },
+    };
+    const service = new EmailVerificationService({
+      cacheStore,
+      codeCooldownMs: 60_000,
+      codeExpiresInMs: 10 * 60_000,
+      sender,
+      verificationSecret: 'test-auth-token-secret-minimum-32-characters',
+    });
+
+    await service.sendRegistrationCode('localized@example.com', 'zh-CN');
+
+    expect(sentSubject).toBe('注册验证码');
+    expect(sentText).toContain('你的注册验证码是');
+    expect(sentText).toContain('验证码将在 10 分钟 后过期。');
+
+    await service.sendProfileEmailVerificationCode('profile-localized@example.com', 'zh-CN');
+
+    expect(sentSubject).toBe('个人邮箱验证码');
+    expect(sentText).toContain('你的个人邮箱验证码是');
+
+    await service.sendMfaCode('mfa-localized@example.com', 'zh-CN');
+
+    expect(sentSubject).toBe('安全验证码');
+    expect(sentText).toContain('你的安全验证码是');
+  });
 });
 
 class ConflictingCompareAndSetCacheStore extends MemoryCacheStore {

@@ -1,0 +1,31 @@
+.app-shell {
+  --app-shell-max-width: 96rem;
+  --app-shell-gutter: max(0px, calc((100vw - var(--app-shell-max-width)) / 2));
+}
+
+.app-shell [data-slot='sidebar-wrapper'] {
+  max-width: var(--app-shell-max-width);
+  margin-inline: auto;
+}
+
+@media (min-width: 48rem) {
+  .app-shell
+    [data-slot='sidebar']:not([data-collapsible='offcanvas'])
+    [data-slot='sidebar-container'][data-side='left'] {
+    left: var(--app-shell-gutter);
+  }
+
+  .app-shell
+    [data-slot='sidebar']:not([data-collapsible='offcanvas'])
+    [data-slot='sidebar-container'][data-side='right'] {
+    right: var(--app-shell-gutter);
+  }
+
+  .app-shell [data-slot='sidebar'][data-collapsible='offcanvas'] [data-slot='sidebar-container'][data-side='left'] {
+    left: calc(var(--app-shell-gutter) - var(--sidebar-width));
+  }
+
+  .app-shell [data-slot='sidebar'][data-collapsible='offcanvas'] [data-slot='sidebar-container'][data-side='right'] {
+    right: calc(var(--app-shell-gutter) - var(--sidebar-width));
+  }
+}

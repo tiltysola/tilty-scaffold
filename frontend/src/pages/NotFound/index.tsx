@@ -1,37 +1,31 @@
+import { useIntl } from 'react-intl';
 import { Link } from 'react-router-dom';
 
 import { FileQuestionIcon, HomeIcon } from 'lucide-react';
 
 import { Button } from '@/shadcn/components/ui/button';
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from '@/shadcn/components/ui/empty';
+
+import { AppEmptyState } from '@/components/AppEmptyState';
 
 const Index = () => {
+  const intl = useIntl();
+
   return (
     <main className="flex min-h-svh w-full items-center justify-center bg-background px-4 py-10 text-foreground">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <FileQuestionIcon />
-          </EmptyMedia>
-          <EmptyTitle>Page not found</EmptyTitle>
-          <EmptyDescription>The requested page does not exist or has been moved.</EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent className="flex-row justify-center gap-2">
+      <AppEmptyState
+        actions={
           <Button asChild>
             <Link to="/">
               <HomeIcon />
-              Return home
+              {intl.formatMessage({ id: 'not.found.return.home' })}
             </Link>
           </Button>
-        </EmptyContent>
-      </Empty>
+        }
+        actionsClassName="flex-row justify-center gap-2"
+        description={intl.formatMessage({ id: 'not.found.description' })}
+        icon={<FileQuestionIcon />}
+        title={intl.formatMessage({ id: 'not.found.title' })}
+      />
     </main>
   );
 };

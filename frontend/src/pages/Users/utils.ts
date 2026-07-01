@@ -1,4 +1,7 @@
+import { formatDateValue } from '@/i18n';
 import { type PhoneCountryCode } from '@/lib/auth';
+import { composePhoneNumber } from '@/lib/phone';
+import { type UpdateUserInput, type UserListItem, type UserListPagination } from '@/lib/users';
 import {
   displayNameSchema,
   emailSchema,
@@ -10,18 +13,7 @@ import {
   profileLocationSchema,
   profileWebsiteUrlSchema,
   usernameSchema,
-} from '@/lib/auth-validation';
-import { composePhoneNumber } from '@/lib/phone';
-import { type UpdateUserInput, type UserListItem, type UserListPagination } from '@/lib/users';
-
-export const userPageSize = 20;
-
-export const defaultPagination: UserListPagination = {
-  page: 1,
-  pageSize: userPageSize,
-  total: 0,
-  totalPages: 0,
-};
+} from '@tilty/shared/validation';
 
 export interface EditUserForm {
   username: string;
@@ -39,6 +31,15 @@ export interface EditUserForm {
   password: string;
   available: boolean;
 }
+
+export const userPageSize = 20;
+
+export const defaultPagination: UserListPagination = {
+  page: 1,
+  pageSize: userPageSize,
+  total: 0,
+  totalPages: 0,
+};
 
 export const defaultEditUserForm: EditUserForm = {
   username: '',
@@ -116,7 +117,7 @@ export function parseEditUserForm(
     const username = usernameSchema.safeParse(form.username);
 
     if (!username.success) {
-      return { success: false, error: username.error.issues[0]?.message ?? 'Username is invalid.' };
+      return { success: false, error: username.error.issues[0]?.message ?? 'validation.username.invalid' };
     }
 
     data.username = username.data;
@@ -126,7 +127,7 @@ export function parseEditUserForm(
     const displayName = displayNameSchema.safeParse(form.displayName);
 
     if (!displayName.success) {
-      return { success: false, error: displayName.error.issues[0]?.message ?? 'Display name is invalid.' };
+      return { success: false, error: displayName.error.issues[0]?.message ?? 'validation.display.name.invalid' };
     }
 
     data.displayName = displayName.data;
@@ -136,7 +137,7 @@ export function parseEditUserForm(
     const gender = profileGenderSchema.safeParse(form.gender);
 
     if (!gender.success) {
-      return { success: false, error: gender.error.issues[0]?.message ?? 'Gender is invalid.' };
+      return { success: false, error: gender.error.issues[0]?.message ?? 'validation.profile.gender.invalid' };
     }
 
     data.gender = gender.data;
@@ -146,7 +147,7 @@ export function parseEditUserForm(
     const birthday = profileBirthdaySchema.safeParse(form.birthday);
 
     if (!birthday.success) {
-      return { success: false, error: birthday.error.issues[0]?.message ?? 'Birthday is invalid.' };
+      return { success: false, error: birthday.error.issues[0]?.message ?? 'validation.birthday.invalid' };
     }
 
     data.birthday = birthday.data;
@@ -156,7 +157,7 @@ export function parseEditUserForm(
     const bio = profileBioSchema.safeParse(form.bio);
 
     if (!bio.success) {
-      return { success: false, error: bio.error.issues[0]?.message ?? 'Bio is invalid.' };
+      return { success: false, error: bio.error.issues[0]?.message ?? 'validation.profile.bio.invalid' };
     }
 
     data.bio = bio.data;
@@ -166,7 +167,7 @@ export function parseEditUserForm(
     const location = profileLocationSchema.safeParse(form.location);
 
     if (!location.success) {
-      return { success: false, error: location.error.issues[0]?.message ?? 'Location is invalid.' };
+      return { success: false, error: location.error.issues[0]?.message ?? 'validation.profile.location.invalid' };
     }
 
     data.location = location.data;
@@ -176,7 +177,7 @@ export function parseEditUserForm(
     const websiteUrl = profileWebsiteUrlSchema.safeParse(form.websiteUrl);
 
     if (!websiteUrl.success) {
-      return { success: false, error: websiteUrl.error.issues[0]?.message ?? 'Homepage is invalid.' };
+      return { success: false, error: websiteUrl.error.issues[0]?.message ?? 'validation.homepage.url.invalid' };
     }
 
     data.websiteUrl = websiteUrl.data;
@@ -186,7 +187,7 @@ export function parseEditUserForm(
     const email = emailSchema.safeParse(form.email);
 
     if (!email.success) {
-      return { success: false, error: email.error.issues[0]?.message ?? 'Email is invalid.' };
+      return { success: false, error: email.error.issues[0]?.message ?? 'validation.email.invalid' };
     }
 
     data.email = email.data;
@@ -203,7 +204,7 @@ export function parseEditUserForm(
       const phoneNumber = phoneNumberSchema.safeParse(phoneNumberDraft);
 
       if (!phoneNumber.success) {
-        return { success: false, error: phoneNumber.error.issues[0]?.message ?? 'Phone number is invalid.' };
+        return { success: false, error: phoneNumber.error.issues[0]?.message ?? 'validation.phone.number.invalid' };
       }
 
       data.phoneNumber = phoneNumber.data;
@@ -215,7 +216,7 @@ export function parseEditUserForm(
   const nextPhoneNumber = data.phoneNumber !== undefined ? data.phoneNumber : (user.phoneNumber ?? null);
 
   if (phoneBindingEnabled && form.phoneVerified && !nextPhoneNumber) {
-    return { success: false, error: 'Phone number is required before marking it verified.' };
+    return { success: false, error: 'users.edit.phone.required.before.verification' };
   }
 
   if (phoneBindingEnabled && (data.phoneNumber !== undefined || form.phoneVerified !== user.phoneVerified)) {
@@ -226,7 +227,7 @@ export function parseEditUserForm(
     const password = passwordSchema.safeParse(form.password);
 
     if (!password.success) {
-      return { success: false, error: password.error.issues[0]?.message ?? 'Password is invalid.' };
+      return { success: false, error: password.error.issues[0]?.message ?? 'validation.password.invalid' };
     }
 
     data.password = password.data;
@@ -239,12 +240,6 @@ export function parseEditUserForm(
   return { success: true, data };
 }
 
-export function formatDate(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString();
+export function formatDate(value: string, locale: string) {
+  return formatDateValue(value, locale);
 }

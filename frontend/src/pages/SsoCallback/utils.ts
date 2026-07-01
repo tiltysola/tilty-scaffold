@@ -1,3 +1,5 @@
+import { type IntlShape } from 'react-intl';
+
 import { getSsoCallbackParams, type VerificationMethod } from '@/lib/auth';
 import { routePath } from '@/router';
 import { isSafeRelativePath } from '@tilty/shared/paths';
@@ -39,24 +41,32 @@ export type ParsedSsoCallback =
       type: 'invalid';
     };
 
-export function getPageTitle(status: SsoCallbackStatus) {
+type FormatMessage = IntlShape['formatMessage'];
+
+export function getPageTitle(status: SsoCallbackStatus, formatMessage: FormatMessage) {
   if (status === 'bind') {
-    return 'Complete SSO authentication';
+    return formatMessage({ id: 'sso.complete.authentication' });
   }
 
-  return status === 'invalid' ? 'SSO authentication failed' : 'Completing SSO authentication';
+  return status === 'invalid'
+    ? formatMessage({ id: 'sso.authentication.failed' })
+    : formatMessage({ id: 'sso.completing.authentication' });
 }
 
-export function getPageDescription(status: SsoCallbackStatus, ssoBind: SsoBindState | null) {
+export function getPageDescription(
+  status: SsoCallbackStatus,
+  ssoBind: SsoBindState | null,
+  formatMessage: FormatMessage,
+) {
   if (status === 'bind' && ssoBind) {
-    return `Select the account association method for ${ssoBind.providerName}.`;
+    return formatMessage({ id: 'sso.description.bind' }, { providerName: ssoBind.providerName });
   }
 
   if (status === 'invalid') {
-    return 'Return to the login page and start SSO again.';
+    return formatMessage({ id: 'sso.description.invalid' });
   }
 
-  return 'Restoring your session.';
+  return formatMessage({ id: 'sso.description.processing' });
 }
 
 export function parseSsoCallback(hash: string): ParsedSsoCallback {

@@ -160,10 +160,9 @@ Registration email verification is disabled by default. Set
 table arrays containing one or more SMTP profiles to require emailed
 verification codes during account registration and enable password recovery.
 Each send uses a randomly selected SMTP profile. Each profile requires `host`,
-`port`,
-`secure`, `startTls`, `from`, and `timeoutMs`; `username` and `password` are
-optional but must be configured together. Verification code records use the
-configured cache store.
+`port`, `secure`, `startTls`, `from`, and `timeoutMs`; `username` and
+`password` are optional but must be configured together. Verification code
+records use the configured cache store.
 
 SMS verification configuration is disabled by default. Set
 `SMS_VERIFICATION_SERVICE=aliyun` and configure `SMS_ALICLOUD_PROFILES` as a
@@ -178,15 +177,22 @@ profile uses Dysmsapi `2017-05-25` `SendSms` with `signName` and
 The setup connection test probes Aliyun credentials without sending a real SMS.
 Verified phone bindings must store phone numbers in E.164 format.
 
+Internationalized backend messages use the request locale from
+`X-Tilty-Locale`, falling back to `Accept-Language` and then `en-US`. This
+applies to API error messages, setup gate responses, readiness failures, RBAC
+display names, and email verification templates. Error responses remain
+code-first contracts; clients should rely on `error` for behavior and treat
+`message` as display text.
+
 SSO is disabled by default. Set `SSO_ENABLED=true` and configure `SSO_PROFILES`
 as TOML table arrays to enable OAuth 2.0 or OpenID Connect providers. Providers
 with `loginEnabled=true` are shown on the login page; providers with
 `bindingEnabled=true` can be bound from the user profile. Each profile has a
 unique `id`, display `name`, optional `iconUrl`, client credentials, callback
 URLs, scopes, and protocol-specific endpoints. OIDC profiles use `issuerUrl`
-and discovery; OAuth 2.0 profiles use
-`authorizationUrl`, `tokenUrl`, `userInfoUrl`, and profile field mappings such
-as `subjectField`, `emailField`, and `emailVerifiedField`.
+and discovery; OAuth 2.0 profiles use `authorizationUrl`, `tokenUrl`,
+`userInfoUrl`, and profile field mappings such as `subjectField`, `emailField`,
+and `emailVerifiedField`.
 
 Production SSO URLs must use HTTPS. Setup defaults each profile
 `frontendCallbackUrl` to `{APP_DOMAIN}/sso/callback` and `redirectUri` to
@@ -197,8 +203,7 @@ validation, the backend redirects to the profile `frontendCallbackUrl` with a
 short-lived, one-time handoff token for known SSO identities, a one-time bind
 token for first-time SSO identities, or a profile binding result for
 authenticated profile binding. Bound SSO identities are stored by `providerId`
-and provider subject,
-allowing one account to bind multiple providers.
+and provider subject, allowing one account to bind multiple providers.
 
 First-time SSO users can either create a new account with a local password or
 bind the SSO identity to an existing account. New-account email addresses are
@@ -269,6 +274,9 @@ verified `user_management` step-up grant from a passkey or authenticator app.
 | `GET`    | `/api/users/`                                 | List users after user management verification           |
 | `PUT`    | `/api/users/:id`                              | Update a managed user after verification                |
 | `PUT`    | `/api/users/:id/roles`                        | Replace user roles after verification                   |
+| `GET`    | `/api/users/:id/devices`                      | List managed user login devices after verification      |
+| `DELETE` | `/api/users/:id/devices`                      | Revoke managed user login devices after verification    |
+| `DELETE` | `/api/users/:id/devices/:sessionId`           | Revoke one managed user login device after verification |
 | `GET`    | `/api/profile-options/genders`                | Return gender profile options                           |
 | `GET`    | `/api/profile-options/locations/countries`    | Return country location options                         |
 | `GET`    | `/api/profile-options/locations/regions`      | Return region location options                          |

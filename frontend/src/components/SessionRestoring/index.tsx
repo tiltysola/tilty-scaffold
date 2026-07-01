@@ -1,6 +1,10 @@
+import { useIntl } from 'react-intl';
+
 import { Spinner } from '@/shadcn/components/ui/spinner';
 
 const Index = () => {
+  const intl = useIntl();
+
   return (
     <main
       aria-busy="true"
@@ -8,7 +12,7 @@ const Index = () => {
     >
       <div className="flex flex-col items-center gap-3 text-center">
         <Spinner className="size-5" />
-        <span>Restoring session</span>
+        <span>{intl.formatMessage({ id: 'state.restoring.session' })}</span>
       </div>
     </main>
   );

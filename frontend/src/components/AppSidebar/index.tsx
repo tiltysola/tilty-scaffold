@@ -1,4 +1,5 @@
 import { type CSSProperties, type ReactNode, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { Link, useNavigate } from 'react-router-dom';
 
 import {
@@ -46,6 +47,16 @@ import { cn } from '@/shadcn/lib/utils';
 import NavHeader from './NavHeader';
 import SideNav, { type SideNavProps } from './SideNav';
 
+interface AppSidebarProps {
+  children: ReactNode;
+}
+
+interface SidebarUserProfile {
+  avatarUrl?: string;
+  name: string;
+  username: string;
+}
+
 const sidebarStyle = {
   '--header-height': 'calc(var(--spacing) * 12)',
   '--sidebar-width': 'calc(var(--spacing) * 72)',
@@ -60,16 +71,6 @@ const navIcons: Record<NavigationIcon, LucideIcon> = {
   users: UsersIcon,
 };
 
-interface AppSidebarProps {
-  children: ReactNode;
-}
-
-interface SidebarUserProfile {
-  avatarUrl?: string;
-  name: string;
-  username: string;
-}
-
 const SidebarUser = ({
   hasProfileBackground,
   onSignOut,
@@ -83,6 +84,7 @@ const SidebarUser = ({
   signingOut: boolean;
   user: SidebarUserProfile;
 }) => {
+  const intl = useIntl();
   const { isMobile } = useSidebar();
   const avatarUrl = resolveAssetUrl(user.avatarUrl);
   const fallback = getUserInitials(user.name);
@@ -128,11 +130,11 @@ const SidebarUser = ({
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={onProfile}>
               <UserCircleIcon />
-              Profile
+              {intl.formatMessage({ id: 'route.profile' })}
             </DropdownMenuItem>
             <DropdownMenuItem disabled={signingOut} onSelect={onSignOut}>
               <LogOutIcon />
-              {signingOut ? 'Signing out' : 'Sign out'}
+              {intl.formatMessage({ id: signingOut ? 'profile.signing.out' : 'profile.sign.out' })}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -144,15 +146,16 @@ const SidebarUser = ({
 const Index = ({ children }: AppSidebarProps) => {
   const [signingOut, setSigningOut] = useState(false);
   const navigate = useNavigate();
+  const intl = useIntl();
   const session = useAuthenticatedSession();
   const sidebarUser = {
     avatarUrl: session.user.avatarUrl,
-    name: session.user.displayName,
+    name: session.user.displayName ?? intl.formatMessage({ id: 'fallback.signed.in.user' }),
     username: session.user.username,
   };
   const profileBackgroundUrl = resolveAssetUrl(session.user.profileBackgroundUrl);
   const hasProfileBackground = Boolean(profileBackgroundUrl);
-  const navItems = createNavItems(session.user.permissions);
+  const navItems = createNavItems(session.user.permissions, intl.formatMessage);
 
   const handleSignOut = () => {
     if (signingOut) {
@@ -165,7 +168,7 @@ const Index = ({ children }: AppSidebarProps) => {
         navigate(routePath('login'), { replace: true });
       })
       .catch((error) => {
-        toast.error(getApiErrorMessage(error, 'Sign out could not be completed.'));
+        toast.error(getApiErrorMessage(error, intl.formatMessage({ id: 'profile.sign.out.failed' })));
         setSigningOut(false);
       });
   };
@@ -175,7 +178,7 @@ const Index = ({ children }: AppSidebarProps) => {
   };
 
   return (
-    <div className="relative h-svh overflow-hidden bg-sidebar text-foreground">
+    <div className="app-shell relative h-svh overflow-hidden bg-sidebar text-foreground">
       {profileBackgroundUrl ? (
         <>
           <div
@@ -201,7 +204,7 @@ const Index = ({ children }: AppSidebarProps) => {
                 <SidebarMenuButton asChild>
                   <Link to={routePath('dashboard')}>
                     <CommandIcon />
-                    <span className="text-base font-semibold">Tilty Scaffold</span>
+                    <span className="text-base font-semibold">{intl.formatMessage({ id: 'app.name' })}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -239,7 +242,7 @@ const Index = ({ children }: AppSidebarProps) => {
   );
 };
 
-function createNavItems(permissionKeys?: string[]) {
+function createNavItems(permissionKeys: string[] | undefined, formatMessage: (descriptor: { id: string }) => string) {
   return {
     groups: getMainNavigationGroups(permissionKeys).map((group) => ({
       items: group.items.map((item) => {
@@ -248,11 +251,11 @@ function createNavItems(permissionKeys?: string[]) {
         return {
           external: item.external,
           icon: <Icon />,
-          title: item.title,
+          title: formatMessage({ id: item.titleMessageId }),
           url: item.url,
         };
       }),
-      label: group.label,
+      label: formatMessage({ id: group.labelMessageId }),
     })),
   } satisfies SideNavProps;
 }

@@ -65,7 +65,7 @@ export class TotpService {
 
   async createSetup(user: UserModel) {
     if (user.totpEnabled) {
-      throw new AppError('TOTP_ALREADY_ENABLED', 'Two-step authentication is already enabled.', 409);
+      throw new AppError('TOTP_ALREADY_ENABLED', 'error.TOTP_ALREADY_ENABLED', 409);
     }
 
     const secret = generateBase32Secret();
@@ -93,14 +93,14 @@ export class TotpService {
 
   async enable(user: UserModel, setupToken: string, code: string) {
     if (user.totpEnabled) {
-      throw new AppError('TOTP_ALREADY_ENABLED', 'Two-step authentication is already enabled.', 409);
+      throw new AppError('TOTP_ALREADY_ENABLED', 'error.TOTP_ALREADY_ENABLED', 409);
     }
 
     const setupRecord = await this.requireSetupToken(user.id, setupToken);
     const secret = this.decryptSecret(setupRecord.secretEncrypted);
 
     if (!(await verifyTotpCode(secret, code))) {
-      throw new AppError('TOTP_CODE_INVALID', 'Two-step authentication code is invalid.', 401);
+      throw new AppError('TOTP_CODE_INVALID', 'error.TOTP_CODE_INVALID', 401);
     }
 
     await this.consumeSetupToken(setupToken, setupRecord);
@@ -121,7 +121,7 @@ export class TotpService {
 
   async disable(user: UserModel) {
     if (!user.totpEnabled) {
-      throw new AppError('TOTP_NOT_ENABLED', 'Two-step authentication is not enabled.', 409);
+      throw new AppError('TOTP_NOT_ENABLED', 'error.TOTP_NOT_ENABLED', 409);
     }
 
     user.totpEnabled = false;
@@ -162,7 +162,7 @@ export class TotpService {
       return this.consumeRecoveryCode(user.id, input.recoveryCode);
     }
 
-    throw new AppError('TOTP_CODE_REQUIRED', 'Two-step authentication code is required.', 400);
+    throw new AppError('TOTP_CODE_REQUIRED', 'error.TOTP_CODE_REQUIRED', 400);
   }
 
   private async requireSetupToken(userId: string, setupToken: string) {
@@ -171,7 +171,7 @@ export class TotpService {
 
     if (!record || record.userId !== userId || record.used || record.expiresAt <= Date.now()) {
       await this.cacheStore.delete(key);
-      throw new AppError('TOTP_SETUP_TOKEN_INVALID', 'Two-step authentication setup token is invalid or expired.', 401);
+      throw new AppError('TOTP_SETUP_TOKEN_INVALID', 'error.TOTP_SETUP_TOKEN_INVALID', 401);
     }
 
     return record;
@@ -183,7 +183,7 @@ export class TotpService {
 
     if (remainingTtlMs <= 0) {
       await this.cacheStore.delete(key);
-      throw new AppError('TOTP_SETUP_TOKEN_INVALID', 'Two-step authentication setup token is invalid or expired.', 401);
+      throw new AppError('TOTP_SETUP_TOKEN_INVALID', 'error.TOTP_SETUP_TOKEN_INVALID', 401);
     }
 
     const consumed = await this.cacheStore.compareAndSet(
@@ -197,7 +197,7 @@ export class TotpService {
     );
 
     if (!consumed) {
-      throw new AppError('TOTP_SETUP_TOKEN_CONFLICT', 'Two-step authentication setup state changed.', 409);
+      throw new AppError('TOTP_SETUP_TOKEN_CONFLICT', 'error.TOTP_SETUP_TOKEN_CONFLICT', 409);
     }
 
     await this.cacheStore.delete(key);
@@ -205,7 +205,7 @@ export class TotpService {
 
   private getUserTotpSecret(user: UserModel) {
     if (!user.totpSecretEncrypted) {
-      throw new AppError('TOTP_NOT_ENABLED', 'Two-step authentication is not enabled.', 409);
+      throw new AppError('TOTP_NOT_ENABLED', 'error.TOTP_NOT_ENABLED', 409);
     }
 
     return this.decryptSecret(user.totpSecretEncrypted);
@@ -249,7 +249,7 @@ export class TotpService {
 
   private assertTotpEnabled(user: UserModel) {
     if (!user.totpEnabled || !user.totpSecretEncrypted) {
-      throw new AppError('TOTP_NOT_ENABLED', 'Two-step authentication is not enabled.', 409);
+      throw new AppError('TOTP_NOT_ENABLED', 'error.TOTP_NOT_ENABLED', 409);
     }
   }
 
@@ -266,7 +266,7 @@ export class TotpService {
     const [version, iv, tag, encrypted] = encryptedSecret.split(':');
 
     if (version !== 'v1' || !iv || !tag || !encrypted) {
-      throw new AppError('TOTP_SECRET_INVALID', 'Two-step authentication secret is invalid.', 500);
+      throw new AppError('TOTP_SECRET_INVALID', 'error.TOTP_SECRET_INVALID', 500);
     }
 
     try {
@@ -276,7 +276,7 @@ export class TotpService {
 
       return Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64url')), decipher.final()]).toString('utf8');
     } catch {
-      throw new AppError('TOTP_SECRET_INVALID', 'Two-step authentication secret is invalid.', 500);
+      throw new AppError('TOTP_SECRET_INVALID', 'error.TOTP_SECRET_INVALID', 500);
     }
   }
 
@@ -341,7 +341,7 @@ async function verifyTotpCode(secret: string, code: string) {
 
     return result.valid;
   } catch {
-    throw new AppError('TOTP_SECRET_INVALID', 'Two-step authentication secret is invalid.', 500);
+    throw new AppError('TOTP_SECRET_INVALID', 'error.TOTP_SECRET_INVALID', 500);
   }
 }
 

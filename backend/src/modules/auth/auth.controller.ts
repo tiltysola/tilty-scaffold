@@ -3,6 +3,7 @@ import { type Middleware } from 'koa';
 import { AppError } from '../../core/errors';
 import { ok } from '../../core/http';
 import { readMultipartFile } from '../../infra/multipart';
+import { getRequestLocale } from '../../middleware/locale';
 import {
   type AuthCookieConfig,
   clearAuthCookies,
@@ -38,6 +39,8 @@ import {
 import { type AuthService } from './auth.service';
 import { type SsoCallbackInput, type SsoService } from './auth.sso';
 
+type AuthenticatedSession = Awaited<ReturnType<AuthService['register']>>;
+
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
@@ -65,21 +68,21 @@ export class AuthController {
 
   sendRegistrationEmailVerification: Middleware = async (ctx) => {
     const input = sendEmailVerificationSchema.parse(ctx.request.body);
-    const result = await this.authService.sendRegistrationEmailVerification(input);
+    const result = await this.authService.sendRegistrationEmailVerification(input, getRequestLocale(ctx));
 
     ctx.body = ok(result);
   };
 
   sendPasswordResetEmailVerification: Middleware = async (ctx) => {
     const input = sendEmailVerificationSchema.parse(ctx.request.body);
-    const result = await this.authService.sendPasswordResetEmailVerification(input);
+    const result = await this.authService.sendPasswordResetEmailVerification(input, getRequestLocale(ctx));
 
     ctx.body = ok(result);
   };
 
   sendProfileEmailVerification: Middleware = async (ctx) => {
     const token = getAuthToken(ctx, this.cookieConfig);
-    const result = await this.authService.sendProfileEmailVerification(token);
+    const result = await this.authService.sendProfileEmailVerification(token, getRequestLocale(ctx));
 
     setSensitiveAuthResponseHeaders(ctx);
     ctx.body = ok(result);
@@ -227,7 +230,7 @@ export class AuthController {
 
     if (!refreshToken) {
       clearAuthCookies(ctx, this.cookieConfig);
-      throw new AppError('AUTH_REFRESH_TOKEN_REQUIRED', 'Refresh token is required.', 401);
+      throw new AppError('AUTH_REFRESH_TOKEN_REQUIRED', 'error.AUTH_REFRESH_TOKEN_REQUIRED', 401);
     }
 
     let session: Awaited<ReturnType<AuthService['refreshSession']>>;
@@ -399,7 +402,9 @@ export class AuthController {
     const token = ctx.cookies.get(this.cookieConfig.accessTokenName);
 
     setSensitiveAuthResponseHeaders(ctx);
-    ctx.body = ok(await this.authService.sendVerificationCode(token, input, getAuthRequestContext(ctx)));
+    ctx.body = ok(
+      await this.authService.sendVerificationCode(token, input, getAuthRequestContext(ctx), getRequestLocale(ctx)),
+    );
   };
 
   verificationPasskeyOptions: Middleware = async (ctx) => {
@@ -477,8 +482,6 @@ export class AuthController {
     ctx.body = ok(await this.authService.revokeOtherDeviceSessions(token));
   };
 }
-
-type AuthenticatedSession = Awaited<ReturnType<AuthService['register']>>;
 
 function toSessionResponse(session: AuthenticatedSession) {
   return {

@@ -1,19 +1,13 @@
 import { type SubmitEventHandler, useState } from 'react';
+import { useIntl } from 'react-intl';
 
 import { KeyRoundIcon } from 'lucide-react';
 
 import { Button } from '@/shadcn/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/shadcn/components/ui/dialog';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
 
+import { AppDialogForm } from '@/components/AppDialog';
 import { ConfirmActionDialog } from '@/components/ConfirmActionDialog';
 import FormMessage from '@/components/FormMessage';
 
@@ -41,76 +35,90 @@ export function ChangePasswordDialog({
   open: boolean;
 }) {
   const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const intl = useIntl();
 
   const handleSubmit: SubmitEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault();
     setConfirmationOpen(true);
   };
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setConfirmationOpen(false);
+    }
+
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Change password</DialogTitle>
-          <DialogDescription>Update the password used for this account.</DialogDescription>
-        </DialogHeader>
-        <form className="grid gap-4" onSubmit={handleSubmit}>
-          <div className="grid gap-2">
-            <Label htmlFor="currentPassword">Current password</Label>
-            <Input
-              autoComplete="current-password"
-              disabled={disabled}
-              id="currentPassword"
-              onChange={(event) => onFieldChange('currentPassword', event.target.value)}
-              placeholder="Enter current password"
-              type="password"
-              value={form.currentPassword}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="newPassword">New password</Label>
-            <Input
-              autoComplete="new-password"
-              disabled={disabled}
-              id="newPassword"
-              onChange={(event) => onFieldChange('password', event.target.value)}
-              placeholder="At least 8 characters"
-              type="password"
-              value={form.password}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="confirmNewPassword">Confirm password</Label>
-            <Input
-              autoComplete="new-password"
-              disabled={disabled}
-              id="confirmNewPassword"
-              onChange={(event) => onFieldChange('confirmPassword', event.target.value)}
-              placeholder="Repeat password"
-              type="password"
-              value={form.confirmPassword}
-            />
-          </div>
-          <FormMessage message={error} variant="error" />
-          <DialogFooter>
+    <>
+      <AppDialogForm
+        bodyContentClassName="grid gap-4"
+        description={intl.formatMessage({ id: 'security.change.password.description' })}
+        footer={
+          <>
             <Button disabled={disabled} onClick={() => onOpenChange(false)} type="button" variant="outline">
-              Cancel
+              {intl.formatMessage({ id: 'common.cancel' })}
             </Button>
             <Button disabled={disabled} type="submit">
               <KeyRoundIcon />
-              {disabled ? 'Changing password' : 'Change password'}
+              {disabled
+                ? intl.formatMessage({ id: 'security.changing.password' })
+                : intl.formatMessage({ id: 'security.change.password' })}
             </Button>
-          </DialogFooter>
-          <ConfirmActionDialog
-            confirmLabel="Change password"
-            description="Your password will be changed and other active device sessions will be signed out."
-            onConfirm={onSubmit}
-            onOpenChange={setConfirmationOpen}
-            open={confirmationOpen}
-            title="Change account password?"
+          </>
+        }
+        onOpenChange={handleOpenChange}
+        onSubmit={handleSubmit}
+        open={open}
+        title={intl.formatMessage({ id: 'security.change.password' })}
+      >
+        <div className="grid gap-2">
+          <Label htmlFor="currentPassword">{intl.formatMessage({ id: 'security.current.password' })}</Label>
+          <Input
+            autoComplete="current-password"
+            disabled={disabled}
+            id="currentPassword"
+            onChange={(event) => onFieldChange('currentPassword', event.target.value)}
+            placeholder={intl.formatMessage({ id: 'security.current.password.placeholder' })}
+            type="password"
+            value={form.currentPassword}
           />
-        </form>
-      </DialogContent>
-    </Dialog>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="newPassword">{intl.formatMessage({ id: 'security.new.password' })}</Label>
+          <Input
+            autoComplete="new-password"
+            disabled={disabled}
+            id="newPassword"
+            onChange={(event) => onFieldChange('password', event.target.value)}
+            placeholder={intl.formatMessage({ id: 'security.new.password.placeholder' })}
+            type="password"
+            value={form.password}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="confirmNewPassword">{intl.formatMessage({ id: 'auth.password.confirm' })}</Label>
+          <Input
+            autoComplete="new-password"
+            disabled={disabled}
+            id="confirmNewPassword"
+            onChange={(event) => onFieldChange('confirmPassword', event.target.value)}
+            placeholder={intl.formatMessage({ id: 'security.confirm.password.placeholder' })}
+            type="password"
+            value={form.confirmPassword}
+          />
+        </div>
+        <FormMessage message={error} variant="error" />
+      </AppDialogForm>
+      <ConfirmActionDialog
+        confirmLabel={intl.formatMessage({ id: 'security.change.password' })}
+        description={intl.formatMessage({ id: 'security.change.password.confirmation.description' })}
+        onConfirm={onSubmit}
+        onOpenChange={setConfirmationOpen}
+        open={confirmationOpen}
+        title={intl.formatMessage({ id: 'security.change.password.title' })}
+      />
+    </>
   );
 }

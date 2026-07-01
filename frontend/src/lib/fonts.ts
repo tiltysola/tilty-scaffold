@@ -1,3 +1,11 @@
+export type AppFontLanguage = 'zh' | 'ja';
+
+interface AppFontConfig {
+  className: string;
+  stylesheetHref: string;
+  stylesheetId: string;
+}
+
 const FONT_CSS_PRECONNECT_ID = 'font-css-preconnect';
 const FONT_CDN_PRECONNECT_ID = 'font-cdn-preconnect';
 const BASE_FONT_STYLESHEET_ID = 'base-font-stylesheet';
@@ -8,14 +16,6 @@ const NOTO_SANS_SC_STYLESHEET_HREF =
   'https://fonts.loli.net/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap';
 const NOTO_SANS_JP_STYLESHEET_ID = 'noto-sans-jp-stylesheet';
 const NOTO_SANS_JP_STYLESHEET_HREF = 'https://fonts.loli.net/css2?family=Noto+Sans+JP:wght@100..900&display=swap';
-
-export type AppFontLanguage = 'zh' | 'ja';
-
-interface AppFontConfig {
-  className: string;
-  stylesheetHref: string;
-  stylesheetId: string;
-}
 
 const languageFontConfigs: Record<AppFontLanguage, AppFontConfig> = {
   zh: {

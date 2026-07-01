@@ -1,4 +1,5 @@
 import { type SubmitEventHandler, useCallback, useEffect, useRef, useState } from 'react';
+import { type IntlShape, useIntl } from 'react-intl';
 
 import { FingerprintIcon, ShieldCheckIcon } from 'lucide-react';
 
@@ -6,14 +7,21 @@ import { type VerificationCodeSendResult, type VerificationMethod, type Verifica
 import {
   getIdentityVerificationDescription,
   getVerificationCodeDelivery,
+  getVerificationMethodLabel,
   type IdentityVerificationContext,
   type VerificationCodeDelivery,
 } from '@/lib/verification';
 import { Button } from '@/shadcn/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/shadcn/components/ui/dialog';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
 
+import {
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogRoot,
+} from '@/components/AppDialog';
 import FormMessage from '@/components/FormMessage';
 
 import VerificationCodeInput from './VerificationCodeInput';
@@ -29,6 +37,7 @@ export interface IdentityVerificationSubmitInput {
 interface IdentityVerificationFormProps {
   allowRecoveryCode?: boolean;
   defaultMethod: VerificationMethodName;
+  dialogLayout?: boolean;
   error?: string | null;
   methods: VerificationMethod[];
   onCancel?: () => void;
@@ -43,6 +52,14 @@ interface IdentityVerificationFormProps {
   submittingLabel?: string;
 }
 
+interface IdentityVerificationFormContentProps extends IdentityVerificationFormProps {
+  formatMessage: IntlShape['formatMessage'];
+}
+
+interface LocalizedVerificationMethod extends VerificationMethod {
+  label: string;
+}
+
 type IdentityVerificationDialogFormProps = Omit<
   IdentityVerificationFormProps,
   'onCancel' | 'onContextChange' | 'onDeliveryChange'
@@ -50,29 +67,35 @@ type IdentityVerificationDialogFormProps = Omit<
 
 interface IdentityVerificationDialogProps extends IdentityVerificationDialogFormProps {
   description?: string;
+  onOpenChange: (open: boolean) => void;
   open: boolean;
+  title?: string;
+}
+
+interface IdentityVerificationDialogContentProps {
+  description?: string;
+  formProps: IdentityVerificationDialogFormProps;
   onOpenChange: (open: boolean) => void;
   title?: string;
 }
 
 export function IdentityVerificationDialog({
   description,
-  open,
   onOpenChange,
-  title = 'Verify identity',
+  open,
+  title,
   ...formProps
 }: IdentityVerificationDialogProps) {
-  const formKey = getFormKey(formProps.defaultMethod, formProps.methods);
-
   return (
-    <IdentityVerificationDialogContent
-      key={formKey}
-      description={description}
-      formProps={formProps}
-      onOpenChange={onOpenChange}
-      open={open}
-      title={title}
-    />
+    <AppDialogRoot open={open} onOpenChange={onOpenChange}>
+      <IdentityVerificationDialogContent
+        key={open ? getFormKey(formProps.defaultMethod, formProps.methods) : 'closed'}
+        description={description}
+        formProps={formProps}
+        onOpenChange={onOpenChange}
+        title={title}
+      />
+    </AppDialogRoot>
   );
 }
 
@@ -80,46 +103,47 @@ function IdentityVerificationDialogContent({
   description,
   formProps,
   onOpenChange,
-  open,
   title,
-}: {
-  description?: string;
-  formProps: IdentityVerificationDialogFormProps;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-}) {
-  const [delivery, setDelivery] = useState<VerificationCodeDelivery | null>(null);
+}: IdentityVerificationDialogContentProps) {
   const [context, setContext] = useState<IdentityVerificationContext>(() =>
     getInitialVerificationContext(formProps.defaultMethod, formProps.methods),
   );
+  const [delivery, setDelivery] = useState<VerificationCodeDelivery | null>(null);
+  const intl = useIntl();
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>
-            {delivery ? (
-              <VerificationCodeDeliveryDescription delivery={delivery} />
-            ) : (
-              (description ?? getIdentityVerificationDescription(context))
-            )}
-          </DialogDescription>
-        </DialogHeader>
-        <IdentityVerificationForm
-          {...formProps}
-          onCancel={() => onOpenChange(false)}
-          onContextChange={setContext}
-          onDeliveryChange={setDelivery}
-        />
-      </DialogContent>
-    </Dialog>
+    <AppDialogContent className="sm:max-w-md">
+      <AppDialogHeader
+        description={
+          delivery ? (
+            <VerificationCodeDeliveryDescription delivery={delivery} />
+          ) : (
+            (description ?? getIdentityVerificationDescription(context, intl.formatMessage))
+          )
+        }
+        title={title ?? intl.formatMessage({ id: 'identity.verify.identity' })}
+      />
+      <IdentityVerificationForm
+        {...formProps}
+        dialogLayout
+        onCancel={() => onOpenChange(false)}
+        onContextChange={setContext}
+        onDeliveryChange={setDelivery}
+      />
+    </AppDialogContent>
   );
 }
 
 export function IdentityVerificationForm(props: IdentityVerificationFormProps) {
-  return <IdentityVerificationFormContent key={getFormKey(props.defaultMethod, props.methods)} {...props} />;
+  const intl = useIntl();
+
+  return (
+    <IdentityVerificationFormContent
+      key={getFormKey(props.defaultMethod, props.methods)}
+      {...props}
+      formatMessage={intl.formatMessage}
+    />
+  );
 }
 
 export function VerificationCodeDeliveryDescription({ delivery }: { delivery: VerificationCodeDelivery }) {
@@ -133,6 +157,7 @@ export function VerificationCodeDeliveryDescription({ delivery }: { delivery: Ve
 function IdentityVerificationFormContent({
   allowRecoveryCode = false,
   defaultMethod,
+  dialogLayout = false,
   error,
   methods,
   onCancel,
@@ -143,9 +168,10 @@ function IdentityVerificationFormContent({
   onSubmit,
   pending = false,
   sendPending = false,
-  submitLabel = 'Verify',
-  submittingLabel = 'Verifying',
-}: IdentityVerificationFormProps) {
+  formatMessage,
+  submitLabel,
+  submittingLabel,
+}: IdentityVerificationFormContentProps) {
   const [code, setCode] = useState('');
   const [delivery, setDelivery] = useState<VerificationCodeDelivery | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -158,6 +184,10 @@ function IdentityVerificationFormContent({
   const autoSubmittedKeyRef = useRef<string | null>(null);
   const mountedRef = useRef(false);
   const currentMethod = methods.find((item) => item.method === method) ?? methods[0];
+  const localizedMethods: LocalizedVerificationMethod[] = methods.map((item) => ({
+    ...item,
+    label: getVerificationMethodLabel(item.method, formatMessage),
+  }));
   const busy = pending || sendPending;
 
   const updateDelivery = useCallback(
@@ -188,11 +218,13 @@ function IdentityVerificationFormContent({
   const applySendCodeResult = useCallback(
     (result: VerificationCodeSendResult | null | undefined) => {
       if (result) {
-        updateDelivery(getVerificationCodeDelivery(method, result.maskedTarget ?? currentMethod?.maskedTarget));
+        updateDelivery(
+          getVerificationCodeDelivery(method, result.maskedTarget ?? currentMethod?.maskedTarget, formatMessage),
+        );
         setResendAvailableAt(Date.now() + result.cooldownSeconds * 1000);
       }
     },
-    [currentMethod?.maskedTarget, method, updateDelivery],
+    [currentMethod?.maskedTarget, formatMessage, method, updateDelivery],
   );
 
   const handleSendCode = useCallback(async () => {
@@ -218,7 +250,7 @@ function IdentityVerificationFormContent({
 
     if (usingRecoveryCode) {
       if (!recoveryCode.trim()) {
-        setLocalError('Enter a recovery code.');
+        setLocalError(formatMessage({ id: 'identity.enter.recovery.code' }));
         return;
       }
 
@@ -228,7 +260,7 @@ function IdentityVerificationFormContent({
 
     if (method === 'password') {
       if (!password) {
-        setLocalError('Enter your password.');
+        setLocalError(formatMessage({ id: 'identity.enter.password' }));
         return;
       }
 
@@ -242,12 +274,12 @@ function IdentityVerificationFormContent({
     }
 
     if (!/^\d{6}$/.test(code)) {
-      setLocalError('Enter the 6-digit code.');
+      setLocalError(formatMessage({ id: 'identity.enter.six.digit.code' }));
       return;
     }
 
     await onSubmit({ method, code });
-  }, [clearMessages, code, method, onSubmit, password, recoveryCode, usingRecoveryCode]);
+  }, [clearMessages, code, formatMessage, method, onSubmit, password, recoveryCode, usingRecoveryCode]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -320,15 +352,15 @@ function IdentityVerificationFormContent({
     await submitCurrentMethod();
   };
 
-  return (
-    <form className="grid gap-4" onSubmit={handleSubmit}>
+  const fields = (
+    <>
       {method === 'passkey' ? (
         <div className="grid gap-2">
           <MethodHeader
             currentMethod={method}
             disabled={busy}
-            label="Passkey"
-            methods={methods}
+            label={formatMessage({ id: 'identity.passkey' })}
+            methods={localizedMethods}
             onChange={handleMethodChange}
             onSwitchOpen={clearMessages}
           />
@@ -339,8 +371,8 @@ function IdentityVerificationFormContent({
             currentMethod={method}
             disabled={busy}
             htmlFor="identityVerificationPassword"
-            label="Password"
-            methods={methods}
+            label={formatMessage({ id: 'identity.password' })}
+            methods={localizedMethods}
             onChange={handleMethodChange}
             onSwitchOpen={clearMessages}
           />
@@ -352,7 +384,7 @@ function IdentityVerificationFormContent({
               clearMessages();
               setPassword(event.target.value);
             }}
-            placeholder="Enter your password"
+            placeholder={formatMessage({ id: 'identity.enter.password.placeholder' })}
             type="password"
             value={password}
           />
@@ -363,8 +395,8 @@ function IdentityVerificationFormContent({
             currentMethod={method}
             disabled={busy}
             htmlFor="identityVerificationRecoveryCode"
-            label="Recovery code"
-            methods={methods}
+            label={formatMessage({ id: 'identity.recovery.code' })}
+            methods={localizedMethods}
             onChange={handleMethodChange}
             onSwitchOpen={clearMessages}
           />
@@ -386,8 +418,12 @@ function IdentityVerificationFormContent({
             currentMethod={method}
             disabled={busy}
             htmlFor="identityVerificationCode"
-            label={method === 'totp' ? 'Authenticator code' : 'Verification code'}
-            methods={methods}
+            label={
+              method === 'totp'
+                ? formatMessage({ id: 'identity.authenticator.code' })
+                : formatMessage({ id: 'identity.verification.code' })
+            }
+            methods={localizedMethods}
             onChange={handleMethodChange}
             onSwitchOpen={clearMessages}
           />
@@ -410,45 +446,69 @@ function IdentityVerificationFormContent({
       )}
 
       <FormMessage message={localError ?? error} variant="error" />
+    </>
+  );
 
-      <div className="flex flex-wrap justify-end gap-2">
-        {method === 'passkey' ? (
-          <Button disabled={pending} onClick={() => void submitCurrentMethod()} type="button" variant="outline">
-            <FingerprintIcon />
-            {pending ? submittingLabel : 'Use passkey'}
-          </Button>
-        ) : null}
-        {allowRecoveryCode && method === 'totp' ? (
-          <Button
-            disabled={pending}
-            onClick={() => {
-              clearMessages();
-              setUsingRecoveryCode((current) => {
-                const next = !current;
+  const actions = (
+    <>
+      {method === 'passkey' ? (
+        <Button disabled={pending} onClick={() => void submitCurrentMethod()} type="button" variant="outline">
+          <FingerprintIcon />
+          {pending
+            ? (submittingLabel ?? formatMessage({ id: 'identity.verifying' }))
+            : formatMessage({ id: 'identity.use.passkey' })}
+        </Button>
+      ) : null}
+      {allowRecoveryCode && method === 'totp' ? (
+        <Button
+          disabled={pending}
+          onClick={() => {
+            clearMessages();
+            setUsingRecoveryCode((current) => {
+              const next = !current;
 
-                onContextChange?.({ method, usingRecoveryCode: next });
+              onContextChange?.({ method, usingRecoveryCode: next });
 
-                return next;
-              });
-            }}
-            type="button"
-            variant="outline"
-          >
-            {usingRecoveryCode ? 'Use authenticator code' : 'Use recovery code'}
-          </Button>
-        ) : null}
-        {onCancel ? (
-          <Button disabled={busy} onClick={onCancel} type="button" variant="outline">
-            Cancel
-          </Button>
-        ) : null}
-        {method !== 'passkey' ? (
-          <Button disabled={pending} type="submit">
-            <ShieldCheckIcon />
-            {pending ? submittingLabel : submitLabel}
-          </Button>
-        ) : null}
-      </div>
+              return next;
+            });
+          }}
+          type="button"
+          variant="outline"
+        >
+          {usingRecoveryCode
+            ? formatMessage({ id: 'identity.use.authenticator.code' })
+            : formatMessage({ id: 'identity.use.recovery.code' })}
+        </Button>
+      ) : null}
+      {onCancel ? (
+        <Button disabled={busy} onClick={onCancel} type="button" variant="outline">
+          {formatMessage({ id: 'common.cancel' })}
+        </Button>
+      ) : null}
+      {method !== 'passkey' ? (
+        <Button disabled={pending} type="submit">
+          <ShieldCheckIcon />
+          {pending
+            ? (submittingLabel ?? formatMessage({ id: 'identity.verifying' }))
+            : (submitLabel ?? formatMessage({ id: 'identity.verify' }))}
+        </Button>
+      ) : null}
+    </>
+  );
+
+  if (dialogLayout) {
+    return (
+      <form className="contents" onSubmit={handleSubmit}>
+        <AppDialogBody contentClassName="grid gap-4">{fields}</AppDialogBody>
+        <AppDialogFooter className="flex-col sm:flex-row sm:flex-wrap sm:items-center">{actions}</AppDialogFooter>
+      </form>
+    );
+  }
+
+  return (
+    <form className="grid gap-4" onSubmit={handleSubmit}>
+      {fields}
+      <div className="flex flex-wrap justify-end gap-2">{actions}</div>
     </form>
   );
 }
@@ -466,7 +526,7 @@ function MethodHeader({
   disabled: boolean;
   htmlFor?: string;
   label: string;
-  methods: VerificationMethod[];
+  methods: LocalizedVerificationMethod[];
   onChange: (method: VerificationMethodName) => void;
   onSwitchOpen: () => void;
 }) {

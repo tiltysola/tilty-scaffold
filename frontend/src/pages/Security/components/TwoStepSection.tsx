@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useIntl } from 'react-intl';
 
 import {
   FingerprintIcon,
@@ -65,6 +66,7 @@ export function TwoStepSection({
   twoStepSwitchDisabled: boolean;
 }) {
   const [pendingSwitchConfirmation, setPendingSwitchConfirmation] = useState<PendingSwitchConfirmation>(null);
+  const intl = useIntl();
 
   const confirmDisableTwoStep = () => {
     setPendingSwitchConfirmation(null);
@@ -78,8 +80,8 @@ export function TwoStepSection({
 
   return (
     <SecuritySection
-      description="Require a verifier app code or recovery code for sensitive sign-ins."
-      title="Two-step Authentication"
+      description={intl.formatMessage({ id: 'security.two.step.authentication.description' })}
+      title={intl.formatMessage({ id: 'security.two.step.authentication' })}
     >
       <Item>
         <ItemMedia>
@@ -87,15 +89,18 @@ export function TwoStepSection({
         </ItemMedia>
         <ItemContent>
           <ItemTitle>
-            Authenticator app
+            {intl.formatMessage({ id: 'security.authenticator.app' })}
             <Badge variant={totpStatus.enabled ? 'secondary' : 'outline'}>
-              {totpStatus.enabled ? 'Enabled' : 'Disabled'}
+              {intl.formatMessage({ id: totpStatus.enabled ? 'common.enabled' : 'common.disabled' })}
             </Badge>
           </ItemTitle>
           <ItemDescription>
             {totpStatus.enabled
-              ? `${totpStatus.recoveryCodesRemaining} recovery codes remain.`
-              : 'No second factor is configured.'}
+              ? intl.formatMessage(
+                  { id: 'security.recovery.codes.remaining' },
+                  { count: totpStatus.recoveryCodesRemaining },
+                )
+              : intl.formatMessage({ id: 'security.no.second.factor.configured' })}
           </ItemDescription>
         </ItemContent>
         <ItemActions>
@@ -103,24 +108,24 @@ export function TwoStepSection({
             <>
               <Button disabled={actionPending} onClick={onOpenRecoveryCodes} size="sm" type="button" variant="outline">
                 <RefreshCwIcon />
-                Recovery codes
+                {intl.formatMessage({ id: 'security.recovery.codes' })}
               </Button>
               <ConfirmActionDialog
-                confirmLabel="Disable"
-                description="Authenticator app codes and current recovery codes will no longer protect this account."
+                confirmLabel={intl.formatMessage({ id: 'common.disable' })}
+                description={intl.formatMessage({ id: 'security.disable.authenticator.description' })}
                 onConfirm={onDisableTotp}
-                title="Disable authenticator app?"
+                title={intl.formatMessage({ id: 'security.disable.authenticator.title' })}
               >
                 <Button disabled={actionPending} size="sm" type="button" variant="destructive">
                   <ShieldOffIcon />
-                  Disable
+                  {intl.formatMessage({ id: 'common.disable' })}
                 </Button>
               </ConfirmActionDialog>
             </>
           ) : (
             <Button disabled={actionPending} onClick={onEnableTotp} size="sm" type="button">
               <ShieldIcon />
-              Enable
+              {intl.formatMessage({ id: 'common.enable' })}
             </Button>
           )}
         </ItemActions>
@@ -134,15 +139,17 @@ export function TwoStepSection({
         </ItemMedia>
         <ItemContent>
           <ItemTitle>
-            Passkeys
-            <Badge variant={passkeys.length > 0 ? 'secondary' : 'outline'}>{formatPasskeyCount(passkeys.length)}</Badge>
+            {intl.formatMessage({ id: 'security.passkeys' })}
+            <Badge variant={passkeys.length > 0 ? 'secondary' : 'outline'}>
+              {formatPasskeyCount(passkeys.length, intl)}
+            </Badge>
           </ItemTitle>
-          <ItemDescription>Use device-bound or synced passkeys as a phishing-resistant verifier.</ItemDescription>
+          <ItemDescription>{intl.formatMessage({ id: 'security.use.passkeys.description' })}</ItemDescription>
         </ItemContent>
         <ItemActions>
           <Button disabled={actionPending} onClick={onRegisterPasskey} size="sm" type="button">
             <FingerprintIcon />
-            Add
+            {intl.formatMessage({ id: 'common.add' })}
           </Button>
         </ItemActions>
         {passkeys.length > 0 ? (
@@ -151,22 +158,26 @@ export function TwoStepSection({
               {passkeys.map((passkey) => (
                 <div className="flex items-center justify-between gap-3 py-1.5" key={passkey.id}>
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">{formatPasskeyDisplayName(passkey.name)}</div>
+                    <div className="truncate text-sm font-medium">{formatPasskeyDisplayName(passkey.name, intl)}</div>
                     <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                      <span>{formatPasskeyDeviceType(passkey.deviceType)}</span>
+                      <span>{formatPasskeyDeviceType(passkey.deviceType, intl)}</span>
                       <span aria-hidden="true">·</span>
-                      <span>{passkey.backedUp ? 'Backed up' : 'Single device'}</span>
+                      <span>
+                        {intl.formatMessage({
+                          id: passkey.backedUp ? 'security.passkey.backed.up' : 'security.passkey.single.device',
+                        })}
+                      </span>
                     </div>
                   </div>
                   <ConfirmActionDialog
-                    confirmLabel="Remove"
-                    description="This passkey will no longer be available for account verification or sign-in."
+                    confirmLabel={intl.formatMessage({ id: 'common.remove' })}
+                    description={intl.formatMessage({ id: 'security.passkey.remove.description' })}
                     onConfirm={() => onDeletePasskey(passkey.id)}
-                    title="Remove passkey?"
+                    title={intl.formatMessage({ id: 'security.passkey.remove.title' })}
                   >
                     <Button disabled={actionPending} size="sm" type="button" variant="destructive">
                       <Trash2Icon />
-                      Remove
+                      {intl.formatMessage({ id: 'common.remove' })}
                     </Button>
                   </ConfirmActionDialog>
                 </div>
@@ -184,12 +195,12 @@ export function TwoStepSection({
         </ItemMedia>
         <ItemContent>
           <ItemTitle>
-            Two-step verification
+            {intl.formatMessage({ id: 'security.two.step.verification' })}
             <Badge variant={mfaSettings.twoStepEnabled ? 'secondary' : 'outline'}>
-              {mfaSettings.twoStepEnabled ? 'Enabled' : 'Off'}
+              {intl.formatMessage({ id: mfaSettings.twoStepEnabled ? 'common.enabled' : 'common.disabled' })}
             </Badge>
           </ItemTitle>
-          <ItemDescription>{getTwoStepStatusDescription(mfaSettings)}</ItemDescription>
+          <ItemDescription>{getTwoStepStatusDescription(mfaSettings, intl)}</ItemDescription>
         </ItemContent>
         <ItemActions>
           <Switch
@@ -214,8 +225,8 @@ export function TwoStepSection({
           <LinkIcon className="size-4" />
         </ItemMedia>
         <ItemContent>
-          <ItemTitle>Third-party sign-in verification</ItemTitle>
-          <ItemDescription>Require two-step authentication after SSO provider verification.</ItemDescription>
+          <ItemTitle>{intl.formatMessage({ id: 'security.sso.mfa' })}</ItemTitle>
+          <ItemDescription>{intl.formatMessage({ id: 'security.sso.mfa.description' })}</ItemDescription>
         </ItemContent>
         <ItemActions>
           <Switch
@@ -233,20 +244,20 @@ export function TwoStepSection({
         </ItemActions>
       </Item>
       <ConfirmActionDialog
-        confirmLabel="Disable"
-        description="Sensitive sign-ins will no longer require a second factor when password sign-in has already succeeded."
+        confirmLabel={intl.formatMessage({ id: 'common.disable' })}
+        description={intl.formatMessage({ id: 'security.disable.totp.description' })}
         onConfirm={confirmDisableTwoStep}
         onOpenChange={(open) => (!open ? setPendingSwitchConfirmation(null) : undefined)}
         open={pendingSwitchConfirmation === 'disable-two-step'}
-        title="Disable two-step verification?"
+        title={intl.formatMessage({ id: 'security.disable.totp.title' })}
       />
       <ConfirmActionDialog
-        confirmLabel="Disable"
-        description="Third-party sign-ins will be accepted after provider verification without an additional local second factor."
+        confirmLabel={intl.formatMessage({ id: 'common.disable' })}
+        description={intl.formatMessage({ id: 'security.disable.sso.mfa.description' })}
         onConfirm={confirmDisableSsoRequirement}
         onOpenChange={(open) => (!open ? setPendingSwitchConfirmation(null) : undefined)}
         open={pendingSwitchConfirmation === 'disable-sso-requirement'}
-        title="Disable SSO two-step requirement?"
+        title={intl.formatMessage({ id: 'security.disable.sso.mfa.title' })}
       />
     </SecuritySection>
   );

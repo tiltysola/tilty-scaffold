@@ -1,6 +1,13 @@
 import { randomUUID } from 'crypto';
 
 import { SystemRole } from '@tilty/shared/access-control';
+import {
+  AuthMfaMethod,
+  type AuthSelectableVerificationPurposeValue,
+  type AuthVerificationCodeMethodValue,
+  AuthVerificationPurpose as AuthVerificationPurposeContract,
+} from '@tilty/shared/auth';
+import { defaultLocale, type SupportedLocale } from '@tilty/shared/i18n';
 
 import { AppError } from '../../core/errors';
 import { type CacheStore } from '../../infra/cache';
@@ -24,9 +31,9 @@ import { assertPasswordConfirmation } from './auth.validation';
 import { type PasskeyService, type VerifyPasskeyRegistrationInput } from './auth-passkey.service';
 import { type AuthSessionRequestContext, AuthSessionService } from './auth-session.service';
 import {
-  type AuthVerificationPurpose,
   AuthVerificationService,
   isStrongSudoPurpose,
+  type StrongSudoPurpose,
   type UpdateMfaSettingsInput,
   type VerifyChallengeInput,
 } from './auth-verification.service';
@@ -139,48 +146,48 @@ export class AuthService {
     };
   }
 
-  async sendRegistrationEmailVerification(input: SendEmailVerificationInput) {
+  async sendRegistrationEmailVerification(input: SendEmailVerificationInput, locale?: SupportedLocale) {
     const existing = await this.userService.findByEmail(input.email);
 
     if (existing) {
-      throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+      throw new AppError('USER_EMAIL_EXISTS', 'error.USER_EMAIL_EXISTS', 409);
     }
 
-    return this.emailVerification.sendRegistrationCode(input.email);
+    return this.emailVerification.sendRegistrationCode(input.email, locale);
   }
 
-  async sendPasswordResetEmailVerification(input: SendEmailVerificationInput) {
+  async sendPasswordResetEmailVerification(input: SendEmailVerificationInput, locale?: SupportedLocale) {
     const user = await this.userService.findByEmail(input.email);
 
     if (!isPasswordResetEligibleUser(user)) {
       return this.emailVerification.getDeliveryMetadata();
     }
 
-    return this.emailVerification.sendPasswordResetCode(input.email);
+    return this.emailVerification.sendPasswordResetCode(input.email, locale);
   }
 
   async sendProfilePhoneVerification(token: string, input: SendProfilePhoneVerificationInput) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'update_contact');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.UpdateContact);
 
     if (user.phoneNumber === input.phoneNumber && user.phoneVerified) {
-      throw new AppError('PHONE_ALREADY_VERIFIED', 'Phone number is already verified.', 409);
+      throw new AppError('PHONE_ALREADY_VERIFIED', 'error.PHONE_ALREADY_VERIFIED', 409);
     }
 
     return this.smsVerification.sendProfilePhoneVerificationCode(input.phoneNumber);
   }
 
-  async sendProfileEmailVerification(token: string) {
+  async sendProfileEmailVerification(token: string, locale: SupportedLocale = defaultLocale) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'update_contact');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.UpdateContact);
 
     if (user.emailVerified) {
-      throw new AppError('EMAIL_ALREADY_VERIFIED', 'Email address is already verified.', 409);
+      throw new AppError('EMAIL_ALREADY_VERIFIED', 'error.EMAIL_ALREADY_VERIFIED', 409);
     }
 
-    return this.emailVerification.sendProfileEmailVerificationCode(user.email);
+    return this.emailVerification.sendProfileEmailVerificationCode(user.email, locale);
   }
 
   async register(input: RegisterInput, context: AuthSessionRequestContext = defaultAuthSessionRequestContext) {
@@ -308,7 +315,7 @@ export class AuthService {
     await this.emailVerification.verifyPasswordResetCode(input.email, input.emailVerificationCode);
 
     if (!isPasswordResetEligibleUser(user)) {
-      throw new AppError('EMAIL_VERIFICATION_INVALID', 'Email verification code is invalid or expired.', 400);
+      throw new AppError('EMAIL_VERIFICATION_INVALID', 'error.EMAIL_VERIFICATION_INVALID', 400);
     }
 
     const credentials = await hashPassword(input.password);
@@ -323,13 +330,17 @@ export class AuthService {
     assertPasswordConfirmation(input);
 
     if (input.currentPassword === input.password) {
-      throw new AppError('AUTH_PASSWORD_UNCHANGED', 'New password must be different from current password.', 400);
+      throw new AppError('AUTH_PASSWORD_UNCHANGED', 'error.AUTH_PASSWORD_UNCHANGED', 400);
     }
 
     const { sessionId, user } = await this.authenticate(token);
 
     if (await this.verificationService.shouldRequireSudoVerification(user)) {
-      await this.verificationService.requireSudoGrant(sessionId, user.id, 'change_password');
+      await this.verificationService.requireSudoGrant(
+        sessionId,
+        user.id,
+        AuthVerificationPurposeContract.ChangePassword,
+      );
     }
 
     if (!user.passwordHash || !user.passwordSalt) {
@@ -353,7 +364,7 @@ export class AuthService {
   async verifyProfileEmail(token: string, input: VerifyProfileEmailInput) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'update_contact');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.UpdateContact);
 
     if (user.emailVerified) {
       return toAuthUser(user, await this.accessControl.getUserAccess(user.id));
@@ -369,7 +380,7 @@ export class AuthService {
   async verifyProfilePhone(token: string, input: VerifyProfilePhoneInput) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'update_contact');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.UpdateContact);
 
     await this.smsVerification.verifyProfilePhoneVerificationCode(input.phoneNumber, input.phoneVerificationCode);
 
@@ -387,7 +398,7 @@ export class AuthService {
     const user = await this.userService.findById(payload.sub);
 
     if (!user) {
-      throw new AppError('AUTH_INVALID_TOKEN', 'Authentication token is invalid.', 401);
+      throw new AppError('AUTH_INVALID_TOKEN', 'error.AUTH_INVALID_TOKEN', 401);
     }
 
     const access = await this.accessControl.getUserAccess(user.id);
@@ -408,11 +419,15 @@ export class AuthService {
     const { sessionId, user } = await this.authenticate(token);
 
     if (input.phoneNumber) {
-      throw new AppError('PHONE_VERIFICATION_REQUIRED', 'Phone number changes require SMS verification.', 400);
+      throw new AppError('PHONE_VERIFICATION_REQUIRED', 'error.PHONE_VERIFICATION_REQUIRED', 400);
     }
 
     if (input.phoneNumber === null && user.phoneNumber) {
-      await this.verificationService.requireSudoGrant(sessionId, user.id, 'update_contact');
+      await this.verificationService.requireSudoGrant(
+        sessionId,
+        user.id,
+        AuthVerificationPurposeContract.UpdateContact,
+      );
     }
 
     const updatedUser = await this.userService.updateProfile(user, input);
@@ -463,7 +478,7 @@ export class AuthService {
   }
 
   async uploadManagedAvatar(user: UserModel, input: ImageUploadInput) {
-    const image = validateProfileImage(input, 'Avatar', 'AVATAR_FILE_INVALID');
+    const image = validateProfileImage(input, 'AVATAR_FILE_INVALID');
     const savedFile = await this.saveProfileImage(input, image, 'avatars');
     const previousAvatarStorageKey = user.avatarStorageKey;
     let updatedUser: UserModel;
@@ -494,7 +509,7 @@ export class AuthService {
   }
 
   async uploadManagedProfileBanner(user: UserModel, input: ImageUploadInput) {
-    const image = validateProfileImage(input, 'Profile banner', 'PROFILE_BANNER_FILE_INVALID');
+    const image = validateProfileImage(input, 'PROFILE_BANNER_FILE_INVALID');
     const savedFile = await this.saveProfileImage(input, image, 'profile-banners');
     const previousProfileBannerStorageKey = user.profileBannerStorageKey;
     let updatedUser: UserModel;
@@ -525,7 +540,7 @@ export class AuthService {
   }
 
   async uploadManagedProfileBackground(user: UserModel, input: ImageUploadInput) {
-    const image = validateProfileImage(input, 'Profile background', 'PROFILE_BACKGROUND_FILE_INVALID');
+    const image = validateProfileImage(input, 'PROFILE_BACKGROUND_FILE_INVALID');
     const savedFile = await this.saveProfileImage(input, image, 'profile-backgrounds');
     const previousProfileBackgroundStorageKey = user.profileBackgroundStorageKey;
     let updatedUser: UserModel;
@@ -564,7 +579,7 @@ export class AuthService {
   async createTotpSetup(token: string) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'manage_totp');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.ManageTotp);
 
     return this.totpService.createSetup(user);
   }
@@ -572,7 +587,7 @@ export class AuthService {
   async enableTotp(token: string, input: { setupToken: string; code: string }) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'manage_totp');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.ManageTotp);
     const result = await this.totpService.enable(user, input.setupToken, input.code);
 
     return {
@@ -584,7 +599,7 @@ export class AuthService {
   async disableTotp(token: string) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'manage_totp');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.ManageTotp);
     await this.totpService.disable(user);
     await this.sessionService.revokeOtherUserSessions(user.id, sessionId);
 
@@ -594,7 +609,7 @@ export class AuthService {
   async regenerateTotpRecoveryCodes(token: string) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'manage_totp');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.ManageTotp);
     return this.totpService.regenerateRecoveryCodes(user);
   }
 
@@ -607,14 +622,14 @@ export class AuthService {
   async updateMfaSettings(token: string, input: UpdateMfaSettingsInput) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'manage_mfa');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.ManageMfa);
     return this.verificationService.updateMfaSettings(user, input);
   }
 
   async requireSsoBindingAccess(token: string) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'manage_sso');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.ManageSso);
 
     return { user };
   }
@@ -623,7 +638,24 @@ export class AuthService {
     await this.sessionService.revokeAllUserSessions(userId);
   }
 
-  async requireStrongSudoAccess(token: string, purpose: 'system_settings' | 'user_management') {
+  async revokeManagedDeviceSession(user: UserModel, sessionId: string, currentSessionId?: string | undefined) {
+    await this.sessionService.revokeUserSession(user.id, sessionId, currentSessionId);
+    await this.revokeSessionFamily(sessionId, this.tokenConfig.refreshTokenTtlSeconds * 1000);
+
+    return { revoked: true } as const;
+  }
+
+  async revokeManagedDeviceSessions(user: UserModel, currentSessionId?: string | undefined) {
+    if (currentSessionId) {
+      await this.sessionService.revokeOtherUserSessions(user.id, currentSessionId);
+    } else {
+      await this.sessionService.revokeAllUserSessions(user.id);
+    }
+
+    return { revoked: true } as const;
+  }
+
+  async requireStrongSudoAccess(token: string, purpose: StrongSudoPurpose) {
     const { sessionId, user } = await this.authenticate(token);
 
     await this.assertStrongVerifier(user, purpose);
@@ -632,7 +664,7 @@ export class AuthService {
 
   async createVerificationChallenge(
     token: string,
-    purpose: Exclude<AuthVerificationPurpose, 'login' | 'sso'>,
+    purpose: AuthSelectableVerificationPurposeValue,
     context: AuthSessionRequestContext,
   ) {
     const { sessionId, user } = await this.authenticate(token);
@@ -659,14 +691,15 @@ export class AuthService {
 
   async sendVerificationCode(
     token: string | undefined,
-    input: { method: 'email' | 'sms'; verificationToken: string },
+    input: { method: AuthVerificationCodeMethodValue; verificationToken: string },
     context: AuthSessionRequestContext,
+    locale: SupportedLocale = defaultLocale,
   ) {
     const user = token
       ? (await this.authenticate(token)).user
       : await this.getVerificationChallengeUser(input.verificationToken, context);
 
-    return this.verificationService.sendChallengeCode(input.verificationToken, input.method, context, user);
+    return this.verificationService.sendChallengeCode(input.verificationToken, input.method, context, user, locale);
   }
 
   async createPasskeyVerificationOptions(verificationToken: string, context: AuthSessionRequestContext) {
@@ -680,7 +713,10 @@ export class AuthService {
     const user = await this.getVerificationChallengeUser(input.verificationToken, context);
     const verified = await this.verificationService.verifyChallenge(input.verificationToken, input, context, user);
 
-    if (verified.purpose !== 'login' && verified.purpose !== 'sso') {
+    if (
+      verified.purpose !== AuthVerificationPurposeContract.Login &&
+      verified.purpose !== AuthVerificationPurposeContract.Sso
+    ) {
       return {
         verified: true,
         sudoExpiresAt: verified.sudoExpiresAt,
@@ -713,7 +749,7 @@ export class AuthService {
   async createPasskeyRegistrationOptions(token: string) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'manage_passkey');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.ManagePasskey);
 
     return this.passkeyService.createRegistrationOptions(user);
   }
@@ -721,14 +757,14 @@ export class AuthService {
   async verifyPasskeyRegistration(token: string, input: VerifyPasskeyRegistrationInput) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'manage_passkey');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.ManagePasskey);
     return this.passkeyService.verifyRegistration(user, input);
   }
 
   async deletePasskey(token: string, passkeyId: string) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, 'manage_passkey');
+    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.ManagePasskey);
     await this.passkeyService.deleteUserPasskey(user.id, passkeyId);
 
     return { deleted: true } as const;
@@ -815,7 +851,7 @@ export class AuthService {
     directory: string,
   ) {
     if (!this.fileStorage) {
-      throw new AppError('FILE_STORAGE_DISABLED', 'File storage is not configured.', 500);
+      throw new AppError('FILE_STORAGE_DISABLED', 'error.FILE_STORAGE_DISABLED', 500);
     }
 
     return this.fileStorage.save({
@@ -864,20 +900,22 @@ export class AuthService {
     const user = await this.userService.findById(subject.userId);
 
     if (!user || !user.available) {
-      throw new AppError('AUTH_VERIFICATION_TOKEN_INVALID', 'Verification token is invalid or expired.', 401);
+      throw new AppError('AUTH_VERIFICATION_TOKEN_INVALID', 'error.AUTH_VERIFICATION_TOKEN_INVALID', 401);
     }
 
     return user;
   }
 
-  private async assertStrongVerifier(user: UserModel, purpose: 'system_settings' | 'user_management') {
+  private async assertStrongVerifier(user: UserModel, purpose: StrongSudoPurpose) {
     const verificationState = await this.verificationService.getUserVerificationState(user);
     const hasStrongVerifier = verificationState.effectiveMethods.some(
-      (method) => method === 'passkey' || method === 'totp',
+      (method) => method === AuthMfaMethod.Passkey || method === AuthMfaMethod.Totp,
     );
 
     if (!hasStrongVerifier) {
-      throw new AppError(getStrongVerifierErrorCode(purpose), getStrongVerifierErrorMessage(purpose), 403);
+      const code = getStrongVerifierErrorCode(purpose);
+
+      throw new AppError(code, `error.${code}`, 403);
     }
   }
 }
@@ -970,23 +1008,17 @@ export function toAuthUser(user: UserModel, access: UserAccess) {
 }
 
 function throwInvalidCredentials(): never {
-  throw new AppError('AUTH_INVALID_CREDENTIALS', 'The account identifier or password is invalid.', 401);
+  throw new AppError('AUTH_INVALID_CREDENTIALS', 'error.AUTH_INVALID_CREDENTIALS', 401);
 }
 
-function getStrongVerifierErrorCode(purpose: 'system_settings' | 'user_management') {
-  return purpose === 'system_settings'
+function getStrongVerifierErrorCode(purpose: StrongSudoPurpose) {
+  return purpose === AuthVerificationPurposeContract.SystemSettings
     ? 'SYSTEM_SETTINGS_STRONG_VERIFICATION_REQUIRED'
     : 'USER_MANAGEMENT_STRONG_VERIFICATION_REQUIRED';
 }
 
-function getStrongVerifierErrorMessage(purpose: 'system_settings' | 'user_management') {
-  return purpose === 'system_settings'
-    ? 'System settings require a passkey or authenticator app before access is allowed.'
-    : 'User management requires a passkey or authenticator app before access is allowed.';
-}
-
 function throwInvalidRefreshToken(): never {
-  throw new AppError('AUTH_REFRESH_TOKEN_INVALID', 'Refresh token is invalid or expired.', 401);
+  throw new AppError('AUTH_REFRESH_TOKEN_INVALID', 'error.AUTH_REFRESH_TOKEN_INVALID', 401);
 }
 
 function getRefreshTokenCacheKey(tokenId: string) {
@@ -1005,16 +1037,19 @@ function isPasswordResetEligibleUser(user: UserModel | null): user is UserModel 
   return Boolean(user?.available && user.passwordHash && user.passwordSalt);
 }
 
-function validateProfileImage(input: ImageUploadInput, label: string, errorCode: string) {
+function validateProfileImage(input: ImageUploadInput, errorCode: string) {
   const detected = detectImageType(input.content);
   const contentType = input.contentType.toLowerCase();
 
   if (!detected) {
-    throw new AppError(errorCode, `${label} must be a JPEG, PNG, WebP, or GIF image.`, 400);
+    throw new AppError(errorCode, `error.${errorCode}`, 400);
   }
 
   if (contentType && contentType !== detected.contentType) {
-    throw new AppError(errorCode, `${label} file content type does not match the uploaded image.`, 400);
+    throw new AppError(errorCode, `error.${errorCode}`, 400, {
+      contentType,
+      expectedContentType: detected.contentType,
+    });
   }
 
   return detected;

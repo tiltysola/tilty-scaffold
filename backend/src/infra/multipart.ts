@@ -28,13 +28,13 @@ export async function readMultipartFile(
   const files = await parseMultipartFiles(request, contentType, options);
 
   if (files.length !== 1) {
-    throw new AppError('FILE_UPLOAD_INVALID', 'Exactly one uploaded file is required.', 400);
+    throw new AppError('FILE_UPLOAD_INVALID', 'error.FILE_UPLOAD_INVALID', 400);
   }
 
   const file = files[0]!;
 
   if (file.content.length === 0) {
-    throw new AppError('FILE_UPLOAD_INVALID', 'The uploaded file is empty.', 400);
+    throw new AppError('FILE_UPLOAD_INVALID', 'error.FILE_UPLOAD_INVALID', 400);
   }
 
   return file;
@@ -62,7 +62,7 @@ function parseMultipartFiles(request: IncomingMessage, contentType: string, opti
 
       if (totalBytes > options.maxBytes + multipartOverheadLimit) {
         fail(
-          new AppError('FILE_TOO_LARGE', 'The uploaded file is too large.', 413, {
+          new AppError('FILE_TOO_LARGE', 'error.FILE_TOO_LARGE', 413, {
             maxBytes: options.maxBytes,
           }),
         );
@@ -71,7 +71,7 @@ function parseMultipartFiles(request: IncomingMessage, contentType: string, opti
 
     parser.on('file', (fieldName, stream, info) => {
       if (fieldName !== options.fieldName) {
-        fail(new AppError('FILE_UPLOAD_INVALID', 'Unexpected uploaded file field.', 400));
+        fail(new AppError('FILE_UPLOAD_INVALID', 'error.FILE_UPLOAD_INVALID', 400));
         stream.resume();
         return;
       }
@@ -89,7 +89,7 @@ function parseMultipartFiles(request: IncomingMessage, contentType: string, opti
       stream.on('end', () => {
         if (fileSizeExceeded || stream.truncated) {
           fail(
-            new AppError('FILE_TOO_LARGE', 'The uploaded file is too large.', 413, {
+            new AppError('FILE_TOO_LARGE', 'error.FILE_TOO_LARGE', 413, {
               maxBytes: options.maxBytes,
             }),
           );
@@ -106,16 +106,16 @@ function parseMultipartFiles(request: IncomingMessage, contentType: string, opti
     });
 
     parser.on('field', () => {
-      fail(new AppError('FILE_UPLOAD_INVALID', 'Unexpected multipart field.', 400));
+      fail(new AppError('FILE_UPLOAD_INVALID', 'error.FILE_UPLOAD_INVALID', 400));
     });
     parser.on('fieldsLimit', () => {
-      fail(new AppError('FILE_UPLOAD_INVALID', 'Unexpected multipart field.', 400));
+      fail(new AppError('FILE_UPLOAD_INVALID', 'error.FILE_UPLOAD_INVALID', 400));
     });
     parser.on('filesLimit', () => {
-      fail(new AppError('FILE_UPLOAD_INVALID', 'Exactly one uploaded file is required.', 400));
+      fail(new AppError('FILE_UPLOAD_INVALID', 'error.FILE_UPLOAD_INVALID', 400));
     });
     parser.on('partsLimit', () => {
-      fail(new AppError('FILE_UPLOAD_INVALID', 'Exactly one uploaded file is required.', 400));
+      fail(new AppError('FILE_UPLOAD_INVALID', 'error.FILE_UPLOAD_INVALID', 400));
     });
     parser.on('error', fail);
     parser.on('close', () => {
@@ -147,7 +147,7 @@ function createBusboyParser(contentType: string, maxBytes: number) {
       },
     });
   } catch {
-    throw new AppError('FILE_UPLOAD_INVALID', 'The request must use multipart/form-data.', 400);
+    throw new AppError('FILE_UPLOAD_INVALID', 'error.FILE_UPLOAD_INVALID', 400);
   }
 }
 
@@ -155,7 +155,7 @@ function validateContentLength(contentLength: string, requestMaxBytes: number, m
   const declaredLength = Number(contentLength);
 
   if (Number.isFinite(declaredLength) && declaredLength > requestMaxBytes) {
-    throw new AppError('FILE_TOO_LARGE', 'The uploaded file is too large.', 413, {
+    throw new AppError('FILE_TOO_LARGE', 'error.FILE_TOO_LARGE', 413, {
       maxBytes,
     });
   }
@@ -166,5 +166,5 @@ function toMultipartError(error: unknown) {
     return error;
   }
 
-  return new AppError('FILE_UPLOAD_INVALID', 'The multipart payload is invalid.', 400);
+  return new AppError('FILE_UPLOAD_INVALID', 'error.FILE_UPLOAD_INVALID');
 }

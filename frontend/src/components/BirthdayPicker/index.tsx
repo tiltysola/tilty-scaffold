@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { DayPicker, getDefaultClassNames } from 'react-day-picker';
+import { useIntl } from 'react-intl';
 
 import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon, XIcon } from 'lucide-react';
 
+import { formatDateOnlyDate, getDatePickerLocale, getMonthOptions } from '@/i18n';
 import { Button } from '@/shadcn/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/shadcn/components/ui/popover';
 import {
@@ -14,24 +16,6 @@ import {
   SelectValue,
 } from '@/shadcn/components/ui/select';
 import { cn } from '@/shadcn/lib/utils';
-
-const birthdayStartMonth = new Date(1900, 0, 1);
-const defaultBirthdayMonth = new Date(2000, 0, 1);
-const defaultClassNames = getDefaultClassNames();
-const monthNames = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
 
 interface BirthdayPickerProps {
   disabled?: boolean;
@@ -46,11 +30,18 @@ interface InteractOutsideEvent {
   preventDefault: () => void;
 }
 
+const birthdayStartMonth = new Date(1900, 0, 1);
+const defaultBirthdayMonth = new Date(2000, 0, 1);
+const defaultClassNames = getDefaultClassNames();
+
 export default function BirthdayPicker({ disabled, id, name, onChange, value }: BirthdayPickerProps) {
   const [open, setOpen] = useState(false);
   const [displayMonth, setDisplayMonth] = useState(defaultBirthdayMonth);
+  const intl = useIntl();
   const selectedDate = useMemo(() => parseDateOnly(value), [value]);
   const today = useMemo(() => new Date(), []);
+  const datePickerLocale = useMemo(() => getDatePickerLocale(intl.locale), [intl.locale]);
+  const monthOptions = useMemo(() => getMonthOptions(intl.locale), [intl.locale]);
   const yearOptions = useMemo(() => buildYearOptions(today), [today]);
   const displayedMonthIndex = displayMonth.getMonth();
   const displayedYear = displayMonth.getFullYear();
@@ -111,7 +102,7 @@ export default function BirthdayPicker({ disabled, id, name, onChange, value }: 
           variant="outline"
         >
           <CalendarIcon />
-          {selectedDate ? formatDateOnly(selectedDate) : 'Not set'}
+          {selectedDate ? formatDateOnlyDate(selectedDate, intl.locale) : intl.formatMessage({ id: 'common.not.set' })}
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -125,7 +116,7 @@ export default function BirthdayPicker({ disabled, id, name, onChange, value }: 
       >
         <div className="grid grid-cols-[2rem_minmax(0,1fr)_5rem_2rem] items-center gap-1 px-1 pt-1">
           <Button
-            aria-label="Previous month"
+            aria-label={intl.formatMessage({ id: 'common.previous.month' })}
             className="size-8 rounded-md"
             disabled={!canShowPreviousMonth}
             onClick={handlePreviousMonth}
@@ -141,9 +132,9 @@ export default function BirthdayPicker({ disabled, id, name, onChange, value }: 
             </SelectTrigger>
             <SelectContent align="center">
               <SelectGroup>
-                {monthNames.map((month, index) => (
-                  <SelectItem key={month} value={String(index)}>
-                    {month}
+                {monthOptions.map((month) => (
+                  <SelectItem key={month.value} value={month.value}>
+                    {month.label}
                   </SelectItem>
                 ))}
               </SelectGroup>
@@ -164,7 +155,7 @@ export default function BirthdayPicker({ disabled, id, name, onChange, value }: 
             </SelectContent>
           </Select>
           <Button
-            aria-label="Next month"
+            aria-label={intl.formatMessage({ id: 'common.next.month' })}
             className="size-8 rounded-md"
             disabled={!canShowNextMonth}
             onClick={handleNextMonth}
@@ -216,6 +207,7 @@ export default function BirthdayPicker({ disabled, id, name, onChange, value }: 
           hideNavigation
           disabled={(date) => date > today}
           endMonth={today}
+          locale={datePickerLocale}
           mode="single"
           month={displayMonth}
           onMonthChange={setDisplayMonth}
@@ -227,7 +219,7 @@ export default function BirthdayPicker({ disabled, id, name, onChange, value }: 
           <div className="border-t pt-2">
             <Button className="w-full justify-start" onClick={handleClear} size="sm" type="button" variant="ghost">
               <XIcon />
-              Clear
+              {intl.formatMessage({ id: 'common.clear' })}
             </Button>
           </div>
         ) : null}

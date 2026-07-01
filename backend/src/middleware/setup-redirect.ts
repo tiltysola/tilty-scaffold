@@ -2,6 +2,8 @@ import { type Middleware } from 'koa';
 
 import { isSetupLocked as isSetupLockedByEnv } from '../config/env';
 import { fail } from '../core/http';
+import { getBackendMessage } from '../i18n';
+import { getRequestLocale } from './locale';
 
 interface SetupRedirectOptions {
   allowedOrigins: string[];
@@ -94,7 +96,11 @@ function sendRedirect(ctx: Parameters<Middleware>[0], redirectUrl: string) {
 
 function sendSetupRequired(ctx: Parameters<Middleware>[0]) {
   ctx.status = setupRequiredStatus;
-  ctx.body = fail(setupRequiredStatus, 'SETUP_REQUIRED', 'Setup is required before the application can be used.');
+  ctx.body = fail(
+    setupRequiredStatus,
+    'SETUP_REQUIRED',
+    getBackendMessage(getRequestLocale(ctx), 'error.SETUP_REQUIRED'),
+  );
 }
 
 function sendSetupRestartRequired(ctx: Parameters<Middleware>[0]) {
@@ -102,7 +108,7 @@ function sendSetupRestartRequired(ctx: Parameters<Middleware>[0]) {
   ctx.body = fail(
     setupRestartRequiredStatus,
     'SETUP_RESTART_REQUIRED',
-    'Setup is complete. Restart the backend service before using the application.',
+    getBackendMessage(getRequestLocale(ctx), 'error.SETUP_RESTART_REQUIRED'),
   );
 }
 

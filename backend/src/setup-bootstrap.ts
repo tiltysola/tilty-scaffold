@@ -1,42 +1,62 @@
 import { createServer } from 'http';
 import { z } from 'zod';
 
+import { SetupBoolean, setupBooleanValues, SetupCacheStore, SetupLogTarget } from '@tilty/shared/setup';
+
 import { createApp, shouldSkipGlobalRateLimit } from './app';
+import { defaultSetupRuntimeEnvironment } from './config/defaults';
 import { flushLogger, logger } from './core/logger';
 import { closeServer, frontendDistDirectory, listen, warnIfFrontendEntryFileMissing } from './core/server';
+import { parseSeparatedValues } from './core/strings';
 import { createCacheStore } from './infra/cache';
 import { configureLogger } from './infra/logger';
 import { createSetupOnlyModule } from './modules/setup';
 
-const defaultAppDomain = 'http://localhost:8011';
+const numberDefault = (value: string) => Number(value);
 
 const setupRuntimeEnvSchema = z.object({
-  APP_DOMAIN: z.string().min(1).default(defaultAppDomain),
+  APP_DOMAIN: z.string().min(1).default(defaultSetupRuntimeEnvironment.APP_DOMAIN),
   APP_CORS_ORIGINS: z.string().min(1).optional(),
-  GLOBAL_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(1000),
-  GLOBAL_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
-  LOG_PENDING_WRITE_MAX: z.coerce.number().int().positive().default(1000),
-  LOG_REQUEST_ENABLED: z.enum(['true', 'false']).default('true'),
-  LOG_TARGETS: z.enum(['console']).default('console'),
-  LOG_WRITE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
-  SERVER_HOST: z.string().default('127.0.0.1'),
-  SERVER_PORT: z.coerce.number().int().positive().default(3000),
-  SERVER_TRUST_PROXY: z.enum(['true', 'false']).default('false'),
+  GLOBAL_RATE_LIMIT_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(numberDefault(defaultSetupRuntimeEnvironment.GLOBAL_RATE_LIMIT_MAX)),
+  GLOBAL_RATE_LIMIT_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(numberDefault(defaultSetupRuntimeEnvironment.GLOBAL_RATE_LIMIT_WINDOW_MS)),
+  LOG_PENDING_WRITE_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(numberDefault(defaultSetupRuntimeEnvironment.LOG_PENDING_WRITE_MAX)),
+  LOG_REQUEST_ENABLED: z.enum(setupBooleanValues).default(defaultSetupRuntimeEnvironment.LOG_REQUEST_ENABLED),
+  LOG_TARGETS: z.literal(SetupLogTarget.Console).default(defaultSetupRuntimeEnvironment.LOG_TARGETS),
+  LOG_WRITE_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(numberDefault(defaultSetupRuntimeEnvironment.LOG_WRITE_TIMEOUT_MS)),
+  SERVER_HOST: z.string().default(defaultSetupRuntimeEnvironment.SERVER_HOST),
+  SERVER_PORT: z.coerce.number().int().positive().default(numberDefault(defaultSetupRuntimeEnvironment.SERVER_PORT)),
+  SERVER_TRUST_PROXY: z.enum(setupBooleanValues).default(defaultSetupRuntimeEnvironment.SERVER_TRUST_PROXY),
 });
 
 export async function bootstrapSetup() {
   const setupRuntimeConfig = loadSetupRuntimeEnv();
-  const cacheStore = createCacheStore({ store: 'memory' });
+  const cacheStore = createCacheStore({ store: SetupCacheStore.Memory });
 
   configureLogger({
     maxPendingWrites: setupRuntimeConfig.LOG_PENDING_WRITE_MAX,
-    targets: ['console'],
+    targets: [SetupLogTarget.Console],
     writeTimeoutMs: setupRuntimeConfig.LOG_WRITE_TIMEOUT_MS,
   });
   warnIfFrontendEntryFileMissing();
 
   const app = createApp([createSetupOnlyModule()], {
-    corsOrigins: parseCommaSeparatedValues(setupRuntimeConfig.APP_CORS_ORIGINS ?? setupRuntimeConfig.APP_DOMAIN),
+    corsOrigins: parseSeparatedValues(setupRuntimeConfig.APP_CORS_ORIGINS ?? setupRuntimeConfig.APP_DOMAIN, ','),
     frontendFiles: {
       root: frontendDistDirectory,
     },
@@ -47,9 +67,9 @@ export async function bootstrapSetup() {
       scope: 'ip',
       skip: shouldSkipGlobalRateLimit,
     },
-    requestLogEnabled: setupRuntimeConfig.LOG_REQUEST_ENABLED === 'true',
+    requestLogEnabled: setupRuntimeConfig.LOG_REQUEST_ENABLED === SetupBoolean.True,
     setupRedirect: { mode: 'setup' },
-    trustProxy: setupRuntimeConfig.SERVER_TRUST_PROXY === 'true',
+    trustProxy: setupRuntimeConfig.SERVER_TRUST_PROXY === SetupBoolean.True,
   });
   const server = createServer(app.callback());
 
@@ -72,11 +92,4 @@ export async function bootstrapSetup() {
 
 export function loadSetupRuntimeEnv() {
   return setupRuntimeEnvSchema.parse(process.env);
-}
-
-function parseCommaSeparatedValues(value: string) {
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
 }

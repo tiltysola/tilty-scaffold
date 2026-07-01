@@ -15,30 +15,57 @@ import {
 } from 'lucide-react';
 
 import { type SetupAdministrator, type SetupEnvironment } from '@/lib/setup';
+import {
+  type SetupAuthCookieSameSiteValue,
+  setupAuthCookieSameSiteValues,
+  type SetupAuthCookieSecureValue,
+  setupAuthCookieSecureValues,
+  SetupBoolean,
+  type SetupBooleanValue,
+  setupBooleanValues,
+  SetupCacheStore,
+  type SetupCacheStoreValue,
+  setupCacheStoreValues,
+  SetupDatabaseDialect,
+  type SetupDatabaseDialectValue,
+  setupDatabaseDialectValues,
+  type SetupDatabaseSyncValue,
+  setupDatabaseSyncValues,
+  SetupEmailVerificationService,
+  type SetupEmailVerificationServiceValue,
+  setupEmailVerificationServiceValues,
+  SetupFileStorageDriver,
+  type SetupFileStorageDriverValue,
+  setupFileStorageDriverValues,
+  SetupLogTarget,
+  type SetupLogTargetValue,
+  type SetupNodeEnvValue,
+  setupNodeEnvValues,
+  SetupSmsVerificationService,
+  type SetupSmsVerificationServiceValue,
+  setupSmsVerificationServiceValues,
+} from '@tilty/shared/setup';
 
 type FieldKind = 'password' | 'select' | 'sms-profiles' | 'smtp-profiles' | 'sso-profiles' | 'textarea' | 'text';
+type SelectOption = { value: string };
 
 export interface SetupFieldDefinition {
   key: string;
   group?: string;
-  label: string;
   kind?: FieldKind;
-  description?: string;
-  options?: Array<{ label: string; value: string }>;
-  placeholder?: string;
+  options?: SelectOption[];
   visible?: (environment: SetupEnvironment) => boolean;
 }
 
 export interface SetupStepDefinition {
   id: string;
-  title: string;
   icon: LucideIcon;
   fields?: SetupFieldDefinition[];
 }
 
 interface FieldHelp {
-  description: string;
   placeholder?: string;
+  placeholderMessageId?: string;
 }
 
 export const administratorDefaults: SetupAdministrator = {
@@ -49,345 +76,163 @@ export const administratorDefaults: SetupAdministrator = {
   confirmPassword: '',
 };
 
-const booleanOptions = [
-  { label: 'Disabled', value: 'false' },
-  { label: 'Enabled', value: 'true' },
-];
+const booleanOptions = createSelectOptions<SetupBooleanValue>(setupBooleanValues);
+
+const nodeEnvOptions = createSelectOptions<SetupNodeEnvValue>(setupNodeEnvValues);
+
+const databaseDialectOptions = createSelectOptions<SetupDatabaseDialectValue>(setupDatabaseDialectValues);
+
+const databaseSyncOptions = createSelectOptions<SetupDatabaseSyncValue>(setupDatabaseSyncValues);
+
+const cacheStoreOptions = createSelectOptions<SetupCacheStoreValue>(setupCacheStoreValues);
+
+const fileStorageDriverOptions = createSelectOptions<SetupFileStorageDriverValue>(setupFileStorageDriverValues);
+
+const authCookieSameSiteOptions = createSelectOptions<SetupAuthCookieSameSiteValue>(setupAuthCookieSameSiteValues);
+
+const authCookieSecureOptions = createSelectOptions<SetupAuthCookieSecureValue>(setupAuthCookieSecureValues);
+
+const logTargetOptions = [
+  { value: SetupLogTarget.Console },
+  { value: joinLogTargets([SetupLogTarget.Console, SetupLogTarget.Local]) },
+  { value: joinLogTargets([SetupLogTarget.Console, SetupLogTarget.Sls]) },
+  { value: joinLogTargets([SetupLogTarget.Console, SetupLogTarget.Local, SetupLogTarget.Sls]) },
+  { value: SetupLogTarget.Local },
+  { value: SetupLogTarget.Sls },
+] satisfies SelectOption[];
+
+const emailVerificationServiceOptions = createSelectOptions<SetupEmailVerificationServiceValue>(
+  setupEmailVerificationServiceValues,
+);
+
+const smsVerificationServiceOptions = createSelectOptions<SetupSmsVerificationServiceValue>(
+  setupSmsVerificationServiceValues,
+);
 
 export const setupFieldHelp: Record<string, FieldHelp> = {
-  NODE_ENV: {
-    description: 'Selects the backend runtime environment. Production mode enforces stricter security validation.',
-  },
-  SERVER_HOST: {
-    description: 'Specifies the network interface on which the backend HTTP server listens.',
-    placeholder: '0.0.0.0',
-  },
-  SERVER_PORT: {
-    description: 'Specifies the port used by the backend HTTP server.',
-    placeholder: '3000',
-  },
-  APP_DOMAIN: {
-    description: 'Defines the primary public application origin used for browser access and callback URL defaults.',
-    placeholder: 'https://app.example.com',
-  },
-  APP_CORS_ORIGINS: {
-    description: 'Lists the browser origins permitted to access the backend API. Defaults to the application domain.',
-    placeholder: 'https://app.example.com, http://localhost:8011',
-  },
-  SERVER_TRUST_PROXY: {
-    description: 'Controls whether reverse proxy headers such as X-Forwarded-For and X-Forwarded-Proto are trusted.',
-  },
-  SERVER_MULTI_INSTANCE_ENABLED: {
-    description: 'Enables deployment across multiple backend instances. Requires Redis, an external database, and OSS.',
-  },
-  DATABASE_DIALECT: {
-    description: 'Selects the database engine used by the backend.',
-  },
-  DATABASE_STORAGE: {
-    description: 'Specifies the SQLite database file path. Relative paths resolve from the backend working directory.',
-    placeholder: './data/database.sqlite',
-  },
-  DATABASE_URL: {
-    description: 'Specifies the PostgreSQL or MySQL connection string.',
-    placeholder: 'postgres://app:password@db.example.com:5432/tilty',
-  },
-  DATABASE_SSL: {
-    description: 'Enables TLS for MySQL or PostgreSQL database connections.',
-  },
-  DATABASE_CONNECT_TIMEOUT_MS: {
-    description: 'Defines the maximum duration, in milliseconds, for database connection attempts.',
-    placeholder: '10000',
-  },
-  DATABASE_POOL_MAX: {
-    description: 'Specifies the maximum number of database connections maintained by the pool.',
-    placeholder: '10',
-  },
-  DATABASE_POOL_MIN: {
-    description: 'Specifies the minimum number of database connections maintained by the pool.',
-    placeholder: '0',
-  },
-  DATABASE_POOL_ACQUIRE_MS: {
-    description: 'Defines the maximum time a request may wait for a database connection from the pool.',
-    placeholder: '30000',
-  },
-  DATABASE_POOL_IDLE_MS: {
-    description: 'Defines how long an idle database connection remains in the pool.',
-    placeholder: '10000',
-  },
-  DATABASE_SYNC: {
-    description: 'Controls startup schema synchronization. This setting must remain disabled in production.',
-  },
-  CACHE_STORE: {
-    description: 'Selects the cache backend. Redis is required for multi-instance deployments.',
-  },
-  CACHE_REDIS_URL: {
-    description: 'Specifies the Redis endpoint used for caching, rate limiting, and distributed locks.',
-    placeholder: 'redis://localhost:6379/0',
-  },
-  CACHE_REDIS_REQUEST_TIMEOUT_MS: {
-    description: 'Defines the maximum Redis command duration before the request is considered failed.',
-    placeholder: '10000',
-  },
-  FILE_STORAGE_DRIVER: {
-    description: 'Selects the storage provider for uploaded files.',
-  },
-  FILE_UPLOAD_MAX_BYTES: {
-    description: 'Defines the maximum accepted upload size in bytes.',
-    placeholder: '2097152',
-  },
-  FILE_PUBLIC_BASE_URL: {
-    description: 'Specifies the URL prefix used by clients to access locally stored files.',
-    placeholder: '/uploads',
-  },
-  FILE_LOCAL_ROOT: {
-    description: 'Specifies the server directory used for uploaded files when local storage is selected.',
-    placeholder: './data/uploads',
-  },
-  FILE_OSS_ACCESS_KEY_ID: {
-    description: 'Specifies the Alibaba Cloud access key ID authorized to write to the selected OSS bucket.',
-    placeholder: 'oss-access-key-id',
-  },
-  FILE_OSS_ACCESS_KEY_SECRET: {
-    description: 'Specifies the Alibaba Cloud access key secret associated with the OSS access key ID.',
-    placeholder: 'oss-access-key-secret-value',
-  },
-  FILE_OSS_BUCKET: {
-    description: 'Specifies the OSS bucket used to store uploaded files.',
-    placeholder: 'tilty-uploads',
-  },
-  FILE_OSS_ENDPOINT: {
-    description: 'Specifies the OSS endpoint for the bucket region.',
-    placeholder: 'oss-cn-hangzhou.aliyuncs.com',
-  },
-  FILE_OSS_REGION: {
-    description: 'Specifies the Alibaba Cloud region where the OSS bucket is located.',
-    placeholder: 'oss-cn-hangzhou',
-  },
-  FILE_OSS_PUBLIC_BASE_URL: {
-    description:
-      'Specifies the public URL prefix for files served from OSS or a CDN. Leave empty to derive the URL from the bucket and endpoint.',
-    placeholder: 'https://cdn.example.com/uploads',
-  },
-  SCHEDULER_ENABLED: {
-    description: 'Controls whether scheduled backend jobs are registered during startup.',
-  },
-  SCHEDULER_LOCK_TTL_MS: {
-    description:
-      'Defines the distributed scheduler lock lifetime in milliseconds. Used for multi-instance deployments.',
-    placeholder: '300000',
-  },
-  AUTH_TOKEN_SECRET: {
-    description: 'Defines the private signing secret for authentication tokens. Preserve this value after setup.',
-    placeholder: 'Generated automatically',
-  },
-  AUTH_ACCESS_TOKEN_TTL_SECONDS: {
-    description: 'Defines the validity period, in seconds, for access tokens.',
-    placeholder: '900',
-  },
-  AUTH_REFRESH_TOKEN_TTL_SECONDS: {
-    description: 'Defines the validity period, in seconds, for refresh tokens.',
-    placeholder: '2592000',
-  },
+  NODE_ENV: {},
+  SERVER_HOST: { placeholderMessageId: 'setup.field.SERVER_HOST.placeholder' },
+  SERVER_PORT: { placeholderMessageId: 'setup.field.SERVER_PORT.placeholder' },
+  APP_DOMAIN: { placeholderMessageId: 'setup.field.APP_DOMAIN.placeholder' },
+  APP_CORS_ORIGINS: { placeholderMessageId: 'setup.field.APP_CORS_ORIGINS.placeholder' },
+  SERVER_TRUST_PROXY: {},
+  SERVER_MULTI_INSTANCE_ENABLED: {},
+  DATABASE_DIALECT: {},
+  DATABASE_STORAGE: { placeholderMessageId: 'setup.field.DATABASE_STORAGE.placeholder' },
+  DATABASE_URL: { placeholderMessageId: 'setup.field.DATABASE_URL.placeholder' },
+  DATABASE_SSL: {},
+  DATABASE_CONNECT_TIMEOUT_MS: { placeholderMessageId: 'setup.field.DATABASE_CONNECT_TIMEOUT_MS.placeholder' },
+  DATABASE_POOL_MAX: { placeholderMessageId: 'setup.field.DATABASE_POOL_MAX.placeholder' },
+  DATABASE_POOL_MIN: { placeholderMessageId: 'setup.field.DATABASE_POOL_MIN.placeholder' },
+  DATABASE_POOL_ACQUIRE_MS: { placeholderMessageId: 'setup.field.DATABASE_POOL_ACQUIRE_MS.placeholder' },
+  DATABASE_POOL_IDLE_MS: { placeholderMessageId: 'setup.field.DATABASE_POOL_IDLE_MS.placeholder' },
+  DATABASE_SYNC: {},
+  CACHE_STORE: {},
+  CACHE_REDIS_URL: { placeholderMessageId: 'setup.field.CACHE_REDIS_URL.placeholder' },
+  CACHE_REDIS_REQUEST_TIMEOUT_MS: { placeholderMessageId: 'setup.field.CACHE_REDIS_REQUEST_TIMEOUT_MS.placeholder' },
+  FILE_STORAGE_DRIVER: {},
+  FILE_UPLOAD_MAX_BYTES: { placeholderMessageId: 'setup.field.FILE_UPLOAD_MAX_BYTES.placeholder' },
+  FILE_PUBLIC_BASE_URL: { placeholderMessageId: 'setup.field.FILE_PUBLIC_BASE_URL.placeholder' },
+  FILE_LOCAL_ROOT: { placeholderMessageId: 'setup.field.FILE_LOCAL_ROOT.placeholder' },
+  FILE_OSS_ACCESS_KEY_ID: { placeholderMessageId: 'setup.field.FILE_OSS_ACCESS_KEY_ID.placeholder' },
+  FILE_OSS_ACCESS_KEY_SECRET: { placeholderMessageId: 'setup.field.FILE_OSS_ACCESS_KEY_SECRET.placeholder' },
+  FILE_OSS_BUCKET: { placeholderMessageId: 'setup.field.FILE_OSS_BUCKET.placeholder' },
+  FILE_OSS_ENDPOINT: { placeholderMessageId: 'setup.field.FILE_OSS_ENDPOINT.placeholder' },
+  FILE_OSS_REGION: { placeholderMessageId: 'setup.field.FILE_OSS_REGION.placeholder' },
+  FILE_OSS_PUBLIC_BASE_URL: { placeholderMessageId: 'setup.field.FILE_OSS_PUBLIC_BASE_URL.placeholder' },
+  SCHEDULER_ENABLED: {},
+  SCHEDULER_LOCK_TTL_MS: { placeholderMessageId: 'setup.field.SCHEDULER_LOCK_TTL_MS.placeholder' },
+  AUTH_TOKEN_SECRET: { placeholderMessageId: 'setup.field.AUTH_TOKEN_SECRET.placeholder' },
+  AUTH_ACCESS_TOKEN_TTL_SECONDS: { placeholderMessageId: 'setup.field.AUTH_ACCESS_TOKEN_TTL_SECONDS.placeholder' },
+  AUTH_REFRESH_TOKEN_TTL_SECONDS: { placeholderMessageId: 'setup.field.AUTH_REFRESH_TOKEN_TTL_SECONDS.placeholder' },
   AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS: {
-    description: 'Defines how long an MFA challenge remains valid.',
-    placeholder: '300',
+    placeholderMessageId: 'setup.field.AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS.placeholder',
   },
-  AUTH_VERIFICATION_MAX_ATTEMPTS: {
-    description: 'Specifies how many failed MFA responses are allowed before a challenge is invalidated.',
-    placeholder: '5',
-  },
+  AUTH_VERIFICATION_MAX_ATTEMPTS: { placeholderMessageId: 'setup.field.AUTH_VERIFICATION_MAX_ATTEMPTS.placeholder' },
   AUTH_VERIFICATION_SUDO_TTL_SECONDS: {
-    description: 'Defines how long sensitive-action authorization remains valid after verification.',
-    placeholder: '900',
+    placeholderMessageId: 'setup.field.AUTH_VERIFICATION_SUDO_TTL_SECONDS.placeholder',
   },
-  AUTH_PASSKEY_RP_NAME: {
-    description: 'Defines the passkey relying party name shown by browsers and authenticators.',
-    placeholder: 'Tilty Scaffold',
-  },
+  AUTH_PASSKEY_RP_NAME: { placeholderMessageId: 'setup.field.AUTH_PASSKEY_RP_NAME.placeholder' },
   AUTH_PASSKEY_REGISTRATION_TTL_SECONDS: {
-    description: 'Defines how long passkey registration tokens remain valid.',
-    placeholder: '300',
+    placeholderMessageId: 'setup.field.AUTH_PASSKEY_REGISTRATION_TTL_SECONDS.placeholder',
   },
   AUTH_PASSKEY_OPERATION_TIMEOUT_MS: {
-    description: 'Defines the browser WebAuthn operation timeout in milliseconds.',
-    placeholder: '60000',
+    placeholderMessageId: 'setup.field.AUTH_PASSKEY_OPERATION_TIMEOUT_MS.placeholder',
   },
-  AUTH_TOTP_ISSUER: {
-    description: 'Defines the issuer name shown in authenticator applications.',
-    placeholder: 'Tilty Scaffold',
-  },
-  AUTH_TOTP_SETUP_TTL_SECONDS: {
-    description: 'Defines how long authenticator app setup tokens remain valid.',
-    placeholder: '600',
-  },
-  AUTH_ACCESS_TOKEN_COOKIE_NAME: {
-    description: 'Specifies the browser cookie name used for access tokens.',
-    placeholder: 'tilty_scaffold_access_token',
-  },
-  AUTH_REFRESH_TOKEN_COOKIE_NAME: {
-    description: 'Specifies the browser cookie name used for refresh tokens.',
-    placeholder: 'tilty_scaffold_refresh_token',
-  },
-  AUTH_COOKIE_SAME_SITE: {
-    description: 'Defines the SameSite policy applied to authentication cookies.',
-  },
-  AUTH_COOKIE_SECURE: {
-    description: 'Controls whether authentication cookies are transmitted only over HTTPS.',
-  },
-  AUTH_RATE_LIMIT_WINDOW_MS: {
-    description: 'Defines the rate limit window, in milliseconds, for authentication endpoints.',
-    placeholder: '60000',
-  },
-  AUTH_RATE_LIMIT_MAX: {
-    description: 'Specifies the maximum number of authentication requests allowed per rate limit window.',
-    placeholder: '10',
-  },
-  GLOBAL_RATE_LIMIT_WINDOW_MS: {
-    description: 'Defines the global rate limit window in milliseconds.',
-    placeholder: '60000',
-  },
-  GLOBAL_RATE_LIMIT_MAX: {
-    description: 'Specifies the maximum number of API requests allowed per global rate limit window.',
-    placeholder: '1000',
-  },
-  LOG_REQUEST_ENABLED: {
-    description: 'Enables access logging for backend HTTP requests.',
-  },
-  LOG_TARGETS: {
-    description: 'Selects the destinations used for backend log output.',
-  },
-  LOG_PENDING_WRITE_MAX: {
-    description: 'Defines the maximum number of pending asynchronous log writes before new writes are discarded.',
-    placeholder: '1000',
-  },
-  LOG_WRITE_TIMEOUT_MS: {
-    description: 'Defines the maximum duration, in milliseconds, allowed for each log write operation.',
-    placeholder: '5000',
-  },
-  LOG_LOCAL_PATH: {
-    description: 'Specifies the file path used when local file logging is enabled.',
-    placeholder: './logs/backend.log',
-  },
-  LOG_SLS_ENDPOINT: {
-    description: 'Specifies the Simple Log Service endpoint for the project region.',
-    placeholder: 'cn-hangzhou.log.aliyuncs.com',
-  },
-  LOG_SLS_PROJECT: {
-    description: 'Specifies the SLS project that owns the target Logstore.',
-    placeholder: 'tilty-production',
-  },
-  LOG_SLS_LOGSTORE: {
-    description: 'Specifies the SLS Logstore that receives backend log records.',
-    placeholder: 'backend-logs',
-  },
-  LOG_SLS_ACCESS_KEY_ID: {
-    description: 'Specifies the Alibaba Cloud access key ID authorized to write logs to SLS.',
-    placeholder: 'sls-access-key-id',
-  },
-  LOG_SLS_ACCESS_KEY_SECRET: {
-    description: 'Specifies the Alibaba Cloud access key secret used for SLS logging.',
-    placeholder: 'sls-access-key-secret-value',
-  },
-  LOG_SLS_TOPIC: {
-    description: 'Defines the topic value attached to SLS log records.',
-    placeholder: 'tilty-scaffold',
-  },
-  LOG_SLS_SOURCE: {
-    description: 'Defines the source value attached to SLS log records.',
-    placeholder: 'backend',
-  },
-  EMAIL_VERIFICATION_SERVICE: {
-    description: 'Selects the email delivery provider used for verification and password recovery workflows.',
-  },
+  AUTH_TOTP_ISSUER: { placeholderMessageId: 'setup.field.AUTH_TOTP_ISSUER.placeholder' },
+  AUTH_TOTP_SETUP_TTL_SECONDS: { placeholderMessageId: 'setup.field.AUTH_TOTP_SETUP_TTL_SECONDS.placeholder' },
+  AUTH_ACCESS_TOKEN_COOKIE_NAME: { placeholderMessageId: 'setup.field.AUTH_ACCESS_TOKEN_COOKIE_NAME.placeholder' },
+  AUTH_REFRESH_TOKEN_COOKIE_NAME: { placeholderMessageId: 'setup.field.AUTH_REFRESH_TOKEN_COOKIE_NAME.placeholder' },
+  AUTH_COOKIE_SAME_SITE: {},
+  AUTH_COOKIE_SECURE: {},
+  AUTH_RATE_LIMIT_WINDOW_MS: { placeholderMessageId: 'setup.field.AUTH_RATE_LIMIT_WINDOW_MS.placeholder' },
+  AUTH_RATE_LIMIT_MAX: { placeholderMessageId: 'setup.field.AUTH_RATE_LIMIT_MAX.placeholder' },
+  GLOBAL_RATE_LIMIT_WINDOW_MS: { placeholderMessageId: 'setup.field.GLOBAL_RATE_LIMIT_WINDOW_MS.placeholder' },
+  GLOBAL_RATE_LIMIT_MAX: { placeholderMessageId: 'setup.field.GLOBAL_RATE_LIMIT_MAX.placeholder' },
+  LOG_REQUEST_ENABLED: {},
+  LOG_TARGETS: {},
+  LOG_PENDING_WRITE_MAX: { placeholderMessageId: 'setup.field.LOG_PENDING_WRITE_MAX.placeholder' },
+  LOG_WRITE_TIMEOUT_MS: { placeholderMessageId: 'setup.field.LOG_WRITE_TIMEOUT_MS.placeholder' },
+  LOG_LOCAL_PATH: { placeholderMessageId: 'setup.field.LOG_LOCAL_PATH.placeholder' },
+  LOG_SLS_ENDPOINT: { placeholderMessageId: 'setup.field.LOG_SLS_ENDPOINT.placeholder' },
+  LOG_SLS_PROJECT: { placeholderMessageId: 'setup.field.LOG_SLS_PROJECT.placeholder' },
+  LOG_SLS_LOGSTORE: { placeholderMessageId: 'setup.field.LOG_SLS_LOGSTORE.placeholder' },
+  LOG_SLS_ACCESS_KEY_ID: { placeholderMessageId: 'setup.field.LOG_SLS_ACCESS_KEY_ID.placeholder' },
+  LOG_SLS_ACCESS_KEY_SECRET: { placeholderMessageId: 'setup.field.LOG_SLS_ACCESS_KEY_SECRET.placeholder' },
+  LOG_SLS_TOPIC: { placeholderMessageId: 'setup.field.LOG_SLS_TOPIC.placeholder' },
+  LOG_SLS_SOURCE: { placeholderMessageId: 'setup.field.LOG_SLS_SOURCE.placeholder' },
+  EMAIL_VERIFICATION_SERVICE: {},
   EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS: {
-    description: 'Defines the validity period, in milliseconds, for email verification codes.',
-    placeholder: '600000',
+    placeholderMessageId: 'setup.field.EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS.placeholder',
   },
   EMAIL_VERIFICATION_CODE_COOLDOWN_MS: {
-    description: 'Defines the minimum interval before another verification email may be requested.',
-    placeholder: '60000',
+    placeholderMessageId: 'setup.field.EMAIL_VERIFICATION_CODE_COOLDOWN_MS.placeholder',
   },
-  EMAIL_SMTP_PROFILES: {
-    description: 'Configures SMTP delivery profiles. At least one profile is required when SMTP is enabled.',
-  },
-  SMS_VERIFICATION_SERVICE: {
-    description: 'Selects the SMS delivery provider used for phone verification workflows.',
-  },
+  EMAIL_SMTP_PROFILES: {},
+  SMS_VERIFICATION_SERVICE: {},
   SMS_VERIFICATION_CODE_EXPIRES_IN_MS: {
-    description: 'Defines the validity period, in milliseconds, for SMS verification codes.',
-    placeholder: '600000',
+    placeholderMessageId: 'setup.field.SMS_VERIFICATION_CODE_EXPIRES_IN_MS.placeholder',
   },
   SMS_VERIFICATION_CODE_COOLDOWN_MS: {
-    description: 'Defines the minimum interval before another SMS verification code may be requested.',
-    placeholder: '60000',
+    placeholderMessageId: 'setup.field.SMS_VERIFICATION_CODE_COOLDOWN_MS.placeholder',
   },
-  SMS_ALICLOUD_PROFILES: {
-    description:
-      'Configures Aliyun SMS profiles by phone country code. Configure only country codes supported for phone verification.',
-  },
-  SSO_ENABLED: {
-    description: 'Enables third-party identity provider configuration and account binding.',
-  },
-  SSO_PROFILES: {
-    description: 'Configures OAuth 2.0 and OpenID Connect providers as JSON profile objects.',
-  },
+  SMS_ALICLOUD_PROFILES: {},
+  SSO_ENABLED: {},
+  SSO_PROFILES: {},
 };
 
 export const administratorFieldHelp: Record<keyof SetupAdministrator, FieldHelp> = {
-  username: {
-    description: 'Specifies the unique username used by the root administrator to log in.',
-    placeholder: 'root_admin',
-  },
-  displayName: {
-    description: 'Specifies the display name shown for the root administrator account.',
-    placeholder: 'Root Administrator',
-  },
-  email: {
-    description: 'Specifies the email address assigned to the root administrator account.',
-    placeholder: 'admin@example.com',
-  },
-  password: {
-    description: 'Defines the initial password for the root administrator account. Use at least 8 characters.',
-    placeholder: 'Enter an administrator password',
-  },
-  confirmPassword: {
-    description: 'Re-enter the administrator password for confirmation.',
-    placeholder: 'Confirm the administrator password',
-  },
+  username: { placeholderMessageId: 'setup.admin.username.placeholder' },
+  displayName: { placeholderMessageId: 'setup.admin.display.name.placeholder' },
+  email: { placeholderMessageId: 'setup.admin.email.placeholder' },
+  password: { placeholderMessageId: 'setup.admin.password.placeholder' },
+  confirmPassword: { placeholderMessageId: 'setup.admin.confirm.password.placeholder' },
 };
 
 export const setupSteps: SetupStepDefinition[] = [
   {
     id: 'runtime',
-    title: 'Runtime',
     icon: ServerIcon,
     fields: [
       {
         key: 'NODE_ENV',
-        group: 'Server',
-        label: 'Environment',
+        group: 'server',
         kind: 'select',
-        options: [
-          { label: 'Development', value: 'development' },
-          { label: 'Test', value: 'test' },
-          { label: 'Production', value: 'production' },
-        ],
+        options: nodeEnvOptions,
       },
-      { key: 'SERVER_HOST', group: 'Server', label: 'Server Host' },
-      { key: 'SERVER_PORT', group: 'Server', label: 'Server Port' },
-      { key: 'APP_DOMAIN', group: 'Application', label: 'Application Domain' },
-      { key: 'APP_CORS_ORIGINS', group: 'Application', label: 'CORS Origins', kind: 'textarea' },
+      { key: 'SERVER_HOST', group: 'server' },
+      { key: 'SERVER_PORT', group: 'server' },
+      { key: 'APP_DOMAIN', group: 'application' },
+      { key: 'APP_CORS_ORIGINS', group: 'application', kind: 'textarea' },
       {
         key: 'SERVER_TRUST_PROXY',
-        group: 'Deployment',
-        label: 'Trusted Proxy Headers',
+        group: 'deployment',
         kind: 'select',
         options: booleanOptions,
       },
       {
         key: 'SERVER_MULTI_INSTANCE_ENABLED',
-        group: 'Deployment',
-        label: 'Multi-Instance Deployment',
+        group: 'deployment',
         kind: 'select',
         options: booleanOptions,
       },
@@ -395,438 +240,342 @@ export const setupSteps: SetupStepDefinition[] = [
   },
   {
     id: 'database',
-    title: 'Database',
     icon: DatabaseIcon,
     fields: [
       {
         key: 'DATABASE_DIALECT',
-        group: 'Engine',
-        label: 'Database Engine',
+        group: 'engine',
         kind: 'select',
-        options: [
-          { label: 'SQLite', value: 'sqlite' },
-          { label: 'MySQL', value: 'mysql' },
-          { label: 'PostgreSQL', value: 'postgres' },
-        ],
+        options: databaseDialectOptions,
       },
       {
         key: 'DATABASE_STORAGE',
-        group: 'SQLite',
-        label: 'SQLite File',
-        visible: (environment) => environment.DATABASE_DIALECT === 'sqlite',
+        group: 'sqlite',
+        visible: (environment) => environment.DATABASE_DIALECT === SetupDatabaseDialect.Sqlite,
       },
       {
         key: 'DATABASE_URL',
-        group: 'External Database',
-        label: 'Connection URL',
+        group: 'externalDatabase',
         kind: 'password',
-        visible: (environment) => environment.DATABASE_DIALECT !== 'sqlite',
+        visible: (environment) => environment.DATABASE_DIALECT !== SetupDatabaseDialect.Sqlite,
       },
       {
         key: 'DATABASE_SSL',
-        group: 'External Database',
-        label: 'Database TLS',
+        group: 'externalDatabase',
         kind: 'select',
         options: booleanOptions,
-        visible: (environment) => environment.DATABASE_DIALECT !== 'sqlite',
+        visible: (environment) => environment.DATABASE_DIALECT !== SetupDatabaseDialect.Sqlite,
       },
       {
         key: 'DATABASE_CONNECT_TIMEOUT_MS',
-        group: 'External Database',
-        label: 'Connection Timeout (ms)',
-        visible: (environment) => environment.DATABASE_DIALECT !== 'sqlite',
+        group: 'externalDatabase',
+        visible: (environment) => environment.DATABASE_DIALECT !== SetupDatabaseDialect.Sqlite,
       },
       {
         key: 'DATABASE_POOL_MAX',
-        group: 'Connection Pool',
-        label: 'Maximum Pool Size',
-        visible: (environment) => environment.DATABASE_DIALECT !== 'sqlite',
+        group: 'connectionPool',
+        visible: (environment) => environment.DATABASE_DIALECT !== SetupDatabaseDialect.Sqlite,
       },
       {
         key: 'DATABASE_POOL_MIN',
-        group: 'Connection Pool',
-        label: 'Minimum Pool Size',
-        visible: (environment) => environment.DATABASE_DIALECT !== 'sqlite',
+        group: 'connectionPool',
+        visible: (environment) => environment.DATABASE_DIALECT !== SetupDatabaseDialect.Sqlite,
       },
       {
         key: 'DATABASE_POOL_ACQUIRE_MS',
-        group: 'Connection Pool',
-        label: 'Pool Acquire Timeout (ms)',
-        visible: (environment) => environment.DATABASE_DIALECT !== 'sqlite',
+        group: 'connectionPool',
+        visible: (environment) => environment.DATABASE_DIALECT !== SetupDatabaseDialect.Sqlite,
       },
       {
         key: 'DATABASE_POOL_IDLE_MS',
-        group: 'Connection Pool',
-        label: 'Pool Idle Timeout (ms)',
-        visible: (environment) => environment.DATABASE_DIALECT !== 'sqlite',
+        group: 'connectionPool',
+        visible: (environment) => environment.DATABASE_DIALECT !== SetupDatabaseDialect.Sqlite,
       },
       {
         key: 'DATABASE_SYNC',
-        group: 'Schema',
-        label: 'Startup Schema Synchronization',
+        group: 'schema',
         kind: 'select',
-        options: [
-          { label: 'Disabled', value: 'off' },
-          { label: 'Alter Existing Schema', value: 'alter' },
-          { label: 'Recreate Schema', value: 'force' },
-        ],
+        options: databaseSyncOptions,
       },
     ],
   },
   {
     id: 'cache',
-    title: 'Cache',
     icon: DatabaseZapIcon,
     fields: [
       {
         key: 'CACHE_STORE',
-        group: 'Store',
-        label: 'Cache Store',
+        group: 'store',
         kind: 'select',
-        options: [
-          { label: 'Memory', value: 'memory' },
-          { label: 'Redis', value: 'redis' },
-        ],
+        options: cacheStoreOptions,
       },
       {
         key: 'CACHE_REDIS_URL',
-        group: 'Redis',
-        label: 'Redis URL',
+        group: 'redis',
         kind: 'password',
-        visible: (environment) => environment.CACHE_STORE === 'redis',
+        visible: (environment) => environment.CACHE_STORE === SetupCacheStore.Redis,
       },
       {
         key: 'CACHE_REDIS_REQUEST_TIMEOUT_MS',
-        group: 'Redis',
-        label: 'Redis Request Timeout (ms)',
-        visible: (environment) => environment.CACHE_STORE === 'redis',
+        group: 'redis',
+        visible: (environment) => environment.CACHE_STORE === SetupCacheStore.Redis,
       },
     ],
   },
   {
     id: 'file-storage',
-    title: 'File Storage',
     icon: HardDriveIcon,
     fields: [
       {
         key: 'FILE_STORAGE_DRIVER',
-        group: 'Driver',
-        label: 'Storage Provider',
+        group: 'driver',
         kind: 'select',
-        options: [
-          { label: 'Local', value: 'local' },
-          { label: 'OSS', value: 'oss' },
-        ],
+        options: fileStorageDriverOptions,
       },
-      { key: 'FILE_UPLOAD_MAX_BYTES', group: 'Driver', label: 'Maximum Upload Size (bytes)' },
+      { key: 'FILE_UPLOAD_MAX_BYTES', group: 'driver' },
       {
         key: 'FILE_PUBLIC_BASE_URL',
-        group: 'Local',
-        label: 'Local Public URL Base',
-        visible: (environment) => environment.FILE_STORAGE_DRIVER === 'local',
+        group: 'local',
+        visible: (environment) => environment.FILE_STORAGE_DRIVER === SetupFileStorageDriver.Local,
       },
       {
         key: 'FILE_LOCAL_ROOT',
-        group: 'Local',
-        label: 'Local File Root',
-        visible: (environment) => environment.FILE_STORAGE_DRIVER === 'local',
+        group: 'local',
+        visible: (environment) => environment.FILE_STORAGE_DRIVER === SetupFileStorageDriver.Local,
       },
       {
         key: 'FILE_OSS_ACCESS_KEY_ID',
-        group: 'OSS',
-        label: 'OSS Access Key ID',
+        group: 'oss',
         kind: 'password',
-        visible: (environment) => environment.FILE_STORAGE_DRIVER === 'oss',
+        visible: (environment) => environment.FILE_STORAGE_DRIVER === SetupFileStorageDriver.Oss,
       },
       {
         key: 'FILE_OSS_ACCESS_KEY_SECRET',
-        group: 'OSS',
-        label: 'OSS Access Key Secret',
+        group: 'oss',
         kind: 'password',
-        visible: (environment) => environment.FILE_STORAGE_DRIVER === 'oss',
+        visible: (environment) => environment.FILE_STORAGE_DRIVER === SetupFileStorageDriver.Oss,
       },
       {
         key: 'FILE_OSS_BUCKET',
-        group: 'OSS',
-        label: 'OSS Bucket',
-        visible: (environment) => environment.FILE_STORAGE_DRIVER === 'oss',
+        group: 'oss',
+        visible: (environment) => environment.FILE_STORAGE_DRIVER === SetupFileStorageDriver.Oss,
       },
       {
         key: 'FILE_OSS_ENDPOINT',
-        group: 'OSS',
-        label: 'OSS Endpoint',
-        visible: (environment) => environment.FILE_STORAGE_DRIVER === 'oss',
+        group: 'oss',
+        visible: (environment) => environment.FILE_STORAGE_DRIVER === SetupFileStorageDriver.Oss,
       },
       {
         key: 'FILE_OSS_REGION',
-        group: 'OSS',
-        label: 'OSS Region',
-        visible: (environment) => environment.FILE_STORAGE_DRIVER === 'oss',
+        group: 'oss',
+        visible: (environment) => environment.FILE_STORAGE_DRIVER === SetupFileStorageDriver.Oss,
       },
       {
         key: 'FILE_OSS_PUBLIC_BASE_URL',
-        group: 'OSS',
-        label: 'OSS Public URL Base',
-        visible: (environment) => environment.FILE_STORAGE_DRIVER === 'oss',
+        group: 'oss',
+        visible: (environment) => environment.FILE_STORAGE_DRIVER === SetupFileStorageDriver.Oss,
       },
     ],
   },
   {
     id: 'scheduler',
-    title: 'Scheduler',
     icon: CalendarClockIcon,
     fields: [
       {
         key: 'SCHEDULER_ENABLED',
-        group: 'Scheduler',
-        label: 'Scheduler Status',
+        group: 'scheduler',
         kind: 'select',
         options: booleanOptions,
       },
-      { key: 'SCHEDULER_LOCK_TTL_MS', group: 'Distributed Lock', label: 'Scheduler Lock TTL (ms)' },
+      { key: 'SCHEDULER_LOCK_TTL_MS', group: 'distributedLock' },
     ],
   },
   {
     id: 'security',
-    title: 'Security',
     icon: ShieldCheckIcon,
     fields: [
-      { key: 'AUTH_TOKEN_SECRET', group: 'Tokens', label: 'Token Signing Secret', kind: 'password' },
-      { key: 'AUTH_ACCESS_TOKEN_TTL_SECONDS', group: 'Tokens', label: 'Access Token TTL (seconds)' },
-      { key: 'AUTH_REFRESH_TOKEN_TTL_SECONDS', group: 'Tokens', label: 'Refresh Token TTL (seconds)' },
-      {
-        key: 'AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS',
-        group: 'Verification',
-        label: 'MFA Challenge TTL (seconds)',
-      },
-      { key: 'AUTH_VERIFICATION_MAX_ATTEMPTS', group: 'Verification', label: 'MFA Attempt Limit' },
-      {
-        key: 'AUTH_VERIFICATION_SUDO_TTL_SECONDS',
-        group: 'Verification',
-        label: 'Sensitive Action TTL (seconds)',
-      },
-      { key: 'AUTH_PASSKEY_RP_NAME', group: 'Passkeys', label: 'Passkey Relying Party Name' },
-      {
-        key: 'AUTH_PASSKEY_REGISTRATION_TTL_SECONDS',
-        group: 'Passkeys',
-        label: 'Passkey Registration TTL (seconds)',
-      },
-      { key: 'AUTH_PASSKEY_OPERATION_TIMEOUT_MS', group: 'Passkeys', label: 'Passkey Operation Timeout (ms)' },
-      { key: 'AUTH_TOTP_ISSUER', group: 'Authenticator Apps', label: 'TOTP Issuer' },
-      {
-        key: 'AUTH_TOTP_SETUP_TTL_SECONDS',
-        group: 'Authenticator Apps',
-        label: 'TOTP Setup TTL (seconds)',
-      },
-      { key: 'AUTH_ACCESS_TOKEN_COOKIE_NAME', group: 'Cookies', label: 'Access Token Cookie Name' },
-      { key: 'AUTH_REFRESH_TOKEN_COOKIE_NAME', group: 'Cookies', label: 'Refresh Token Cookie Name' },
+      { key: 'AUTH_TOKEN_SECRET', group: 'tokens', kind: 'password' },
+      { key: 'AUTH_ACCESS_TOKEN_TTL_SECONDS', group: 'tokens' },
+      { key: 'AUTH_REFRESH_TOKEN_TTL_SECONDS', group: 'tokens' },
+      { key: 'AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS', group: 'verification' },
+      { key: 'AUTH_VERIFICATION_MAX_ATTEMPTS', group: 'verification' },
+      { key: 'AUTH_VERIFICATION_SUDO_TTL_SECONDS', group: 'verification' },
+      { key: 'AUTH_PASSKEY_RP_NAME', group: 'passkeys' },
+      { key: 'AUTH_PASSKEY_REGISTRATION_TTL_SECONDS', group: 'passkeys' },
+      { key: 'AUTH_PASSKEY_OPERATION_TIMEOUT_MS', group: 'passkeys' },
+      { key: 'AUTH_TOTP_ISSUER', group: 'authenticatorApps' },
+      { key: 'AUTH_TOTP_SETUP_TTL_SECONDS', group: 'authenticatorApps' },
+      { key: 'AUTH_ACCESS_TOKEN_COOKIE_NAME', group: 'cookies' },
+      { key: 'AUTH_REFRESH_TOKEN_COOKIE_NAME', group: 'cookies' },
       {
         key: 'AUTH_COOKIE_SAME_SITE',
-        group: 'Cookies',
-        label: 'Cookie SameSite Policy',
+        group: 'cookies',
         kind: 'select',
-        options: [
-          { label: 'Lax', value: 'lax' },
-          { label: 'Strict', value: 'strict' },
-          { label: 'None', value: 'none' },
-        ],
+        options: authCookieSameSiteOptions,
       },
       {
         key: 'AUTH_COOKIE_SECURE',
-        group: 'Cookies',
-        label: 'Secure Cookies',
+        group: 'cookies',
         kind: 'select',
-        options: [
-          { label: 'Automatic', value: 'auto' },
-          { label: 'Enabled', value: 'true' },
-          { label: 'Disabled', value: 'false' },
-        ],
+        options: authCookieSecureOptions,
       },
-      { key: 'AUTH_RATE_LIMIT_WINDOW_MS', group: 'Rate Limits', label: 'Authentication Rate Window (ms)' },
-      { key: 'AUTH_RATE_LIMIT_MAX', group: 'Rate Limits', label: 'Authentication Rate Limit' },
-      { key: 'GLOBAL_RATE_LIMIT_WINDOW_MS', group: 'Rate Limits', label: 'Global Rate Window (ms)' },
-      { key: 'GLOBAL_RATE_LIMIT_MAX', group: 'Rate Limits', label: 'Global Rate Limit' },
+      { key: 'AUTH_RATE_LIMIT_WINDOW_MS', group: 'rateLimits' },
+      { key: 'AUTH_RATE_LIMIT_MAX', group: 'rateLimits' },
+      { key: 'GLOBAL_RATE_LIMIT_WINDOW_MS', group: 'rateLimits' },
+      { key: 'GLOBAL_RATE_LIMIT_MAX', group: 'rateLimits' },
     ],
   },
   {
     id: 'logging',
-    title: 'Logging',
     icon: FileTextIcon,
     fields: [
       {
         key: 'LOG_REQUEST_ENABLED',
-        group: 'General',
-        label: 'Request Logging',
+        group: 'general',
         kind: 'select',
         options: booleanOptions,
       },
       {
         key: 'LOG_TARGETS',
-        group: 'General',
-        label: 'Log Targets',
+        group: 'general',
         kind: 'select',
-        options: [
-          { label: 'Console', value: 'console' },
-          { label: 'Console + Local File', value: 'console,local' },
-          { label: 'Console + SLS', value: 'console,sls' },
-          { label: 'Console + Local File + SLS', value: 'console,local,sls' },
-          { label: 'Local File', value: 'local' },
-          { label: 'SLS', value: 'sls' },
-        ],
+        options: logTargetOptions,
       },
-      { key: 'LOG_PENDING_WRITE_MAX', group: 'Write Behavior', label: 'Maximum Pending Writes' },
-      { key: 'LOG_WRITE_TIMEOUT_MS', group: 'Write Behavior', label: 'Write Timeout (ms)' },
+      { key: 'LOG_PENDING_WRITE_MAX', group: 'writeBehavior' },
+      { key: 'LOG_WRITE_TIMEOUT_MS', group: 'writeBehavior' },
       {
         key: 'LOG_LOCAL_PATH',
-        group: 'Local',
-        label: 'Local Log Path',
-        visible: (environment) => hasLogTarget(environment, 'local'),
+        group: 'local',
+        visible: (environment) => hasLogTarget(environment, SetupLogTarget.Local),
       },
       {
         key: 'LOG_SLS_ENDPOINT',
-        group: 'SLS',
-        label: 'SLS Endpoint',
-        visible: (environment) => hasLogTarget(environment, 'sls'),
+        group: 'sls',
+        visible: (environment) => hasLogTarget(environment, SetupLogTarget.Sls),
       },
       {
         key: 'LOG_SLS_PROJECT',
-        group: 'SLS',
-        label: 'SLS Project',
-        visible: (environment) => hasLogTarget(environment, 'sls'),
+        group: 'sls',
+        visible: (environment) => hasLogTarget(environment, SetupLogTarget.Sls),
       },
       {
         key: 'LOG_SLS_LOGSTORE',
-        group: 'SLS',
-        label: 'SLS Logstore',
-        visible: (environment) => hasLogTarget(environment, 'sls'),
+        group: 'sls',
+        visible: (environment) => hasLogTarget(environment, SetupLogTarget.Sls),
       },
       {
         key: 'LOG_SLS_ACCESS_KEY_ID',
-        group: 'SLS',
-        label: 'SLS Access Key ID',
+        group: 'sls',
         kind: 'password',
-        visible: (environment) => hasLogTarget(environment, 'sls'),
+        visible: (environment) => hasLogTarget(environment, SetupLogTarget.Sls),
       },
       {
         key: 'LOG_SLS_ACCESS_KEY_SECRET',
-        group: 'SLS',
-        label: 'SLS Access Key Secret',
+        group: 'sls',
         kind: 'password',
-        visible: (environment) => hasLogTarget(environment, 'sls'),
+        visible: (environment) => hasLogTarget(environment, SetupLogTarget.Sls),
       },
       {
         key: 'LOG_SLS_TOPIC',
-        group: 'SLS',
-        label: 'SLS Topic',
-        visible: (environment) => hasLogTarget(environment, 'sls'),
+        group: 'sls',
+        visible: (environment) => hasLogTarget(environment, SetupLogTarget.Sls),
       },
       {
         key: 'LOG_SLS_SOURCE',
-        group: 'SLS',
-        label: 'SLS Source',
-        visible: (environment) => hasLogTarget(environment, 'sls'),
+        group: 'sls',
+        visible: (environment) => hasLogTarget(environment, SetupLogTarget.Sls),
       },
     ],
   },
   {
     id: 'email',
-    title: 'Email',
     icon: MailIcon,
     fields: [
       {
         key: 'EMAIL_VERIFICATION_SERVICE',
-        group: 'Verification',
-        label: 'Email Verification Provider',
+        group: 'verification',
         kind: 'select',
-        options: [
-          { label: 'Disabled', value: 'off' },
-          { label: 'SMTP', value: 'smtp' },
-        ],
+        options: emailVerificationServiceOptions,
       },
       {
         key: 'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS',
-        group: 'Verification Codes',
-        label: 'Verification Code Expiration (ms)',
-        visible: (environment) => environment.EMAIL_VERIFICATION_SERVICE === 'smtp',
+        group: 'verificationCodes',
+        visible: (environment) => environment.EMAIL_VERIFICATION_SERVICE === SetupEmailVerificationService.Smtp,
       },
       {
         key: 'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
-        group: 'Verification Codes',
-        label: 'Verification Code Cooldown (ms)',
-        visible: (environment) => environment.EMAIL_VERIFICATION_SERVICE === 'smtp',
+        group: 'verificationCodes',
+        visible: (environment) => environment.EMAIL_VERIFICATION_SERVICE === SetupEmailVerificationService.Smtp,
       },
       {
         key: 'EMAIL_SMTP_PROFILES',
-        group: 'SMTP',
-        label: 'SMTP Profiles',
+        group: 'smtp',
         kind: 'smtp-profiles',
-        visible: (environment) => environment.EMAIL_VERIFICATION_SERVICE === 'smtp',
+        visible: (environment) => environment.EMAIL_VERIFICATION_SERVICE === SetupEmailVerificationService.Smtp,
       },
     ],
   },
   {
     id: 'sms',
-    title: 'SMS',
     icon: SmartphoneIcon,
     fields: [
       {
         key: 'SMS_VERIFICATION_SERVICE',
-        group: 'Verification',
-        label: 'SMS Verification Provider',
+        group: 'verification',
         kind: 'select',
-        options: [
-          { label: 'Disabled', value: 'off' },
-          { label: 'Aliyun SMS', value: 'aliyun' },
-        ],
+        options: smsVerificationServiceOptions,
       },
       {
         key: 'SMS_VERIFICATION_CODE_EXPIRES_IN_MS',
-        group: 'Verification Codes',
-        label: 'Verification Code Expiration (ms)',
-        visible: (environment) => environment.SMS_VERIFICATION_SERVICE === 'aliyun',
+        group: 'verificationCodes',
+        visible: (environment) => environment.SMS_VERIFICATION_SERVICE === SetupSmsVerificationService.Aliyun,
       },
       {
         key: 'SMS_VERIFICATION_CODE_COOLDOWN_MS',
-        group: 'Verification Codes',
-        label: 'Verification Code Cooldown (ms)',
-        visible: (environment) => environment.SMS_VERIFICATION_SERVICE === 'aliyun',
+        group: 'verificationCodes',
+        visible: (environment) => environment.SMS_VERIFICATION_SERVICE === SetupSmsVerificationService.Aliyun,
       },
       {
         key: 'SMS_ALICLOUD_PROFILES',
-        group: 'Aliyun SMS',
-        label: 'Aliyun SMS Profiles',
+        group: 'aliyunSms',
         kind: 'sms-profiles',
-        visible: (environment) => environment.SMS_VERIFICATION_SERVICE === 'aliyun',
+        visible: (environment) => environment.SMS_VERIFICATION_SERVICE === SetupSmsVerificationService.Aliyun,
       },
     ],
   },
   {
     id: 'sso',
-    title: 'SSO',
     icon: KeyRoundIcon,
     fields: [
-      { key: 'SSO_ENABLED', group: 'General', label: 'SSO Authentication', kind: 'select', options: booleanOptions },
+      { key: 'SSO_ENABLED', group: 'general', kind: 'select', options: booleanOptions },
       {
         key: 'SSO_PROFILES',
-        group: 'Providers',
-        label: 'SSO Profiles',
+        group: 'providers',
         kind: 'sso-profiles',
-        visible: (environment) => environment.SSO_ENABLED === 'true',
+        visible: (environment) => environment.SSO_ENABLED === SetupBoolean.True,
       },
     ],
   },
   {
     id: 'administrator',
-    title: 'Administrator',
     icon: UserPlusIcon,
   },
   {
     id: 'review',
-    title: 'Review',
     icon: CheckCircle2Icon,
   },
 ];
 
-export function hasLogTarget(environment: SetupEnvironment, target: string) {
+export function hasLogTarget(environment: SetupEnvironment, target: SetupLogTargetValue) {
   return environment.LOG_TARGETS?.split(',').some((item) => item.trim() === target) ?? false;
+}
+
+function createSelectOptions<T extends string>(values: readonly T[]): SelectOption[] {
+  return values.map((value) => ({
+    value,
+  }));
+}
+
+function joinLogTargets(targets: readonly SetupLogTargetValue[]) {
+  return targets.join(',');
 }

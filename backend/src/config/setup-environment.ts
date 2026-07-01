@@ -3,7 +3,29 @@ import { constants } from 'fs';
 import { access, rename, stat, unlink, writeFile } from 'fs/promises';
 import { z } from 'zod';
 
+import {
+  SetupBoolean,
+  setupBooleanValues,
+  SetupCacheStore,
+  setupCacheStoreValues,
+  SetupDatabaseDialect,
+  setupDatabaseDialectValues,
+  SetupDatabaseSync,
+  SetupEmailVerificationService,
+  SetupEnvironmentStep,
+  type SetupEnvironmentStepValue,
+  setupEnvironmentStepValues,
+  SetupFileStorageDriver,
+  setupFileStorageDriverValues,
+  SetupLogTarget,
+  SetupNodeEnv,
+  setupNodeEnvValues,
+  SetupSmsVerificationService,
+} from '@tilty/shared/setup';
+
 import { AppError } from '../core/errors';
+import { parseSeparatedValues } from '../core/strings';
+import { defaultSetupEnvironment } from './defaults';
 import {
   getConfigFilePath,
   getEnvValidationMessage,
@@ -20,8 +42,13 @@ interface ConfigFileWriteOptions {
   allowLocked?: boolean;
   generator?: string;
 }
+interface ConditionalRequiredEnvironmentFields {
+  isEnabled: (environment: SetupEnvironment) => boolean;
+  keys: readonly (keyof SetupEnvironment)[];
+}
 
-export const setupLockedMessage = 'Setup is locked because SETUP_LOCKED is true.';
+export type SetupEnvironment = z.infer<typeof setupEnvSchema>;
+type SetupStepId = SetupEnvironmentStepValue;
 
 export const setupEnvSchema = z
   .object({
@@ -104,16 +131,15 @@ export const setupEnvSchema = z
 export const setupEnvironmentInputSchema = z.object({
   environment: setupEnvSchema,
 });
-const setupStepIdSchema = z.enum(['administrator', 'runtime', 'scheduler', 'security']);
+const setupStepIdSchema = z.enum(setupEnvironmentStepValues);
 export const setupEnvironmentValidationInputSchema = setupEnvironmentInputSchema.extend({
   stepId: setupStepIdSchema.optional(),
 });
-const setupDatabaseDialectSchema = z.enum(['mysql', 'postgres', 'sqlite']);
-const setupCacheStoreSchema = z.enum(['memory', 'redis']);
-const setupFileStorageDriverSchema = z.enum(['local', 'oss']);
+const setupDatabaseDialectSchema = z.enum(setupDatabaseDialectValues);
+const setupCacheStoreSchema = z.enum(setupCacheStoreValues);
+const setupFileStorageDriverSchema = z.enum(setupFileStorageDriverValues);
 
-export type SetupEnvironment = z.infer<typeof setupEnvSchema>;
-type SetupStepId = z.infer<typeof setupStepIdSchema>;
+export const setupEnvironmentKeys = setupEnvSchema.keyof().options;
 
 const profileEnvironmentKeySet = new Set<keyof SetupEnvironment>([
   'EMAIL_SMTP_PROFILES',
@@ -220,762 +246,6 @@ const smsEnvironmentKeys = [
   'SMS_ALICLOUD_PROFILES',
 ] as const satisfies Array<keyof SetupEnvironment>;
 const ssoEnvironmentKeys = ['SSO_ENABLED', 'SSO_PROFILES'] as const satisfies Array<keyof SetupEnvironment>;
-
-export function getSetupEnvironmentDefaults() {
-  return {
-    environment: getDefaultSetupEnvironment(),
-    environmentFileLoaded: hasConfigFile(),
-  };
-}
-
-export async function updateSetupEnvironmentConfig(input: unknown) {
-  const { environment } = setupEnvironmentInputSchema.parse(input);
-  const setupEnvironmentSource = assertValidEnvironment(environment);
-
-  await writeConfigFile(setupEnvironmentSource, {
-    allowLocked: true,
-    generator: 'system settings page',
-  });
-
-  return {
-    restartRequired: true,
-    updated: true,
-  } as const;
-}
-
-export function assertValidEnvironment(environment: SetupEnvironment, options: EnvironmentValidationOptions = {}) {
-  assertRequiredEnvironment(environment, options);
-
-  const environmentSource = toEnvironmentSource(environment, options);
-  const validationMessage = getEnvValidationMessage(environmentSource);
-
-  if (validationMessage) {
-    throw new AppError('SETUP_ENV_INVALID', validationMessage, 400);
-  }
-
-  return environmentSource;
-}
-
-function toEnvironmentSource(
-  environment: SetupEnvironment,
-  options: EnvironmentValidationOptions = {},
-): NodeJS.ProcessEnv {
-  const environmentSource: NodeJS.ProcessEnv = {};
-
-  for (const [key, value] of Object.entries(environment)) {
-    const normalized = value.trim();
-
-    if (normalized) {
-      environmentSource[key] = normalized;
-    }
-  }
-
-  if (options.relaxedSms && environmentSource.SMS_VERIFICATION_SERVICE === 'aliyun') {
-    environmentSource.SMS_VERIFICATION_SERVICE = 'off';
-  }
-
-  return environmentSource;
-}
-
-export function assertValidSetupStepEnvironment(environment: SetupEnvironment, stepId: SetupStepId) {
-  if (stepId === 'administrator') {
-    return;
-  }
-
-  if (stepId === 'runtime') {
-    assertValidRuntimeEnvironment(environment);
-    return;
-  }
-
-  if (stepId === 'scheduler') {
-    assertValidEnvironmentFields(environment, schedulerEnvironmentKeys, schedulerEnvironmentKeys);
-    return;
-  }
-
-  assertValidEnvironmentFields(environment, securityEnvironmentKeys, securityEnvironmentKeys);
-}
-
-function assertValidRuntimeEnvironment(environment: SetupEnvironment) {
-  assertRequiredFields(environment, runtimeEnvironmentKeys);
-  assertHttpOrigin(environment.APP_DOMAIN, 'APP_DOMAIN');
-  assertAllowedValue(environment.NODE_ENV, 'NODE_ENV', ['development', 'test', 'production']);
-  assertAllowedValue(environment.SERVER_TRUST_PROXY, 'SERVER_TRUST_PROXY', ['false', 'true']);
-  assertAllowedValue(environment.SERVER_MULTI_INSTANCE_ENABLED, 'SERVER_MULTI_INSTANCE_ENABLED', ['false', 'true']);
-  parsePositiveInteger(environment.SERVER_PORT, 'SERVER_PORT');
-}
-
-export function assertValidDatabaseEnvironment(environment: SetupEnvironment) {
-  const dialect = setupDatabaseDialectSchema.parse(environment.DATABASE_DIALECT.trim());
-  const requiredFields: Array<keyof SetupEnvironment> =
-    dialect === 'sqlite'
-      ? ['DATABASE_DIALECT', 'DATABASE_STORAGE', 'DATABASE_SYNC']
-      : [
-          'DATABASE_DIALECT',
-          'DATABASE_URL',
-          'DATABASE_SSL',
-          'DATABASE_CONNECT_TIMEOUT_MS',
-          'DATABASE_POOL_MAX',
-          'DATABASE_POOL_MIN',
-          'DATABASE_POOL_ACQUIRE_MS',
-          'DATABASE_POOL_IDLE_MS',
-          'DATABASE_SYNC',
-        ];
-
-  assertValidEnvironmentFields(environment, databaseEnvironmentKeys, requiredFields);
-
-  if (environment.NODE_ENV.trim() === 'production' && environment.DATABASE_SYNC.trim() !== 'off') {
-    throw new AppError('SETUP_ENV_INVALID', 'DATABASE_SYNC must be off when NODE_ENV is production.', 400);
-  }
-
-  if (environment.SERVER_MULTI_INSTANCE_ENABLED.trim() === 'true' && dialect === 'sqlite') {
-    throw new AppError(
-      'SETUP_ENV_INVALID',
-      'DATABASE_DIALECT must be mysql or postgres when SERVER_MULTI_INSTANCE_ENABLED is true.',
-      400,
-    );
-  }
-}
-
-export function assertValidFileStorageEnvironment(environment: SetupEnvironment) {
-  const driver = setupFileStorageDriverSchema.parse(environment.FILE_STORAGE_DRIVER.trim());
-  const requiredFields: Array<keyof SetupEnvironment> =
-    driver === 'local'
-      ? ['FILE_STORAGE_DRIVER', 'FILE_UPLOAD_MAX_BYTES', 'FILE_PUBLIC_BASE_URL', 'FILE_LOCAL_ROOT']
-      : [
-          'FILE_STORAGE_DRIVER',
-          'FILE_UPLOAD_MAX_BYTES',
-          'FILE_OSS_ACCESS_KEY_ID',
-          'FILE_OSS_ACCESS_KEY_SECRET',
-          'FILE_OSS_BUCKET',
-          'FILE_OSS_ENDPOINT',
-          'FILE_OSS_REGION',
-        ];
-
-  return assertValidEnvironmentFields(environment, fileStorageEnvironmentKeys, requiredFields);
-}
-
-export function assertValidLoggingEnvironment(environment: SetupEnvironment) {
-  const requiredFields: Array<keyof SetupEnvironment> = [
-    'LOG_REQUEST_ENABLED',
-    'LOG_TARGETS',
-    'LOG_PENDING_WRITE_MAX',
-    'LOG_WRITE_TIMEOUT_MS',
-  ];
-  const logTargets = parseLogTargets(environment.LOG_TARGETS);
-
-  if (logTargets.includes('local')) {
-    requiredFields.push('LOG_LOCAL_PATH');
-  }
-
-  if (logTargets.includes('sls')) {
-    requiredFields.push(
-      'LOG_SLS_ENDPOINT',
-      'LOG_SLS_PROJECT',
-      'LOG_SLS_LOGSTORE',
-      'LOG_SLS_ACCESS_KEY_ID',
-      'LOG_SLS_ACCESS_KEY_SECRET',
-      'LOG_SLS_TOPIC',
-      'LOG_SLS_SOURCE',
-    );
-  }
-
-  return assertValidEnvironmentFields(environment, loggingEnvironmentKeys, requiredFields);
-}
-
-export function assertValidEmailEnvironment(environment: SetupEnvironment) {
-  const requiredFields: Array<keyof SetupEnvironment> = ['EMAIL_VERIFICATION_SERVICE'];
-
-  if (environment.EMAIL_VERIFICATION_SERVICE.trim() === 'smtp') {
-    requiredFields.push(
-      'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS',
-      'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
-      'EMAIL_SMTP_PROFILES',
-    );
-  }
-
-  return assertValidEnvironmentFields(environment, emailEnvironmentKeys, requiredFields);
-}
-
-export function assertValidSmsEnvironment(environment: SetupEnvironment) {
-  const requiredFields: Array<keyof SetupEnvironment> = ['SMS_VERIFICATION_SERVICE'];
-
-  if (environment.SMS_VERIFICATION_SERVICE.trim() === 'aliyun') {
-    requiredFields.push(
-      'SMS_VERIFICATION_CODE_EXPIRES_IN_MS',
-      'SMS_VERIFICATION_CODE_COOLDOWN_MS',
-      'SMS_ALICLOUD_PROFILES',
-    );
-  }
-
-  return assertValidEnvironmentFields(environment, smsEnvironmentKeys, requiredFields);
-}
-
-export function assertValidSsoEnvironment(environment: SetupEnvironment) {
-  const requiredFields: Array<keyof SetupEnvironment> = ['SSO_ENABLED'];
-
-  if (environment.SSO_ENABLED.trim() === 'true') {
-    requiredFields.push('SSO_PROFILES');
-  }
-
-  return assertValidEnvironmentFields(environment, ssoEnvironmentKeys, requiredFields);
-}
-
-function assertValidEnvironmentFields(
-  environment: SetupEnvironment,
-  keys: readonly (keyof SetupEnvironment)[],
-  requiredKeys: readonly (keyof SetupEnvironment)[],
-) {
-  assertRequiredFields(environment, requiredKeys);
-
-  const environmentSource = toStepEnvironmentSource(environment, keys);
-  const validationMessage = getEnvValidationMessage(environmentSource);
-
-  if (validationMessage) {
-    throw new AppError('SETUP_ENV_INVALID', validationMessage, 400);
-  }
-
-  return environmentSource;
-}
-
-function toStepEnvironmentSource(environment: SetupEnvironment, keys: readonly (keyof SetupEnvironment)[]) {
-  const stepEnvironment: SetupEnvironment = {
-    ...defaultSetupEnvironment,
-    AUTH_TOKEN_SECRET: setupValidationAuthTokenSecret,
-    DATABASE_STORAGE: ':memory:',
-    SERVER_MULTI_INSTANCE_ENABLED: 'false',
-    NODE_ENV: 'development',
-  };
-
-  for (const key of keys) {
-    stepEnvironment[key] = environment[key];
-  }
-
-  return toEnvironmentSource(stepEnvironment);
-}
-
-function assertAllowedValue(value: string, label: string, allowedValues: readonly string[]) {
-  const normalized = value.trim();
-
-  if (!allowedValues.includes(normalized)) {
-    throw new AppError('SETUP_ENV_INVALID', `${label} must be one of: ${allowedValues.join(', ')}.`, 400);
-  }
-}
-
-function assertHttpOrigin(value: string, label: string) {
-  try {
-    const url = new URL(value.trim());
-
-    if (
-      (url.protocol === 'http:' || url.protocol === 'https:') &&
-      !url.username &&
-      !url.password &&
-      url.pathname === '/' &&
-      !url.search &&
-      !url.hash
-    ) {
-      return;
-    }
-  } catch {
-    // Normalize all parsing failures to the setup validation error below.
-  }
-
-  throw new AppError('SETUP_ENV_INVALID', `${label} must be an http:// or https:// origin.`, 400);
-}
-
-export function toDatabaseConfig(environment: SetupEnvironment) {
-  const dialect = setupDatabaseDialectSchema.parse(environment.DATABASE_DIALECT.trim());
-
-  if (dialect === 'sqlite') {
-    assertRequiredFields(environment, ['DATABASE_STORAGE']);
-
-    return {
-      dialect,
-      storage: environment.DATABASE_STORAGE.trim(),
-    };
-  }
-
-  assertRequiredFields(environment, [
-    'DATABASE_URL',
-    'DATABASE_CONNECT_TIMEOUT_MS',
-    'DATABASE_POOL_ACQUIRE_MS',
-    'DATABASE_POOL_IDLE_MS',
-    'DATABASE_POOL_MAX',
-    'DATABASE_POOL_MIN',
-    'DATABASE_SSL',
-  ]);
-
-  return {
-    connectTimeoutMs: parsePositiveInteger(environment.DATABASE_CONNECT_TIMEOUT_MS, 'DATABASE_CONNECT_TIMEOUT_MS'),
-    dialect,
-    pool: {
-      acquire: parsePositiveInteger(environment.DATABASE_POOL_ACQUIRE_MS, 'DATABASE_POOL_ACQUIRE_MS'),
-      idle: parsePositiveInteger(environment.DATABASE_POOL_IDLE_MS, 'DATABASE_POOL_IDLE_MS'),
-      max: parsePositiveInteger(environment.DATABASE_POOL_MAX, 'DATABASE_POOL_MAX'),
-      min: parseNonNegativeInteger(environment.DATABASE_POOL_MIN, 'DATABASE_POOL_MIN'),
-    },
-    ssl: environment.DATABASE_SSL.trim() === 'true',
-    url: environment.DATABASE_URL.trim(),
-  };
-}
-
-export function toCacheConfig(environment: SetupEnvironment) {
-  const store = setupCacheStoreSchema.parse(environment.CACHE_STORE.trim());
-
-  if (store === 'memory') {
-    return {
-      store,
-    } as const;
-  }
-
-  assertRequiredFields(environment, ['CACHE_REDIS_REQUEST_TIMEOUT_MS', 'CACHE_REDIS_URL']);
-
-  return {
-    store,
-    timeoutMs: parsePositiveInteger(environment.CACHE_REDIS_REQUEST_TIMEOUT_MS, 'CACHE_REDIS_REQUEST_TIMEOUT_MS'),
-    url: environment.CACHE_REDIS_URL.trim(),
-  } as const;
-}
-
-export function toFileStorageConfig(environment: SetupEnvironment) {
-  const driver = setupFileStorageDriverSchema.parse(environment.FILE_STORAGE_DRIVER.trim());
-  const environmentConfig = loadEnv(assertValidFileStorageEnvironment(environment));
-
-  if (driver === 'local') {
-    return environmentConfig.fileStorage;
-  }
-
-  if (environmentConfig.fileStorage.driver !== 'oss') {
-    throw new AppError('SETUP_ENV_INVALID', 'OSS file storage configuration is invalid.', 400);
-  }
-
-  return environmentConfig.fileStorage;
-}
-
-export function parseLogTargets(value: string) {
-  return value
-    .split(',')
-    .map((target) => target.trim())
-    .filter(Boolean);
-}
-
-function assertRequiredEnvironment(environment: SetupEnvironment, options: EnvironmentValidationOptions = {}) {
-  assertRequiredFields(environment, [
-    'NODE_ENV',
-    'SERVER_HOST',
-    'SERVER_PORT',
-    'APP_DOMAIN',
-    'APP_CORS_ORIGINS',
-    'SERVER_TRUST_PROXY',
-    'SERVER_MULTI_INSTANCE_ENABLED',
-    'DATABASE_DIALECT',
-    'DATABASE_SYNC',
-    'CACHE_STORE',
-    'FILE_STORAGE_DRIVER',
-    'FILE_UPLOAD_MAX_BYTES',
-    'SCHEDULER_ENABLED',
-    'SCHEDULER_LOCK_TTL_MS',
-    'AUTH_TOKEN_SECRET',
-    'AUTH_ACCESS_TOKEN_TTL_SECONDS',
-    'AUTH_REFRESH_TOKEN_TTL_SECONDS',
-    'AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS',
-    'AUTH_VERIFICATION_MAX_ATTEMPTS',
-    'AUTH_VERIFICATION_SUDO_TTL_SECONDS',
-    'AUTH_PASSKEY_RP_NAME',
-    'AUTH_PASSKEY_REGISTRATION_TTL_SECONDS',
-    'AUTH_PASSKEY_OPERATION_TIMEOUT_MS',
-    'AUTH_TOTP_ISSUER',
-    'AUTH_TOTP_SETUP_TTL_SECONDS',
-    'AUTH_ACCESS_TOKEN_COOKIE_NAME',
-    'AUTH_REFRESH_TOKEN_COOKIE_NAME',
-    'AUTH_COOKIE_SAME_SITE',
-    'AUTH_COOKIE_SECURE',
-    'AUTH_RATE_LIMIT_WINDOW_MS',
-    'AUTH_RATE_LIMIT_MAX',
-    'GLOBAL_RATE_LIMIT_WINDOW_MS',
-    'GLOBAL_RATE_LIMIT_MAX',
-    'LOG_REQUEST_ENABLED',
-    'LOG_TARGETS',
-    'LOG_PENDING_WRITE_MAX',
-    'LOG_WRITE_TIMEOUT_MS',
-    'EMAIL_VERIFICATION_SERVICE',
-    'SMS_VERIFICATION_SERVICE',
-    'SSO_ENABLED',
-  ]);
-
-  if (environment.DATABASE_DIALECT.trim() === 'sqlite') {
-    assertRequiredFields(environment, ['DATABASE_STORAGE']);
-  } else {
-    assertRequiredFields(environment, [
-      'DATABASE_URL',
-      'DATABASE_SSL',
-      'DATABASE_CONNECT_TIMEOUT_MS',
-      'DATABASE_POOL_MAX',
-      'DATABASE_POOL_MIN',
-      'DATABASE_POOL_ACQUIRE_MS',
-      'DATABASE_POOL_IDLE_MS',
-    ]);
-  }
-
-  if (environment.CACHE_STORE.trim() === 'redis') {
-    assertRequiredFields(environment, ['CACHE_REDIS_REQUEST_TIMEOUT_MS', 'CACHE_REDIS_URL']);
-  }
-
-  if (environment.FILE_STORAGE_DRIVER.trim() === 'local') {
-    assertRequiredFields(environment, ['FILE_LOCAL_ROOT', 'FILE_PUBLIC_BASE_URL']);
-  } else {
-    assertRequiredFields(environment, [
-      'FILE_OSS_ACCESS_KEY_ID',
-      'FILE_OSS_ACCESS_KEY_SECRET',
-      'FILE_OSS_BUCKET',
-      'FILE_OSS_ENDPOINT',
-      'FILE_OSS_REGION',
-    ]);
-  }
-
-  const logTargets = parseLogTargets(environment.LOG_TARGETS);
-
-  if (logTargets.includes('local')) {
-    assertRequiredFields(environment, ['LOG_LOCAL_PATH']);
-  }
-
-  if (logTargets.includes('sls')) {
-    assertRequiredFields(environment, [
-      'LOG_SLS_ENDPOINT',
-      'LOG_SLS_PROJECT',
-      'LOG_SLS_LOGSTORE',
-      'LOG_SLS_ACCESS_KEY_ID',
-      'LOG_SLS_ACCESS_KEY_SECRET',
-      'LOG_SLS_TOPIC',
-      'LOG_SLS_SOURCE',
-    ]);
-  }
-
-  if (environment.EMAIL_VERIFICATION_SERVICE.trim() === 'smtp') {
-    assertRequiredFields(environment, [
-      'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS',
-      'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
-      'EMAIL_SMTP_PROFILES',
-    ]);
-  }
-
-  if (!options.relaxedSms && environment.SMS_VERIFICATION_SERVICE.trim() === 'aliyun') {
-    assertRequiredFields(environment, [
-      'SMS_VERIFICATION_CODE_EXPIRES_IN_MS',
-      'SMS_VERIFICATION_CODE_COOLDOWN_MS',
-      'SMS_ALICLOUD_PROFILES',
-    ]);
-  }
-
-  if (environment.SSO_ENABLED.trim() === 'true') {
-    assertRequiredFields(environment, ['SSO_PROFILES']);
-  }
-}
-
-function assertRequiredFields(environment: SetupEnvironment, keys: readonly (keyof SetupEnvironment)[]) {
-  const missing = keys.filter((key) => !environment[key].trim());
-
-  if (missing.length > 0) {
-    throw new AppError('SETUP_ENV_REQUIRED', `Required setup field(s) are empty: ${missing.join(', ')}.`, 400);
-  }
-}
-
-function parsePositiveInteger(value: string, label: string) {
-  const parsed = Number(value.trim());
-
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new AppError('SETUP_ENV_INVALID', `${label} must be a positive integer.`, 400);
-  }
-
-  return parsed;
-}
-
-function parseNonNegativeInteger(value: string, label: string) {
-  const parsed = Number(value.trim());
-
-  if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new AppError('SETUP_ENV_INVALID', `${label} must be a non-negative integer.`, 400);
-  }
-
-  return parsed;
-}
-
-export async function assertConfigFileWritable(setupEnvironmentSource: NodeJS.ProcessEnv) {
-  const configFilePath = getConfigFilePath();
-  const temporaryConfigFilePath = getTemporaryConfigFilePath(configFilePath);
-
-  try {
-    if (hasConfigFile()) {
-      const configFileStats = await stat(configFilePath);
-
-      if (!configFileStats.isFile()) {
-        throw new AppError('SETUP_CONFIG_WRITE_FAILED', 'Configuration file path must be a writable file.', 500);
-      }
-
-      await access(configFilePath, constants.W_OK);
-    }
-
-    await writeFile(temporaryConfigFilePath, renderConfigFile(setupEnvironmentSource), {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600,
-    });
-  } catch (error) {
-    if (error instanceof AppError) {
-      throw error;
-    }
-
-    throw new AppError('SETUP_CONFIG_WRITE_FAILED', 'Configuration file cannot be written.', 500);
-  } finally {
-    await unlink(temporaryConfigFilePath).catch(() => undefined);
-  }
-}
-
-export async function writeConfigFile(setupEnvironmentSource: NodeJS.ProcessEnv, options: ConfigFileWriteOptions = {}) {
-  if (!options.allowLocked && isSetupLocked()) {
-    throw new AppError('SETUP_LOCKED', setupLockedMessage, 403);
-  }
-
-  const configFilePath = getConfigFilePath();
-  const temporaryConfigFilePath = getTemporaryConfigFilePath(configFilePath);
-
-  try {
-    await writeFile(temporaryConfigFilePath, renderConfigFile(setupEnvironmentSource, options.generator), {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600,
-    });
-    if (!options.allowLocked && isSetupLocked()) {
-      throw new AppError('SETUP_LOCKED', setupLockedMessage, 403);
-    }
-    await rename(temporaryConfigFilePath, configFilePath);
-  } catch (error) {
-    await unlink(temporaryConfigFilePath).catch(() => undefined);
-    throw error;
-  }
-}
-
-function getTemporaryConfigFilePath(configFilePath: string) {
-  return `${configFilePath}.${process.pid}.${randomUUID()}.tmp`;
-}
-
-function renderConfigFile(setupEnvironmentSource: NodeJS.ProcessEnv, generator = 'setup process') {
-  const configFileLines = [
-    `# Generated by the ${generator}.`,
-    '# Do not commit this file.',
-    '',
-    '# Setup',
-    '# Setup lock state.',
-    '# Missing or false enables setup; true locks setup.',
-    'SETUP_LOCKED = true',
-    '',
-  ];
-  const profileEntries: Array<[keyof SetupEnvironment, string]> = [];
-
-  for (const environmentGroup of envGroups) {
-    configFileLines.push(`# ${environmentGroup.name}`);
-
-    for (const environmentKey of environmentGroup.keys) {
-      const environmentValue = setupEnvironmentSource[environmentKey];
-
-      if (environmentValue !== undefined) {
-        if (profileEnvironmentKeySet.has(environmentKey)) {
-          profileEntries.push([environmentKey, environmentValue]);
-        } else if (emptyOptionalConfigKeySet.has(environmentKey) && environmentValue.trim() === '') {
-          continue;
-        } else {
-          pushConfigCommentLines(configFileLines, environmentKey);
-          configFileLines.push(`${environmentKey} = ${formatTomlValue(environmentValue)}`);
-        }
-      }
-    }
-
-    configFileLines.push('');
-  }
-
-  const renderedProfiles = renderProfileTables(profileEntries);
-
-  if (renderedProfiles.length > 0) {
-    configFileLines.push('# Profile Arrays', ...renderedProfiles, '');
-  }
-
-  return `${configFileLines.join('\n').trimEnd()}\n`;
-}
-
-function renderProfileTables(profileEntries: Array<[keyof SetupEnvironment, string]>) {
-  const lines: string[] = [];
-
-  for (const [environmentKey, environmentValue] of profileEntries) {
-    const profiles = parseProfileEnvironmentValue(environmentKey, environmentValue);
-
-    if (profiles.length > 0) {
-      pushConfigCommentLines(lines, environmentKey);
-    }
-
-    for (const profile of profiles) {
-      lines.push(`[[${environmentKey}]]`);
-
-      for (const [key, value] of Object.entries(profile)) {
-        lines.push(`${key} = ${formatTomlValue(value)}`);
-      }
-
-      lines.push('');
-    }
-  }
-
-  return lines;
-}
-
-function pushConfigCommentLines(lines: string[], environmentKey: keyof SetupEnvironment) {
-  const comments = setupConfigComments[environmentKey];
-
-  if (comments) {
-    lines.push(...comments.map((comment) => `# ${comment}`));
-  }
-}
-
-function parseProfileEnvironmentValue(environmentKey: keyof SetupEnvironment, value: string) {
-  try {
-    const parsed = JSON.parse(value);
-
-    if (Array.isArray(parsed)) {
-      return parsed.filter((profile): profile is Record<string, unknown> =>
-        Boolean(profile && typeof profile === 'object'),
-      );
-    }
-  } catch {
-    throw new AppError('SETUP_ENV_INVALID', `${environmentKey} must be a JSON array.`, 400);
-  }
-
-  throw new AppError('SETUP_ENV_INVALID', `${environmentKey} must be a JSON array.`, 400);
-}
-
-function formatTomlValue(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(formatTomlValue).join(', ')}]`;
-  }
-
-  if (typeof value === 'boolean') {
-    return value ? 'true' : 'false';
-  }
-
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return String(value);
-  }
-
-  if (value === undefined || value === null) {
-    return '""';
-  }
-
-  return JSON.stringify(String(value));
-}
-
-function getDefaultSetupEnvironment() {
-  const setupEnvironment: SetupEnvironment = {
-    ...defaultSetupEnvironment,
-    ...getExistingSetupEnvironment(),
-  };
-
-  if (!setupEnvironment.AUTH_TOKEN_SECRET.trim()) {
-    setupEnvironment.AUTH_TOKEN_SECRET = generateSecret();
-  }
-
-  return setupEnvironment;
-}
-
-function getExistingSetupEnvironment() {
-  const environmentFileSource = loadConfigFileSource();
-  const existingSetupEnvironment: Partial<SetupEnvironment> = {};
-
-  for (const environmentKey of Object.keys(defaultSetupEnvironment) as Array<keyof SetupEnvironment>) {
-    const environmentValue = environmentFileSource[environmentKey];
-
-    if (environmentValue !== undefined) {
-      existingSetupEnvironment[environmentKey] = environmentValue;
-    }
-  }
-
-  return existingSetupEnvironment;
-}
-
-function generateSecret() {
-  return randomBytes(48).toString('base64url');
-}
-
-const defaultSetupEnvironment = {
-  NODE_ENV: 'development',
-  SERVER_HOST: '0.0.0.0',
-  SERVER_PORT: '3000',
-  APP_DOMAIN: 'http://localhost:8011',
-  APP_CORS_ORIGINS: 'http://localhost:8011',
-  SERVER_TRUST_PROXY: 'false',
-  SERVER_MULTI_INSTANCE_ENABLED: 'false',
-  DATABASE_DIALECT: 'sqlite',
-  DATABASE_STORAGE: './data/database.sqlite',
-  DATABASE_URL: '',
-  DATABASE_SSL: 'false',
-  DATABASE_CONNECT_TIMEOUT_MS: '10000',
-  DATABASE_POOL_MAX: '10',
-  DATABASE_POOL_MIN: '0',
-  DATABASE_POOL_ACQUIRE_MS: '30000',
-  DATABASE_POOL_IDLE_MS: '10000',
-  DATABASE_SYNC: 'off',
-  CACHE_STORE: 'memory',
-  CACHE_REDIS_URL: 'redis://localhost:6379/0',
-  CACHE_REDIS_REQUEST_TIMEOUT_MS: '10000',
-  FILE_STORAGE_DRIVER: 'local',
-  FILE_UPLOAD_MAX_BYTES: '2097152',
-  FILE_PUBLIC_BASE_URL: '/uploads',
-  FILE_LOCAL_ROOT: './data/uploads',
-  FILE_OSS_ACCESS_KEY_ID: '',
-  FILE_OSS_ACCESS_KEY_SECRET: '',
-  FILE_OSS_BUCKET: '',
-  FILE_OSS_ENDPOINT: '',
-  FILE_OSS_REGION: '',
-  FILE_OSS_PUBLIC_BASE_URL: '',
-  SCHEDULER_ENABLED: 'true',
-  SCHEDULER_LOCK_TTL_MS: '300000',
-  AUTH_TOKEN_SECRET: '',
-  AUTH_ACCESS_TOKEN_TTL_SECONDS: '900',
-  AUTH_REFRESH_TOKEN_TTL_SECONDS: '2592000',
-  AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS: '300',
-  AUTH_VERIFICATION_MAX_ATTEMPTS: '5',
-  AUTH_VERIFICATION_SUDO_TTL_SECONDS: '900',
-  AUTH_PASSKEY_RP_NAME: 'Tilty Scaffold',
-  AUTH_PASSKEY_REGISTRATION_TTL_SECONDS: '300',
-  AUTH_PASSKEY_OPERATION_TIMEOUT_MS: '60000',
-  AUTH_TOTP_ISSUER: 'Tilty Scaffold',
-  AUTH_TOTP_SETUP_TTL_SECONDS: '600',
-  AUTH_ACCESS_TOKEN_COOKIE_NAME: 'tilty_scaffold_access_token',
-  AUTH_REFRESH_TOKEN_COOKIE_NAME: 'tilty_scaffold_refresh_token',
-  AUTH_COOKIE_SAME_SITE: 'lax',
-  AUTH_COOKIE_SECURE: 'auto',
-  AUTH_RATE_LIMIT_WINDOW_MS: '60000',
-  AUTH_RATE_LIMIT_MAX: '10',
-  GLOBAL_RATE_LIMIT_WINDOW_MS: '60000',
-  GLOBAL_RATE_LIMIT_MAX: '1000',
-  LOG_REQUEST_ENABLED: 'true',
-  LOG_TARGETS: 'console',
-  LOG_PENDING_WRITE_MAX: '1000',
-  LOG_WRITE_TIMEOUT_MS: '5000',
-  LOG_LOCAL_PATH: './logs/backend.log',
-  LOG_SLS_ENDPOINT: '',
-  LOG_SLS_PROJECT: '',
-  LOG_SLS_LOGSTORE: '',
-  LOG_SLS_ACCESS_KEY_ID: '',
-  LOG_SLS_ACCESS_KEY_SECRET: '',
-  LOG_SLS_TOPIC: 'tilty-scaffold',
-  LOG_SLS_SOURCE: 'backend',
-  EMAIL_VERIFICATION_SERVICE: 'off',
-  EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS: '600000',
-  EMAIL_VERIFICATION_CODE_COOLDOWN_MS: '60000',
-  EMAIL_SMTP_PROFILES: '[]',
-  SMS_VERIFICATION_SERVICE: 'off',
-  SMS_VERIFICATION_CODE_EXPIRES_IN_MS: '600000',
-  SMS_VERIFICATION_CODE_COOLDOWN_MS: '60000',
-  SMS_ALICLOUD_PROFILES: '[]',
-  SSO_ENABLED: 'false',
-  SSO_PROFILES: '[]',
-} satisfies SetupEnvironment;
 
 const envGroups = [
   {
@@ -1192,3 +462,707 @@ const setupConfigComments: Partial<Record<keyof SetupEnvironment, string[]>> = {
     'Profile IDs must be unique and are used for account binding.',
   ],
 };
+
+export function getSetupEnvironmentDefaults() {
+  return {
+    environment: getDefaultSetupEnvironment(),
+    environmentFileLoaded: hasConfigFile(),
+  };
+}
+
+export async function updateSetupEnvironmentConfig(input: unknown) {
+  const { environment } = setupEnvironmentInputSchema.parse(input);
+  const setupEnvironmentSource = assertValidEnvironment(environment);
+
+  await writeConfigFile(setupEnvironmentSource, {
+    allowLocked: true,
+    generator: 'system settings page',
+  });
+
+  return {
+    restartRequired: true,
+    updated: true,
+  } as const;
+}
+
+export function assertValidEnvironment(environment: SetupEnvironment, options: EnvironmentValidationOptions = {}) {
+  assertRequiredEnvironment(environment, options);
+
+  const environmentSource = toEnvironmentSource(environment, options);
+  const validationMessage = getEnvValidationMessage(environmentSource);
+
+  if (validationMessage) {
+    throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400, { reason: validationMessage });
+  }
+
+  return environmentSource;
+}
+
+function toEnvironmentSource(
+  environment: SetupEnvironment,
+  options: EnvironmentValidationOptions = {},
+): NodeJS.ProcessEnv {
+  const environmentSource: NodeJS.ProcessEnv = {};
+
+  for (const [key, value] of Object.entries(environment)) {
+    const normalized = value.trim();
+
+    if (normalized) {
+      environmentSource[key] = normalized;
+    }
+  }
+
+  if (options.relaxedSms && environmentSource.SMS_VERIFICATION_SERVICE === SetupSmsVerificationService.Aliyun) {
+    environmentSource.SMS_VERIFICATION_SERVICE = SetupSmsVerificationService.Off;
+  }
+
+  return environmentSource;
+}
+
+export function assertValidSetupStepEnvironment(environment: SetupEnvironment, stepId: SetupStepId) {
+  if (stepId === SetupEnvironmentStep.Administrator) {
+    return;
+  }
+
+  if (stepId === SetupEnvironmentStep.Runtime) {
+    assertValidRuntimeEnvironment(environment);
+    return;
+  }
+
+  if (stepId === SetupEnvironmentStep.Scheduler) {
+    assertValidEnvironmentFields(environment, schedulerEnvironmentKeys, schedulerEnvironmentKeys);
+    return;
+  }
+
+  assertValidEnvironmentFields(environment, securityEnvironmentKeys, securityEnvironmentKeys);
+}
+
+function assertValidRuntimeEnvironment(environment: SetupEnvironment) {
+  assertRequiredFields(environment, runtimeEnvironmentKeys);
+  assertHttpOrigin(environment.APP_DOMAIN, 'APP_DOMAIN');
+  assertAllowedValue(environment.NODE_ENV, 'NODE_ENV', setupNodeEnvValues);
+  assertAllowedValue(environment.SERVER_TRUST_PROXY, 'SERVER_TRUST_PROXY', setupBooleanValues);
+  assertAllowedValue(environment.SERVER_MULTI_INSTANCE_ENABLED, 'SERVER_MULTI_INSTANCE_ENABLED', setupBooleanValues);
+  parsePositiveInteger(environment.SERVER_PORT, 'SERVER_PORT');
+}
+
+export function assertValidDatabaseEnvironment(environment: SetupEnvironment) {
+  const dialect = setupDatabaseDialectSchema.parse(environment.DATABASE_DIALECT.trim());
+  const requiredFields: Array<keyof SetupEnvironment> =
+    dialect === SetupDatabaseDialect.Sqlite
+      ? ['DATABASE_DIALECT', 'DATABASE_STORAGE', 'DATABASE_SYNC']
+      : [
+          'DATABASE_DIALECT',
+          'DATABASE_URL',
+          'DATABASE_SSL',
+          'DATABASE_CONNECT_TIMEOUT_MS',
+          'DATABASE_POOL_MAX',
+          'DATABASE_POOL_MIN',
+          'DATABASE_POOL_ACQUIRE_MS',
+          'DATABASE_POOL_IDLE_MS',
+          'DATABASE_SYNC',
+        ];
+
+  assertValidEnvironmentFields(environment, databaseEnvironmentKeys, requiredFields);
+
+  if (
+    environment.NODE_ENV.trim() === SetupNodeEnv.Production &&
+    environment.DATABASE_SYNC.trim() !== SetupDatabaseSync.Off
+  ) {
+    throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400);
+  }
+
+  if (
+    environment.SERVER_MULTI_INSTANCE_ENABLED.trim() === SetupBoolean.True &&
+    dialect === SetupDatabaseDialect.Sqlite
+  ) {
+    throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400, {
+      reason: 'DATABASE_DIALECT must be mysql or postgres when SERVER_MULTI_INSTANCE_ENABLED is true.',
+    });
+  }
+}
+
+export function assertValidFileStorageEnvironment(environment: SetupEnvironment) {
+  const driver = setupFileStorageDriverSchema.parse(environment.FILE_STORAGE_DRIVER.trim());
+  const requiredFields: Array<keyof SetupEnvironment> =
+    driver === SetupFileStorageDriver.Local
+      ? ['FILE_STORAGE_DRIVER', 'FILE_UPLOAD_MAX_BYTES', 'FILE_PUBLIC_BASE_URL', 'FILE_LOCAL_ROOT']
+      : [
+          'FILE_STORAGE_DRIVER',
+          'FILE_UPLOAD_MAX_BYTES',
+          'FILE_OSS_ACCESS_KEY_ID',
+          'FILE_OSS_ACCESS_KEY_SECRET',
+          'FILE_OSS_BUCKET',
+          'FILE_OSS_ENDPOINT',
+          'FILE_OSS_REGION',
+        ];
+
+  return assertValidEnvironmentFields(environment, fileStorageEnvironmentKeys, requiredFields);
+}
+
+export function assertValidLoggingEnvironment(environment: SetupEnvironment) {
+  const requiredFields: Array<keyof SetupEnvironment> = [
+    'LOG_REQUEST_ENABLED',
+    'LOG_TARGETS',
+    'LOG_PENDING_WRITE_MAX',
+    'LOG_WRITE_TIMEOUT_MS',
+  ];
+  const logTargets = parseLogTargets(environment.LOG_TARGETS);
+
+  if (logTargets.includes(SetupLogTarget.Local)) {
+    requiredFields.push('LOG_LOCAL_PATH');
+  }
+
+  if (logTargets.includes(SetupLogTarget.Sls)) {
+    requiredFields.push(
+      'LOG_SLS_ENDPOINT',
+      'LOG_SLS_PROJECT',
+      'LOG_SLS_LOGSTORE',
+      'LOG_SLS_ACCESS_KEY_ID',
+      'LOG_SLS_ACCESS_KEY_SECRET',
+      'LOG_SLS_TOPIC',
+      'LOG_SLS_SOURCE',
+    );
+  }
+
+  return assertValidEnvironmentFields(environment, loggingEnvironmentKeys, requiredFields);
+}
+
+export function assertValidEmailEnvironment(environment: SetupEnvironment) {
+  return assertValidConditionalEnvironmentFields(
+    environment,
+    emailEnvironmentKeys,
+    ['EMAIL_VERIFICATION_SERVICE'],
+    [
+      {
+        isEnabled: (currentEnvironment) =>
+          currentEnvironment.EMAIL_VERIFICATION_SERVICE.trim() === SetupEmailVerificationService.Smtp,
+        keys: ['EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS', 'EMAIL_VERIFICATION_CODE_COOLDOWN_MS', 'EMAIL_SMTP_PROFILES'],
+      },
+    ],
+  );
+}
+
+export function assertValidSmsEnvironment(environment: SetupEnvironment) {
+  return assertValidConditionalEnvironmentFields(
+    environment,
+    smsEnvironmentKeys,
+    ['SMS_VERIFICATION_SERVICE'],
+    [
+      {
+        isEnabled: (currentEnvironment) =>
+          currentEnvironment.SMS_VERIFICATION_SERVICE.trim() === SetupSmsVerificationService.Aliyun,
+        keys: ['SMS_VERIFICATION_CODE_EXPIRES_IN_MS', 'SMS_VERIFICATION_CODE_COOLDOWN_MS', 'SMS_ALICLOUD_PROFILES'],
+      },
+    ],
+  );
+}
+
+export function assertValidSsoEnvironment(environment: SetupEnvironment) {
+  return assertValidConditionalEnvironmentFields(
+    environment,
+    ssoEnvironmentKeys,
+    ['SSO_ENABLED'],
+    [
+      {
+        isEnabled: (currentEnvironment) => currentEnvironment.SSO_ENABLED.trim() === SetupBoolean.True,
+        keys: ['SSO_PROFILES'],
+      },
+    ],
+  );
+}
+
+function assertValidConditionalEnvironmentFields(
+  environment: SetupEnvironment,
+  keys: readonly (keyof SetupEnvironment)[],
+  baseRequiredKeys: readonly (keyof SetupEnvironment)[],
+  conditionalRequiredFields: readonly ConditionalRequiredEnvironmentFields[],
+) {
+  const requiredKeys = [...baseRequiredKeys];
+
+  for (const conditionalFields of conditionalRequiredFields) {
+    if (conditionalFields.isEnabled(environment)) {
+      requiredKeys.push(...conditionalFields.keys);
+    }
+  }
+
+  return assertValidEnvironmentFields(environment, keys, requiredKeys);
+}
+
+function assertValidEnvironmentFields(
+  environment: SetupEnvironment,
+  keys: readonly (keyof SetupEnvironment)[],
+  requiredKeys: readonly (keyof SetupEnvironment)[],
+) {
+  assertRequiredFields(environment, requiredKeys);
+
+  const environmentSource = toStepEnvironmentSource(environment, keys);
+  const validationMessage = getEnvValidationMessage(environmentSource);
+
+  if (validationMessage) {
+    throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400, { reason: validationMessage });
+  }
+
+  return environmentSource;
+}
+
+function toStepEnvironmentSource(environment: SetupEnvironment, keys: readonly (keyof SetupEnvironment)[]) {
+  const stepEnvironment: SetupEnvironment = {
+    ...defaultSetupEnvironment,
+    AUTH_TOKEN_SECRET: setupValidationAuthTokenSecret,
+    DATABASE_STORAGE: ':memory:',
+    SERVER_MULTI_INSTANCE_ENABLED: SetupBoolean.False,
+    NODE_ENV: SetupNodeEnv.Development,
+  };
+
+  for (const key of keys) {
+    stepEnvironment[key] = environment[key];
+  }
+
+  return toEnvironmentSource(stepEnvironment);
+}
+
+function assertAllowedValue(value: string, label: string, allowedValues: readonly string[]) {
+  const normalized = value.trim();
+
+  if (!allowedValues.includes(normalized)) {
+    throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400, { allowedValues, field: label });
+  }
+}
+
+function assertHttpOrigin(value: string, label: string) {
+  try {
+    const url = new URL(value.trim());
+
+    if (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      !url.username &&
+      !url.password &&
+      url.pathname === '/' &&
+      !url.search &&
+      !url.hash
+    ) {
+      return;
+    }
+  } catch {
+    // Normalize all parsing failures to the setup validation error below.
+  }
+
+  throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400, { field: label });
+}
+
+export function toDatabaseConfig(environment: SetupEnvironment) {
+  const dialect = setupDatabaseDialectSchema.parse(environment.DATABASE_DIALECT.trim());
+
+  if (dialect === SetupDatabaseDialect.Sqlite) {
+    assertRequiredFields(environment, ['DATABASE_STORAGE']);
+
+    return {
+      dialect,
+      storage: environment.DATABASE_STORAGE.trim(),
+    };
+  }
+
+  assertRequiredFields(environment, [
+    'DATABASE_URL',
+    'DATABASE_CONNECT_TIMEOUT_MS',
+    'DATABASE_POOL_ACQUIRE_MS',
+    'DATABASE_POOL_IDLE_MS',
+    'DATABASE_POOL_MAX',
+    'DATABASE_POOL_MIN',
+    'DATABASE_SSL',
+  ]);
+
+  return {
+    connectTimeoutMs: parsePositiveInteger(environment.DATABASE_CONNECT_TIMEOUT_MS, 'DATABASE_CONNECT_TIMEOUT_MS'),
+    dialect,
+    pool: {
+      acquire: parsePositiveInteger(environment.DATABASE_POOL_ACQUIRE_MS, 'DATABASE_POOL_ACQUIRE_MS'),
+      idle: parsePositiveInteger(environment.DATABASE_POOL_IDLE_MS, 'DATABASE_POOL_IDLE_MS'),
+      max: parsePositiveInteger(environment.DATABASE_POOL_MAX, 'DATABASE_POOL_MAX'),
+      min: parseNonNegativeInteger(environment.DATABASE_POOL_MIN, 'DATABASE_POOL_MIN'),
+    },
+    ssl: environment.DATABASE_SSL.trim() === SetupBoolean.True,
+    url: environment.DATABASE_URL.trim(),
+  };
+}
+
+export function toCacheConfig(environment: SetupEnvironment) {
+  const store = setupCacheStoreSchema.parse(environment.CACHE_STORE.trim());
+
+  if (store === SetupCacheStore.Memory) {
+    return {
+      store,
+    } as const;
+  }
+
+  assertRequiredFields(environment, ['CACHE_REDIS_REQUEST_TIMEOUT_MS', 'CACHE_REDIS_URL']);
+
+  return {
+    store,
+    timeoutMs: parsePositiveInteger(environment.CACHE_REDIS_REQUEST_TIMEOUT_MS, 'CACHE_REDIS_REQUEST_TIMEOUT_MS'),
+    url: environment.CACHE_REDIS_URL.trim(),
+  } as const;
+}
+
+export function toFileStorageConfig(environment: SetupEnvironment) {
+  const driver = setupFileStorageDriverSchema.parse(environment.FILE_STORAGE_DRIVER.trim());
+  const environmentConfig = loadEnv(assertValidFileStorageEnvironment(environment));
+
+  if (driver === SetupFileStorageDriver.Local) {
+    return environmentConfig.fileStorage;
+  }
+
+  if (environmentConfig.fileStorage.driver !== SetupFileStorageDriver.Oss) {
+    throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400);
+  }
+
+  return environmentConfig.fileStorage;
+}
+
+export function parseLogTargets(value: string) {
+  return parseSeparatedValues(value, ',');
+}
+
+function assertRequiredEnvironment(environment: SetupEnvironment, options: EnvironmentValidationOptions = {}) {
+  assertRequiredFields(environment, [
+    'NODE_ENV',
+    'SERVER_HOST',
+    'SERVER_PORT',
+    'APP_DOMAIN',
+    'APP_CORS_ORIGINS',
+    'SERVER_TRUST_PROXY',
+    'SERVER_MULTI_INSTANCE_ENABLED',
+    'DATABASE_DIALECT',
+    'DATABASE_SYNC',
+    'CACHE_STORE',
+    'FILE_STORAGE_DRIVER',
+    'FILE_UPLOAD_MAX_BYTES',
+    'SCHEDULER_ENABLED',
+    'SCHEDULER_LOCK_TTL_MS',
+    'AUTH_TOKEN_SECRET',
+    'AUTH_ACCESS_TOKEN_TTL_SECONDS',
+    'AUTH_REFRESH_TOKEN_TTL_SECONDS',
+    'AUTH_VERIFICATION_CHALLENGE_TTL_SECONDS',
+    'AUTH_VERIFICATION_MAX_ATTEMPTS',
+    'AUTH_VERIFICATION_SUDO_TTL_SECONDS',
+    'AUTH_PASSKEY_RP_NAME',
+    'AUTH_PASSKEY_REGISTRATION_TTL_SECONDS',
+    'AUTH_PASSKEY_OPERATION_TIMEOUT_MS',
+    'AUTH_TOTP_ISSUER',
+    'AUTH_TOTP_SETUP_TTL_SECONDS',
+    'AUTH_ACCESS_TOKEN_COOKIE_NAME',
+    'AUTH_REFRESH_TOKEN_COOKIE_NAME',
+    'AUTH_COOKIE_SAME_SITE',
+    'AUTH_COOKIE_SECURE',
+    'AUTH_RATE_LIMIT_WINDOW_MS',
+    'AUTH_RATE_LIMIT_MAX',
+    'GLOBAL_RATE_LIMIT_WINDOW_MS',
+    'GLOBAL_RATE_LIMIT_MAX',
+    'LOG_REQUEST_ENABLED',
+    'LOG_TARGETS',
+    'LOG_PENDING_WRITE_MAX',
+    'LOG_WRITE_TIMEOUT_MS',
+    'EMAIL_VERIFICATION_SERVICE',
+    'SMS_VERIFICATION_SERVICE',
+    'SSO_ENABLED',
+  ]);
+
+  if (environment.DATABASE_DIALECT.trim() === SetupDatabaseDialect.Sqlite) {
+    assertRequiredFields(environment, ['DATABASE_STORAGE']);
+  } else {
+    assertRequiredFields(environment, [
+      'DATABASE_URL',
+      'DATABASE_SSL',
+      'DATABASE_CONNECT_TIMEOUT_MS',
+      'DATABASE_POOL_MAX',
+      'DATABASE_POOL_MIN',
+      'DATABASE_POOL_ACQUIRE_MS',
+      'DATABASE_POOL_IDLE_MS',
+    ]);
+  }
+
+  if (environment.CACHE_STORE.trim() === SetupCacheStore.Redis) {
+    assertRequiredFields(environment, ['CACHE_REDIS_REQUEST_TIMEOUT_MS', 'CACHE_REDIS_URL']);
+  }
+
+  if (environment.FILE_STORAGE_DRIVER.trim() === SetupFileStorageDriver.Local) {
+    assertRequiredFields(environment, ['FILE_LOCAL_ROOT', 'FILE_PUBLIC_BASE_URL']);
+  } else {
+    assertRequiredFields(environment, [
+      'FILE_OSS_ACCESS_KEY_ID',
+      'FILE_OSS_ACCESS_KEY_SECRET',
+      'FILE_OSS_BUCKET',
+      'FILE_OSS_ENDPOINT',
+      'FILE_OSS_REGION',
+    ]);
+  }
+
+  const logTargets = parseLogTargets(environment.LOG_TARGETS);
+
+  if (logTargets.includes(SetupLogTarget.Local)) {
+    assertRequiredFields(environment, ['LOG_LOCAL_PATH']);
+  }
+
+  if (logTargets.includes(SetupLogTarget.Sls)) {
+    assertRequiredFields(environment, [
+      'LOG_SLS_ENDPOINT',
+      'LOG_SLS_PROJECT',
+      'LOG_SLS_LOGSTORE',
+      'LOG_SLS_ACCESS_KEY_ID',
+      'LOG_SLS_ACCESS_KEY_SECRET',
+      'LOG_SLS_TOPIC',
+      'LOG_SLS_SOURCE',
+    ]);
+  }
+
+  if (environment.EMAIL_VERIFICATION_SERVICE.trim() === SetupEmailVerificationService.Smtp) {
+    assertRequiredFields(environment, [
+      'EMAIL_VERIFICATION_CODE_EXPIRES_IN_MS',
+      'EMAIL_VERIFICATION_CODE_COOLDOWN_MS',
+      'EMAIL_SMTP_PROFILES',
+    ]);
+  }
+
+  if (!options.relaxedSms && environment.SMS_VERIFICATION_SERVICE.trim() === SetupSmsVerificationService.Aliyun) {
+    assertRequiredFields(environment, [
+      'SMS_VERIFICATION_CODE_EXPIRES_IN_MS',
+      'SMS_VERIFICATION_CODE_COOLDOWN_MS',
+      'SMS_ALICLOUD_PROFILES',
+    ]);
+  }
+
+  if (environment.SSO_ENABLED.trim() === SetupBoolean.True) {
+    assertRequiredFields(environment, ['SSO_PROFILES']);
+  }
+}
+
+function assertRequiredFields(environment: SetupEnvironment, keys: readonly (keyof SetupEnvironment)[]) {
+  const missing = keys.filter((key) => !environment[key].trim());
+
+  if (missing.length > 0) {
+    throw new AppError('SETUP_ENV_REQUIRED', 'error.SETUP_ENV_REQUIRED', 400, { missing });
+  }
+}
+
+function parsePositiveInteger(value: string, label: string) {
+  const parsed = Number(value.trim());
+
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400, { field: label });
+  }
+
+  return parsed;
+}
+
+function parseNonNegativeInteger(value: string, label: string) {
+  const parsed = Number(value.trim());
+
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400, { field: label });
+  }
+
+  return parsed;
+}
+
+export async function assertConfigFileWritable(setupEnvironmentSource: NodeJS.ProcessEnv) {
+  const configFilePath = getConfigFilePath();
+  const temporaryConfigFilePath = getTemporaryConfigFilePath(configFilePath);
+
+  try {
+    if (hasConfigFile()) {
+      const configFileStats = await stat(configFilePath);
+
+      if (!configFileStats.isFile()) {
+        throw new AppError('SETUP_CONFIG_WRITE_FAILED', 'error.SETUP_CONFIG_WRITE_FAILED', 500);
+      }
+
+      await access(configFilePath, constants.W_OK);
+    }
+
+    await writeFile(temporaryConfigFilePath, renderConfigFile(setupEnvironmentSource), {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    throw new AppError('SETUP_CONFIG_WRITE_FAILED', 'error.SETUP_CONFIG_WRITE_FAILED', 500);
+  } finally {
+    await unlink(temporaryConfigFilePath).catch(() => undefined);
+  }
+}
+
+export async function writeConfigFile(setupEnvironmentSource: NodeJS.ProcessEnv, options: ConfigFileWriteOptions = {}) {
+  if (!options.allowLocked && isSetupLocked()) {
+    throw new AppError('SETUP_LOCKED', 'error.SETUP_LOCKED', 403);
+  }
+
+  const configFilePath = getConfigFilePath();
+  const temporaryConfigFilePath = getTemporaryConfigFilePath(configFilePath);
+
+  try {
+    await writeFile(temporaryConfigFilePath, renderConfigFile(setupEnvironmentSource, options.generator), {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    if (!options.allowLocked && isSetupLocked()) {
+      throw new AppError('SETUP_LOCKED', 'error.SETUP_LOCKED', 403);
+    }
+    await rename(temporaryConfigFilePath, configFilePath);
+  } catch (error) {
+    await unlink(temporaryConfigFilePath).catch(() => undefined);
+    throw error;
+  }
+}
+
+function getTemporaryConfigFilePath(configFilePath: string) {
+  return `${configFilePath}.${process.pid}.${randomUUID()}.tmp`;
+}
+
+function renderConfigFile(setupEnvironmentSource: NodeJS.ProcessEnv, generator = 'setup process') {
+  const configFileLines = [
+    `# Generated by the ${generator}.`,
+    '# Do not commit this file.',
+    '',
+    '# Setup',
+    '# Setup lock state.',
+    '# Missing or false enables setup; true locks setup.',
+    'SETUP_LOCKED = true',
+    '',
+  ];
+  const profileEntries: Array<[keyof SetupEnvironment, string]> = [];
+
+  for (const environmentGroup of envGroups) {
+    configFileLines.push(`# ${environmentGroup.name}`);
+
+    for (const environmentKey of environmentGroup.keys) {
+      const environmentValue = setupEnvironmentSource[environmentKey];
+
+      if (environmentValue !== undefined) {
+        if (profileEnvironmentKeySet.has(environmentKey)) {
+          profileEntries.push([environmentKey, environmentValue]);
+        } else if (emptyOptionalConfigKeySet.has(environmentKey) && environmentValue.trim() === '') {
+          continue;
+        } else {
+          pushConfigCommentLines(configFileLines, environmentKey);
+          configFileLines.push(`${environmentKey} = ${formatTomlValue(environmentValue)}`);
+        }
+      }
+    }
+
+    configFileLines.push('');
+  }
+
+  const renderedProfiles = renderProfileTables(profileEntries);
+
+  if (renderedProfiles.length > 0) {
+    configFileLines.push('# Profile Arrays', ...renderedProfiles, '');
+  }
+
+  return `${configFileLines.join('\n').trimEnd()}\n`;
+}
+
+function renderProfileTables(profileEntries: Array<[keyof SetupEnvironment, string]>) {
+  const lines: string[] = [];
+
+  for (const [environmentKey, environmentValue] of profileEntries) {
+    const profiles = parseProfileEnvironmentValue(environmentKey, environmentValue);
+
+    if (profiles.length > 0) {
+      pushConfigCommentLines(lines, environmentKey);
+    }
+
+    for (const profile of profiles) {
+      lines.push(`[[${environmentKey}]]`);
+
+      for (const [key, value] of Object.entries(profile)) {
+        lines.push(`${key} = ${formatTomlValue(value)}`);
+      }
+
+      lines.push('');
+    }
+  }
+
+  return lines;
+}
+
+function pushConfigCommentLines(lines: string[], environmentKey: keyof SetupEnvironment) {
+  const comments = setupConfigComments[environmentKey];
+
+  if (comments) {
+    lines.push(...comments.map((comment) => `# ${comment}`));
+  }
+}
+
+function parseProfileEnvironmentValue(environmentKey: keyof SetupEnvironment, value: string) {
+  try {
+    const parsed = JSON.parse(value);
+
+    if (Array.isArray(parsed)) {
+      return parsed.filter((profile): profile is Record<string, unknown> =>
+        Boolean(profile && typeof profile === 'object'),
+      );
+    }
+  } catch {
+    throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400, { field: environmentKey });
+  }
+
+  throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400, { field: environmentKey });
+}
+
+function formatTomlValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(formatTomlValue).join(', ')}]`;
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false';
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  if (value === undefined || value === null) {
+    return '""';
+  }
+
+  return JSON.stringify(String(value));
+}
+
+function getDefaultSetupEnvironment() {
+  const setupEnvironment: SetupEnvironment = {
+    ...defaultSetupEnvironment,
+    ...getExistingSetupEnvironment(),
+  };
+
+  if (!setupEnvironment.AUTH_TOKEN_SECRET.trim()) {
+    setupEnvironment.AUTH_TOKEN_SECRET = generateSecret();
+  }
+
+  return setupEnvironment;
+}
+
+function getExistingSetupEnvironment() {
+  const environmentFileSource = loadConfigFileSource();
+  const existingSetupEnvironment: Partial<SetupEnvironment> = {};
+
+  for (const environmentKey of Object.keys(defaultSetupEnvironment) as Array<keyof SetupEnvironment>) {
+    const environmentValue = environmentFileSource[environmentKey];
+
+    if (environmentValue !== undefined) {
+      existingSetupEnvironment[environmentKey] = environmentValue;
+    }
+  }
+
+  return existingSetupEnvironment;
+}
+
+function generateSecret() {
+  return randomBytes(48).toString('base64url');
+}

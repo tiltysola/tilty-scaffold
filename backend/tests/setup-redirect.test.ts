@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { localeRequestHeader } from '@tilty/shared/i18n';
+
+import { localeMiddleware } from '../src/middleware/locale';
 import { setupRedirectMiddleware } from '../src/middleware/setup-redirect';
 import { createTestContext, runMiddlewares } from './support/http';
 
@@ -32,6 +35,36 @@ describe('setup redirect middleware', () => {
       message: 'Setup is required before the application can be used.',
     });
     expect(context.responseHeaders.location).toBeUndefined();
+  });
+
+  it('localizes setup-required responses from the request locale', async () => {
+    const context = await runMiddlewares(
+      [
+        localeMiddleware(),
+        setupRedirectMiddleware({
+          allowedOrigins: ['http://localhost:8011'],
+          isSetupLocked: () => false,
+          mode: 'setup',
+        }),
+      ],
+      createTestContext(
+        undefined,
+        {
+          [localeRequestHeader]: 'zh-CN',
+        },
+        undefined,
+        {
+          path: '/api/auth/config',
+        },
+      ),
+    );
+
+    expect(context.status).toBe(503);
+    expect(context.body).toEqual({
+      code: 503,
+      error: 'SETUP_REQUIRED',
+      message: '使用应用前需要完成初始化设置。',
+    });
   });
 
   it('allows setup API requests in setup mode', async () => {

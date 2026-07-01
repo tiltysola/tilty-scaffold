@@ -30,7 +30,7 @@ const getSwaggerAsset: Middleware = async (ctx) => {
   const contentType = asset ? swaggerAssets.get(asset) : undefined;
 
   if (!asset || !contentType) {
-    throw new AppError('DOCS_ASSET_NOT_FOUND', 'The Swagger UI asset was not found.', 404);
+    throw new AppError('DOCS_ASSET_NOT_FOUND', 'error.DOCS_ASSET_NOT_FOUND', 404);
   }
 
   ctx.type = contentType;
@@ -44,7 +44,7 @@ const getSwaggerAsset: Middleware = async (ctx) => {
   const assetStat = await stat(assetPath).catch(() => null);
 
   if (!assetStat?.isFile()) {
-    throw new AppError('DOCS_ASSET_NOT_FOUND', 'The Swagger UI asset was not found.', 404);
+    throw new AppError('DOCS_ASSET_NOT_FOUND', 'error.DOCS_ASSET_NOT_FOUND', 404);
   }
 
   ctx.body = createReadStream(assetPath);

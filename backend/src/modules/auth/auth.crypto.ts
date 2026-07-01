@@ -5,13 +5,6 @@ import { AppError } from '../../core/errors';
 
 type JoseModule = typeof import('jose', { with: { 'resolution-mode': 'import' } });
 
-const scrypt = promisify(scryptCallback);
-const passwordKeyLength = 64;
-export const ssoStateTtlMs = 10 * 60 * 1000;
-export const ssoHandoffTtlMs = 60 * 1000;
-export const ssoBindTtlMs = 10 * 60 * 1000;
-let joseModule: Promise<JoseModule> | undefined;
-
 interface PasswordHash {
   passwordHash: string;
   passwordSalt: string;
@@ -66,6 +59,13 @@ interface SsoBindPayload {
   exp: number;
   type: 'sso_bind';
 }
+
+const scrypt = promisify(scryptCallback);
+const passwordKeyLength = 64;
+export const ssoStateTtlMs = 10 * 60 * 1000;
+export const ssoHandoffTtlMs = 60 * 1000;
+export const ssoBindTtlMs = 10 * 60 * 1000;
+let joseModule: Promise<JoseModule> | undefined;
 
 export async function hashPassword(password: string): Promise<PasswordHash> {
   const passwordSalt = randomBytes(16).toString('base64url');
@@ -157,7 +157,7 @@ export async function verifyAccessToken(token: string, secret: string) {
     }
 
     if (error instanceof errors.JWTExpired) {
-      throw new AppError('AUTH_TOKEN_EXPIRED', 'Authentication token has expired.', 401);
+      throw new AppError('AUTH_TOKEN_EXPIRED', 'error.AUTH_TOKEN_EXPIRED', 401);
     }
 
     throwInvalidToken();
@@ -309,7 +309,7 @@ async function verifyToken<T>(token: string, secret: string) {
     return payload;
   } catch (error) {
     if (error instanceof errors.JWTExpired) {
-      throw new AppError('AUTH_TOKEN_EXPIRED', 'Authentication token has expired.', 401);
+      throw new AppError('AUTH_TOKEN_EXPIRED', 'error.AUTH_TOKEN_EXPIRED', 401);
     }
 
     throwInvalidToken();
@@ -317,7 +317,7 @@ async function verifyToken<T>(token: string, secret: string) {
 }
 
 function throwInvalidToken(): never {
-  throw new AppError('AUTH_INVALID_TOKEN', 'Authentication token is invalid.', 401);
+  throw new AppError('AUTH_INVALID_TOKEN', 'error.AUTH_INVALID_TOKEN', 401);
 }
 
 function getSecretKey(secret: string) {

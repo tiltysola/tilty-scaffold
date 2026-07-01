@@ -4,9 +4,11 @@ import { z } from 'zod';
 import { AppError } from '../../core/errors';
 import { ok } from '../../core/http';
 import { readMultipartFile } from '../../infra/multipart';
+import { getRequestLocale } from '../../middleware/locale';
 import { type AccessControlService, type UserAccess } from '../access-control/access-control.service';
 import { hashPassword } from '../auth/auth.crypto';
 import {
+  authDeviceSessionIdSchema,
   authPasskeyIdSchema,
   displayNameSchema,
   emailSchema,
@@ -76,6 +78,7 @@ export class UserController {
     const result = await this.userService.listUsers(pagination);
     const users = result.users;
     const accessByUserId = await this.accessControl.getUsersAccess(users.map((user) => user.id));
+    const locale = getRequestLocale(ctx);
 
     ctx.body = ok({
       pagination: {
@@ -84,7 +87,7 @@ export class UserController {
         total: result.total,
         totalPages: Math.ceil(result.total / pagination.pageSize),
       },
-      roles: await this.accessControl.listRoles(),
+      roles: await this.accessControl.listRoles(locale),
       users: users.map((user) => toUserListItem(user, accessByUserId.get(user.id))),
     });
   };
@@ -95,7 +98,7 @@ export class UserController {
     const user = await this.userService.findManagedById(userId);
 
     if (!user) {
-      throw new AppError('USER_NOT_FOUND', 'User was not found.', 404);
+      throw new AppError('USER_NOT_FOUND', 'error.USER_NOT_FOUND', 404);
     }
 
     const access = await this.accessControl.replaceUserRoles(user.id, input.roleKeys);
@@ -109,7 +112,7 @@ export class UserController {
     const user = await this.userService.findManagedById(userId);
 
     if (!user) {
-      throw new AppError('USER_NOT_FOUND', 'User was not found.', 404);
+      throw new AppError('USER_NOT_FOUND', 'error.USER_NOT_FOUND', 404);
     }
 
     const { password, roleKeys, ...userInput } = input;
@@ -187,6 +190,26 @@ export class UserController {
     const user = await this.requireManagedUser(ctx);
 
     ctx.body = ok(await this.authService.listManagedDeviceSessions(user, getCurrentSessionIdForUser(ctx, user.id)));
+  };
+
+  revokeDevice: Middleware = async (ctx) => {
+    const { id, sessionId } = z
+      .object({
+        id: userIdSchema,
+        ...authDeviceSessionIdSchema.shape,
+      })
+      .parse((ctx as { params?: Record<string, string> }).params);
+    const user = await this.requireManagedUserById(id);
+
+    ctx.body = ok(
+      await this.authService.revokeManagedDeviceSession(user, sessionId, getCurrentSessionIdForUser(ctx, user.id)),
+    );
+  };
+
+  revokeDevices: Middleware = async (ctx) => {
+    const user = await this.requireManagedUser(ctx);
+
+    ctx.body = ok(await this.authService.revokeManagedDeviceSessions(user, getCurrentSessionIdForUser(ctx, user.id)));
   };
 
   ssoIdentities: Middleware = async (ctx) => {
@@ -271,7 +294,7 @@ export class UserController {
     const user = await this.userService.findManagedById(userId);
 
     if (!user) {
-      throw new AppError('USER_NOT_FOUND', 'User was not found.', 404);
+      throw new AppError('USER_NOT_FOUND', 'error.USER_NOT_FOUND', 404);
     }
 
     return user;

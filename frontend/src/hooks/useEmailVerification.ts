@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 
+import { formatStaticMessage } from '@/i18n';
 import { getApiErrorMessage } from '@/lib/api';
 import { type SendEmailVerificationInput, type VerificationCodeSendResult } from '@/lib/auth';
 
@@ -9,11 +10,16 @@ type SendEmailVerification = (input: SendEmailVerificationInput) => Promise<Veri
 type ErrorMessageResolver = (error: unknown, fallback: string) => string;
 
 interface UseEmailVerificationOptions {
+  formatNotice?: (expiresInMinutes: number) => string;
   getErrorMessage?: ErrorMessageResolver;
   sendCode: SendEmailVerification;
 }
 
-export function useEmailVerification({ getErrorMessage = getApiErrorMessage, sendCode }: UseEmailVerificationOptions) {
+export function useEmailVerification({
+  formatNotice = defaultFormatNotice,
+  getErrorMessage = getApiErrorMessage,
+  sendCode,
+}: UseEmailVerificationOptions) {
   const [notice, setNotice] = useState<string | null>(null);
   const { clearError, error, pending, run, setError } = useAsyncAction(getErrorMessage);
 
@@ -30,12 +36,12 @@ export function useEmailVerification({ getErrorMessage = getApiErrorMessage, sen
       if (result) {
         const expiresInMinutes = Math.ceil(result.expiresInSeconds / 60);
 
-        setNotice(`Verification code sent. It expires in ${expiresInMinutes} minutes.`);
+        setNotice(formatNotice(expiresInMinutes));
       }
 
       return result;
     },
-    [run, sendCode],
+    [formatNotice, run, sendCode],
   );
 
   return {
@@ -46,4 +52,10 @@ export function useEmailVerification({ getErrorMessage = getApiErrorMessage, sen
     sending: pending,
     setError,
   };
+}
+
+function defaultFormatNotice(expiresInMinutes: number) {
+  return formatStaticMessage('email.verification.sent', {
+    minutes: expiresInMinutes,
+  });
 }

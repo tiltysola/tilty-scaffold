@@ -2,11 +2,13 @@ import cors from '@koa/cors';
 import Koa from 'koa';
 import bodyParser from 'koa-bodyparser';
 
+import { defaultFrontendOrigin } from './config/defaults';
 import { type BackendModule } from './core/module';
 import { createRouter } from './core/router';
 import { csrfProtectionMiddleware } from './middleware/csrf';
 import { errorMiddleware } from './middleware/error';
 import { type FrontendFilesConfig, frontendFilesMiddleware } from './middleware/frontend-files';
+import { localeMiddleware } from './middleware/locale';
 import { rateLimitMiddleware, type RateLimitOptions } from './middleware/rate-limit';
 import { requestIdMiddleware } from './middleware/request-id';
 import { requestLogMiddleware } from './middleware/request-log';
@@ -27,7 +29,7 @@ interface AppConfig {
 }
 
 const defaultAppConfig: AppConfig = {
-  corsOrigins: ['http://localhost:8011'],
+  corsOrigins: [defaultFrontendOrigin],
   requestLogEnabled: false,
   trustProxy: false,
 };
@@ -38,6 +40,7 @@ export function createApp(modules: BackendModule[], config: AppConfig = defaultA
 
   app.proxy = config.trustProxy;
   app.use(errorMiddleware());
+  app.use(localeMiddleware());
   app.use(requestIdMiddleware());
   app.use(requestLogMiddleware(config.requestLogEnabled));
   app.use(securityHeadersMiddleware());

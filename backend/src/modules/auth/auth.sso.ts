@@ -1,6 +1,8 @@
 import { randomBytes } from 'crypto';
 
 import { SystemRole } from '@tilty/shared/access-control';
+import { AuthVerificationPurpose } from '@tilty/shared/auth';
+import { SetupSsoProtocol, type SetupSsoProtocolValue } from '@tilty/shared/setup';
 
 import { AppError } from '../../core/errors';
 import { type CacheStore } from '../../infra/cache';
@@ -29,7 +31,7 @@ import { AuthVerificationService, type SsoBindVerificationIdentity } from './aut
 type JoseModule = typeof import('jose', { with: { 'resolution-mode': 'import' } });
 type SsoCallbackMode = 'bind' | 'login';
 type SsoProviderPurpose = 'binding' | 'login';
-export type SsoProtocol = 'oauth2' | 'oidc';
+export type SsoProtocol = SetupSsoProtocolValue;
 
 export interface SsoProviderConfig {
   id: string;
@@ -98,12 +100,12 @@ interface BaseSsoProviderConfig {
 }
 
 interface OidcProviderConfig extends BaseSsoProviderConfig {
-  protocol: 'oidc';
+  protocol: typeof SetupSsoProtocol.Oidc;
   issuerUrl: string;
 }
 
 interface OAuth2ProviderConfig extends BaseSsoProviderConfig {
-  protocol: 'oauth2';
+  protocol: typeof SetupSsoProtocol.Oauth2;
   authorizationUrl: string;
   tokenUrl: string;
   userInfoUrl: string;
@@ -215,7 +217,7 @@ const idTokenVerifiers: IdTokenVerifier[] = [
     algorithms: ['RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512', 'ES256', 'ES384', 'ES512', 'EdDSA'],
     async verify({ algorithms, config, discovery, idToken, jose, verifyOptions }) {
       if (!discovery.jwks_uri || !isAllowedProviderUrl(discovery.jwks_uri, config)) {
-        throw new AppError('SSO_DISCOVERY_INVALID', 'SSO discovery document is invalid.', 502);
+        throw new AppError('SSO_DISCOVERY_INVALID', 'error.SSO_DISCOVERY_INVALID', 502);
       }
 
       const { payload } = await jose.jwtVerify<OidcIdTokenPayload>(
@@ -302,14 +304,14 @@ export class SsoService {
     this.requireConfig();
 
     if (input.error) {
-      throw new AppError('SSO_PROVIDER_ERROR', 'SSO authentication could not be completed.', 401, {
+      throw new AppError('SSO_PROVIDER_ERROR', 'error.SSO_PROVIDER_ERROR', 401, {
         providerError: input.error,
         ...(input.errorDescription ? { providerErrorDescription: input.errorDescription } : {}),
       });
     }
 
     if (!input.code || !input.state) {
-      throw new AppError('SSO_CALLBACK_INVALID', 'SSO callback is invalid.', 400);
+      throw new AppError('SSO_CALLBACK_INVALID', 'error.SSO_CALLBACK_INVALID', 400);
     }
 
     const state = await verifySsoStateToken(input.state, this.tokenSecret);
@@ -321,7 +323,7 @@ export class SsoService {
     const claims = await this.fetchSsoClaims(provider, input.code, state.nonce);
 
     if (claims.emailVerified !== true) {
-      throw new AppError('SSO_EMAIL_UNVERIFIED', 'SSO profile email is not verified.', 401);
+      throw new AppError('SSO_EMAIL_UNVERIFIED', 'error.SSO_EMAIL_UNVERIFIED', 401);
     }
 
     const identity = toVerifiedIdentity(provider, claims);
@@ -346,7 +348,7 @@ export class SsoService {
 
     if (user) {
       if (!user.available) {
-        throw new AppError('USER_UNAVAILABLE', 'User is not available.', 403);
+        throw new AppError('USER_UNAVAILABLE', 'error.USER_UNAVAILABLE', 403);
       }
 
       return this.createSessionCallbackUrl(provider, user, state.redirectPath, context);
@@ -369,7 +371,7 @@ export class SsoService {
     const user = await this.userService.findById(userId);
 
     if (!user) {
-      throw new AppError('AUTH_INVALID_TOKEN', 'Authentication token is invalid.', 401);
+      throw new AppError('AUTH_INVALID_TOKEN', 'error.AUTH_INVALID_TOKEN', 401);
     }
 
     return createAuthSession(
@@ -400,19 +402,19 @@ export class SsoService {
     const existingBySubject = await this.findUserBySsoIdentity(identity);
 
     if (existingBySubject) {
-      throw new AppError('SSO_SUBJECT_EXISTS', 'The SSO identity is already associated with an account.', 409);
+      throw new AppError('SSO_SUBJECT_EXISTS', 'error.SSO_SUBJECT_EXISTS', 409);
     }
 
     const existingByEmail = await this.userService.findByEmail(bind.email);
 
     if (existingByEmail) {
-      throw new AppError('USER_EMAIL_EXISTS', 'The email address is already registered.', 409);
+      throw new AppError('USER_EMAIL_EXISTS', 'error.USER_EMAIL_EXISTS', 409);
     }
 
     const existingByUsername = await this.userService.findByUsername(input.username);
 
     if (existingByUsername) {
-      throw new AppError('USER_USERNAME_EXISTS', 'The username is already registered.', 409);
+      throw new AppError('USER_USERNAME_EXISTS', 'error.USER_USERNAME_EXISTS', 409);
     }
 
     await this.consumeOneTimeToken(tokenKey, tokenSubject);
@@ -512,7 +514,7 @@ export class SsoService {
     },
   ) {
     const authorizationUrl =
-      provider.protocol === 'oidc'
+      provider.protocol === SetupSsoProtocol.Oidc
         ? (await this.getDiscovery(provider)).authorization_endpoint
         : provider.authorizationUrl;
     const nonce = randomBytes(16).toString('base64url');
@@ -540,7 +542,7 @@ export class SsoService {
     url.searchParams.set('scope', provider.scopes.join(' '));
     url.searchParams.set('state', state.token);
 
-    if (provider.protocol === 'oidc') {
+    if (provider.protocol === SetupSsoProtocol.Oidc) {
       url.searchParams.set('nonce', nonce);
     }
 
@@ -550,16 +552,16 @@ export class SsoService {
   private async fetchSsoClaims(provider: NormalizedSsoProviderConfig, code: string, expectedNonce: string) {
     const tokenResponse = await this.exchangeCode(provider, code);
 
-    if (provider.protocol === 'oidc') {
+    if (provider.protocol === SetupSsoProtocol.Oidc) {
       if (!tokenResponse.id_token) {
-        throw new AppError('SSO_ID_TOKEN_MISSING', 'SSO identity token is missing.', 401);
+        throw new AppError('SSO_ID_TOKEN_MISSING', 'error.SSO_ID_TOKEN_MISSING', 401);
       }
 
       return this.verifyOidcClaims(provider, tokenResponse.id_token, expectedNonce);
     }
 
     if (!tokenResponse.access_token) {
-      throw new AppError('SSO_ACCESS_TOKEN_MISSING', 'SSO access token is missing.', 401);
+      throw new AppError('SSO_ACCESS_TOKEN_MISSING', 'error.SSO_ACCESS_TOKEN_MISSING', 401);
     }
 
     return this.fetchOAuth2Claims(provider, tokenResponse.access_token);
@@ -578,14 +580,14 @@ export class SsoService {
       const algorithm = protectedHeader.alg;
 
       if (!algorithm) {
-        throw new AppError('SSO_ID_TOKEN_INVALID', 'SSO identity token is invalid.', 401);
+        throw new AppError('SSO_ID_TOKEN_INVALID', 'error.SSO_ID_TOKEN_INVALID', 401);
       }
 
       const verifier = findIdTokenVerifier(algorithm);
       const algorithms = getVerifierAlgorithms(discovery, verifier);
 
       if (!algorithms.includes(algorithm)) {
-        throw new AppError('SSO_ID_TOKEN_INVALID', 'SSO identity token is invalid.', 401);
+        throw new AppError('SSO_ID_TOKEN_INVALID', 'error.SSO_ID_TOKEN_INVALID', 401);
       }
 
       const payload = await verifier.verify({
@@ -602,7 +604,7 @@ export class SsoService {
       });
 
       if (payload.nonce !== expectedNonce) {
-        throw new AppError('SSO_NONCE_INVALID', 'SSO nonce is invalid.', 401);
+        throw new AppError('SSO_NONCE_INVALID', 'error.SSO_NONCE_INVALID', 401);
       }
 
       return {
@@ -617,7 +619,7 @@ export class SsoService {
         throw error;
       }
 
-      throw new AppError('SSO_ID_TOKEN_INVALID', 'SSO identity token is invalid.', 401);
+      throw new AppError('SSO_ID_TOKEN_INVALID', 'error.SSO_ID_TOKEN_INVALID', 401);
     }
   }
 
@@ -638,7 +640,7 @@ export class SsoService {
         throw error;
       }
 
-      throw new AppError('SSO_USERINFO_FAILED', 'SSO profile could not be loaded.', 502);
+      throw new AppError('SSO_USERINFO_FAILED', 'error.SSO_USERINFO_FAILED', 502);
     }
 
     return {
@@ -659,7 +661,9 @@ export class SsoService {
 
   private async exchangeCode(provider: NormalizedSsoProviderConfig, code: string) {
     const tokenEndpoint =
-      provider.protocol === 'oidc' ? (await this.getDiscovery(provider)).token_endpoint : provider.tokenUrl;
+      provider.protocol === SetupSsoProtocol.Oidc
+        ? (await this.getDiscovery(provider)).token_endpoint
+        : provider.tokenUrl;
     const body = new URLSearchParams({
       client_id: provider.clientId,
       client_secret: provider.clientSecret,
@@ -684,7 +688,7 @@ export class SsoService {
         throw error;
       }
 
-      throw new AppError('SSO_TOKEN_EXCHANGE_FAILED', 'SSO token exchange could not be completed.', 502);
+      throw new AppError('SSO_TOKEN_EXCHANGE_FAILED', 'error.SSO_TOKEN_EXCHANGE_FAILED', 502);
     }
   }
 
@@ -723,7 +727,7 @@ export class SsoService {
 
   private requireConfig() {
     if (!this.config) {
-      throw new AppError('SSO_DISABLED', 'SSO authentication is disabled.', 404);
+      throw new AppError('SSO_DISABLED', 'error.SSO_DISABLED', 404);
     }
 
     return this.config;
@@ -736,13 +740,13 @@ export class SsoService {
       : config.profiles.find((candidate) => isProviderEnabledForPurpose(candidate, purpose));
 
     if (!provider) {
-      throw new AppError('SSO_PROVIDER_NOT_FOUND', 'SSO provider was not found.', 404);
+      throw new AppError('SSO_PROVIDER_NOT_FOUND', 'error.SSO_PROVIDER_NOT_FOUND', 404);
     }
 
     if (!isProviderEnabledForPurpose(provider, purpose)) {
       const code = purpose === 'login' ? 'SSO_LOGIN_DISABLED' : 'SSO_BINDING_DISABLED';
 
-      throw new AppError(code, 'SSO provider is disabled for this operation.', 403);
+      throw new AppError(code, `error.${code}`, 403);
     }
 
     return provider;
@@ -757,7 +761,7 @@ export class SsoService {
     const callbackUrl = new URL(provider.frontendCallbackUrl);
 
     if (user.mfaRequiredForSso && (await this.verificationService.shouldRequireLoginVerification(user))) {
-      const challenge = await this.verificationService.createLoginChallenge(user, context, 'sso');
+      const challenge = await this.verificationService.createLoginChallenge(user, context, AuthVerificationPurpose.Sso);
 
       setCallbackFragment(callbackUrl, {
         redirect: redirectPath,
@@ -883,7 +887,7 @@ export class SsoService {
       }
     }
 
-    throw new AppError('SSO_TOKEN_CONFLICT', 'SSO token state changed. Submit the request again.', 409);
+    throw new AppError('SSO_TOKEN_CONFLICT', 'error.SSO_TOKEN_CONFLICT', 409);
   }
 }
 
@@ -898,7 +902,7 @@ export async function testSsoDiscovery(config: SsoServiceConfig) {
   }
 
   for (const provider of normalized.profiles) {
-    if (provider.protocol === 'oidc') {
+    if (provider.protocol === SetupSsoProtocol.Oidc) {
       await fetchDiscovery(provider);
     }
   }
@@ -940,10 +944,10 @@ function normalizeSsoProviderConfig(profile: SsoProviderConfig): NormalizedSsoPr
     scopes: profile.scopes,
   };
 
-  if (profile.protocol === 'oauth2') {
+  if (profile.protocol === SetupSsoProtocol.Oauth2) {
     return {
       ...base,
-      protocol: 'oauth2',
+      protocol: SetupSsoProtocol.Oauth2,
       authorizationUrl: profile.authorizationUrl!,
       tokenUrl: profile.tokenUrl!,
       userInfoUrl: profile.userInfoUrl!,
@@ -957,7 +961,7 @@ function normalizeSsoProviderConfig(profile: SsoProviderConfig): NormalizedSsoPr
 
   return {
     ...base,
-    protocol: 'oidc',
+    protocol: SetupSsoProtocol.Oidc,
     issuerUrl: profile.issuerUrl!.replace(/\/+$/, ''),
   };
 }
@@ -991,7 +995,7 @@ function findIdTokenVerifier(algorithm: string) {
   const verifier = idTokenVerifiers.find((candidate) => candidate.algorithms.includes(algorithm));
 
   if (!verifier) {
-    throw new AppError('SSO_ID_TOKEN_INVALID', 'SSO identity token is invalid.', 401);
+    throw new AppError('SSO_ID_TOKEN_INVALID', 'error.SSO_ID_TOKEN_INVALID', 401);
   }
 
   return verifier;
@@ -1021,7 +1025,7 @@ async function fetchDiscovery(provider: OidcProviderConfig) {
       throw error;
     }
 
-    throw new AppError('SSO_DISCOVERY_FAILED', 'SSO discovery could not be completed.', 502);
+    throw new AppError('SSO_DISCOVERY_FAILED', 'error.SSO_DISCOVERY_FAILED', 502);
   }
 
   validateDiscovery(discovery, provider);
@@ -1036,7 +1040,7 @@ function validateDiscovery(discovery: OidcDiscoveryDocument, provider: OidcProvi
     !isAllowedProviderUrl(discovery.token_endpoint, provider) ||
     (discovery.jwks_uri !== undefined && !isAllowedProviderUrl(discovery.jwks_uri, provider))
   ) {
-    throw new AppError('SSO_DISCOVERY_INVALID', 'SSO discovery document is invalid.', 502);
+    throw new AppError('SSO_DISCOVERY_INVALID', 'error.SSO_DISCOVERY_INVALID', 502);
   }
 }
 
@@ -1068,7 +1072,7 @@ async function readJson<T>(response: Response, code: string): Promise<T> {
   const text = await response.text();
 
   if (!response.ok) {
-    throw new AppError(code, 'The SSO provider request could not be completed.', 502, {
+    throw new AppError(code, `error.${code}`, 502, {
       status: response.status,
     });
   }
@@ -1076,7 +1080,7 @@ async function readJson<T>(response: Response, code: string): Promise<T> {
   try {
     return JSON.parse(text) as T;
   } catch {
-    throw new AppError(code, 'SSO provider response is invalid.', 502);
+    throw new AppError(code, `error.${code}`, 502);
   }
 }
 
@@ -1114,13 +1118,13 @@ function getSsoEmail(value: unknown) {
   const email = getClaimString(value);
 
   if (!email) {
-    throw new AppError('SSO_EMAIL_MISSING', 'SSO profile email is missing.', 401);
+    throw new AppError('SSO_EMAIL_MISSING', 'error.SSO_EMAIL_MISSING', 401);
   }
 
   const parsed = emailSchema.safeParse(email);
 
   if (!parsed.success) {
-    throw new AppError('SSO_EMAIL_INVALID', 'SSO profile email is invalid.', 401);
+    throw new AppError('SSO_EMAIL_INVALID', 'error.SSO_EMAIL_INVALID', 401);
   }
 
   return parsed.data;
@@ -1142,7 +1146,7 @@ function getProviderSubject(value: unknown) {
   const providerSubject = getClaimString(value);
 
   if (!providerSubject) {
-    throw new AppError('SSO_SUBJECT_MISSING', 'SSO profile subject is missing.', 401);
+    throw new AppError('SSO_SUBJECT_MISSING', 'error.SSO_SUBJECT_MISSING', 401);
   }
 
   return providerSubject;
@@ -1199,9 +1203,9 @@ function loadJose() {
 }
 
 function throwInvalidCredentials(): never {
-  throw new AppError('AUTH_INVALID_CREDENTIALS', 'The account identifier or password is invalid.', 401);
+  throw new AppError('AUTH_INVALID_CREDENTIALS', 'error.AUTH_INVALID_CREDENTIALS', 401);
 }
 
 function throwInvalidSsoToken(): never {
-  throw new AppError('AUTH_INVALID_TOKEN', 'Authentication token is invalid.', 401);
+  throw new AppError('AUTH_INVALID_TOKEN', 'error.AUTH_INVALID_TOKEN', 401);
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { formatStaticMessage } from '@/i18n';
 import { getApiErrorMessage } from '@/lib/api';
 import {
   createVerificationChallenge,
@@ -10,6 +11,7 @@ import {
   verifyAuthenticationChallenge,
   verifyWithPasskey,
 } from '@/lib/auth';
+import { type AuthVerificationCodeMethodValue, AuthVerificationMethod } from '@tilty/shared/auth';
 
 export interface VerificationGateSubmitInput {
   method: VerificationMethodName;
@@ -26,10 +28,10 @@ interface UseVerificationGateOptions {
 }
 
 export function useVerificationGate({
-  codeSendErrorMessage = 'Verification code could not be sent.',
-  passkeyErrorMessage = 'Passkey verification could not be completed.',
+  codeSendErrorMessage,
+  passkeyErrorMessage,
   purpose,
-  verificationErrorMessage = 'Verification could not be completed.',
+  verificationErrorMessage,
 }: UseVerificationGateOptions) {
   const [error, setError] = useState<string | null>(null);
   const [pendingChallenge, setPendingChallenge] = useState<VerificationRequired | null>(null);
@@ -37,6 +39,12 @@ export function useVerificationGate({
   const [sendPending, setSendPending] = useState(false);
   const [submitPending, setSubmitPending] = useState(false);
   const mountedRef = useRef(false);
+  const resolvedCodeSendErrorMessage =
+    codeSendErrorMessage ?? formatStaticMessage('identity.verification.code.send.failed');
+  const resolvedPasskeyErrorMessage =
+    passkeyErrorMessage ?? formatStaticMessage('identity.passkey.verification.failed');
+  const resolvedVerificationErrorMessage =
+    verificationErrorMessage ?? formatStaticMessage('identity.verification.failed');
 
   const clearError = useCallback(() => {
     if (mountedRef.current) {
@@ -75,7 +83,7 @@ export function useVerificationGate({
   }, [purpose]);
 
   const sendCode = useCallback(
-    async (method: 'email' | 'sms'): Promise<VerificationCodeSendResult | null> => {
+    async (method: AuthVerificationCodeMethodValue): Promise<VerificationCodeSendResult | null> => {
       if (!pendingChallenge) {
         return null;
       }
@@ -92,7 +100,7 @@ export function useVerificationGate({
         });
       } catch (requestError: unknown) {
         if (mountedRef.current) {
-          setError(getApiErrorMessage(requestError, codeSendErrorMessage));
+          setError(getApiErrorMessage(requestError, resolvedCodeSendErrorMessage));
         }
 
         return null;
@@ -102,7 +110,7 @@ export function useVerificationGate({
         }
       }
     },
-    [codeSendErrorMessage, pendingChallenge],
+    [pendingChallenge, resolvedCodeSendErrorMessage],
   );
 
   const confirmChallenge = useCallback(
@@ -117,7 +125,7 @@ export function useVerificationGate({
       }
 
       try {
-        if (input.method === 'passkey') {
+        if (input.method === AuthVerificationMethod.Passkey) {
           await verifyWithPasskey(pendingChallenge.verificationToken);
         } else {
           await verifyAuthenticationChallenge({
@@ -136,7 +144,9 @@ export function useVerificationGate({
           setError(
             getApiErrorMessage(
               requestError,
-              input.method === 'passkey' ? passkeyErrorMessage : verificationErrorMessage,
+              input.method === AuthVerificationMethod.Passkey
+                ? resolvedPasskeyErrorMessage
+                : resolvedVerificationErrorMessage,
             ),
           );
         }
@@ -148,7 +158,7 @@ export function useVerificationGate({
         }
       }
     },
-    [passkeyErrorMessage, pendingChallenge, verificationErrorMessage],
+    [pendingChallenge, resolvedPasskeyErrorMessage, resolvedVerificationErrorMessage],
   );
 
   const dismissChallenge = useCallback(() => {

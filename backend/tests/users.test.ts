@@ -1,16 +1,97 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { localeRequestHeader } from '@tilty/shared/i18n';
+
 import { initModels } from '../src/composition/models';
 import { createServices } from '../src/composition/services';
 import { type RouteDefinition } from '../src/core/module';
 import { createSequelize } from '../src/infra/database';
 import { createMigrator } from '../src/infra/migrator';
 import { errorMiddleware } from '../src/middleware/error';
+import { localeMiddleware } from '../src/middleware/locale';
 import { defaultAuthCookieConfig } from '../src/modules/auth/auth.http';
 import { createUsersModule } from '../src/modules/users';
 import { registerRootWithUserManagementAccess, registerTestUser } from './support/auth';
 import { createTestContext, getTestRoute, runMiddlewares } from './support/http';
 import { createTotpCode } from './support/totp';
+
+interface UserListBody {
+  data: {
+    pagination: {
+      page: number;
+      pageSize: number;
+      total: number;
+      totalPages: number;
+    };
+    users: unknown[];
+  };
+}
+
+interface UserUpdateBody {
+  data: {
+    username: string;
+    displayName: string;
+    gender?: string;
+    birthday?: string;
+    bio?: string;
+    location?: string;
+    websiteUrl?: string;
+    email: string;
+    emailVerified: boolean;
+    phoneNumber?: string;
+    phoneVerified: boolean;
+    available: boolean;
+    roles: string[];
+    permissions: string[];
+  };
+}
+
+interface ManagedUserDetailsBody {
+  data: {
+    user: {
+      id: string;
+      email: string;
+    };
+    security: ManagedSecurityBody['data'];
+    devices: unknown[];
+    ssoIdentities: Array<{
+      providerId: string;
+      providerName: string;
+      providerSubject: string;
+    }>;
+  };
+}
+
+interface ManagedSecurityBody {
+  data: {
+    mfaSettings: {
+      mfaRequiredForSso: boolean;
+      passkeyCount: number;
+      twoStepEnabled: boolean;
+    };
+    passkeys: unknown[];
+    totpStatus: {
+      enabled: boolean;
+      recoveryCodesRemaining: number;
+    };
+  };
+}
+
+interface ManagedSsoIdentitiesBody {
+  data: {
+    identities: unknown[];
+  };
+}
+
+interface ManagedDeviceSessionsBody {
+  data: {
+    sessions: Array<{
+      id: string;
+      ipAddress: string;
+      isCurrent: boolean;
+    }>;
+  };
+}
 
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
 const ssoProfile = {
@@ -69,17 +150,25 @@ describe('users API', () => {
     const rootSession = await registerTestUser(services.auth, 'Root User', 'root-no-user-management-mfa@example.com');
     const listRoute = getTestRoute(routes, 'get', '/');
     const context = await runMiddlewares(
-      [errorMiddleware(), ...listRoute.handlers],
-      createTestContext(undefined, {}, undefined, {
-        cookies: {
-          tilty_scaffold_access_token: rootSession.accessToken,
+      [errorMiddleware(), localeMiddleware(), ...listRoute.handlers],
+      createTestContext(
+        undefined,
+        {
+          [localeRequestHeader]: 'zh-CN',
         },
-      }),
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
     );
 
     expect(context.status).toBe(403);
     expect(context.body).toMatchObject({
       error: 'USER_MANAGEMENT_STRONG_VERIFICATION_REQUIRED',
+      message: '访问用户管理前需要配置通行密钥或认证器应用。',
     });
   });
 
@@ -269,6 +358,213 @@ describe('users API', () => {
         providerSubject: 'mahoutsukai-target-details',
       }),
     ]);
+  });
+
+  it('revokes managed user login device sessions', async () => {
+    const rootSession = await registerRootWithUserManagementAccess(services, 'Root User', 'root-devices@example.com');
+    const primarySession = await registerTestUser(services.auth, 'Target Device User', 'target-devices@example.com');
+    const secondarySession = await services.auth.login(
+      {
+        identifier: 'target-devices@example.com',
+        password: 'password123',
+      },
+      {
+        deviceId: 'target-devices-secondary',
+        ipAddress: '203.0.113.20',
+        userAgent:
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
+      },
+    );
+    const targetUser = await services.user.findByEmail('target-devices@example.com');
+
+    expect(targetUser).not.toBeNull();
+
+    if (!targetUser) {
+      return;
+    }
+
+    if ('requiresVerification' in secondarySession) {
+      throw new Error('Verification challenge was not expected for this account.');
+    }
+
+    const devicesRoute = getTestRoute(routes, 'get', '/:id/devices');
+    const devicesContext = await runMiddlewares(
+      [errorMiddleware(), ...devicesRoute.handlers],
+      createTestContext(
+        undefined,
+        {},
+        {
+          id: targetUser.id,
+        },
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
+    );
+    const devicesBody = devicesContext.body as ManagedDeviceSessionsBody;
+    const secondaryDevice = devicesBody.data.sessions.find((device) => device.ipAddress === '203.0.113.20');
+
+    expect(devicesBody.data.sessions).toHaveLength(2);
+    expect(secondaryDevice).toBeDefined();
+
+    if (!secondaryDevice) {
+      return;
+    }
+
+    const revokeDeviceRoute = getTestRoute(routes, 'delete', '/:id/devices/:sessionId');
+    const revokeDeviceContext = await runMiddlewares(
+      [errorMiddleware(), ...revokeDeviceRoute.handlers],
+      createTestContext(
+        undefined,
+        {},
+        {
+          id: targetUser.id,
+          sessionId: secondaryDevice.id,
+        },
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(revokeDeviceContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        revoked: true,
+      },
+    });
+    await expect(services.auth.getCurrentUser(secondarySession.accessToken)).rejects.toMatchObject({
+      code: 'AUTH_REFRESH_TOKEN_INVALID',
+      status: 401,
+    });
+    await expect(services.auth.getCurrentUser(primarySession.accessToken)).resolves.toMatchObject({
+      email: 'target-devices@example.com',
+    });
+
+    const revokeDevicesRoute = getTestRoute(routes, 'delete', '/:id/devices');
+    const revokeDevicesContext = await runMiddlewares(
+      [errorMiddleware(), ...revokeDevicesRoute.handlers],
+      createTestContext(
+        undefined,
+        {},
+        {
+          id: targetUser.id,
+        },
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(revokeDevicesContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        revoked: true,
+      },
+    });
+    await expect(services.auth.getCurrentUser(primarySession.accessToken)).rejects.toMatchObject({
+      code: 'AUTH_SESSION_INVALID',
+      status: 401,
+    });
+  });
+
+  it('preserves the current administrator session when managing own login devices', async () => {
+    const rootSession = await registerRootWithUserManagementAccess(
+      services,
+      'Root Device User',
+      'root-own-devices@example.com',
+    );
+    const rootUser = await services.user.findByEmail('root-own-devices@example.com');
+
+    expect(rootUser).not.toBeNull();
+
+    if (!rootUser) {
+      return;
+    }
+
+    const devicesRoute = getTestRoute(routes, 'get', '/:id/devices');
+    const devicesContext = await runMiddlewares(
+      [errorMiddleware(), ...devicesRoute.handlers],
+      createTestContext(
+        undefined,
+        {},
+        {
+          id: rootUser.id,
+        },
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
+    );
+    const devicesBody = devicesContext.body as ManagedDeviceSessionsBody;
+    const currentDevice = devicesBody.data.sessions.find((device) => device.isCurrent);
+
+    expect(currentDevice).toBeDefined();
+
+    if (!currentDevice) {
+      return;
+    }
+
+    const revokeDeviceRoute = getTestRoute(routes, 'delete', '/:id/devices/:sessionId');
+    const revokeCurrentContext = await runMiddlewares(
+      [errorMiddleware(), ...revokeDeviceRoute.handlers],
+      createTestContext(
+        undefined,
+        {},
+        {
+          id: rootUser.id,
+          sessionId: currentDevice.id,
+        },
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(revokeCurrentContext.status).toBe(400);
+    expect(revokeCurrentContext.body).toMatchObject({
+      error: 'AUTH_CURRENT_SESSION_REVOKE_FORBIDDEN',
+    });
+
+    const revokeDevicesRoute = getTestRoute(routes, 'delete', '/:id/devices');
+    const revokeDevicesContext = await runMiddlewares(
+      [errorMiddleware(), ...revokeDevicesRoute.handlers],
+      createTestContext(
+        undefined,
+        {},
+        {
+          id: rootUser.id,
+        },
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(revokeDevicesContext.body).toMatchObject({
+      code: 200,
+      error: null,
+      data: {
+        revoked: true,
+      },
+    });
+    await expect(services.auth.getCurrentUser(rootSession.accessToken)).resolves.toMatchObject({
+      email: 'root-own-devices@example.com',
+    });
   });
 
   it('removes managed user security bindings', async () => {
@@ -563,71 +859,3 @@ describe('users API', () => {
     });
   });
 });
-
-interface UserListBody {
-  data: {
-    pagination: {
-      page: number;
-      pageSize: number;
-      total: number;
-      totalPages: number;
-    };
-    users: unknown[];
-  };
-}
-
-interface UserUpdateBody {
-  data: {
-    username: string;
-    displayName: string;
-    gender?: string;
-    birthday?: string;
-    bio?: string;
-    location?: string;
-    websiteUrl?: string;
-    email: string;
-    emailVerified: boolean;
-    phoneNumber?: string;
-    phoneVerified: boolean;
-    available: boolean;
-    roles: string[];
-    permissions: string[];
-  };
-}
-
-interface ManagedUserDetailsBody {
-  data: {
-    user: {
-      id: string;
-      email: string;
-    };
-    security: ManagedSecurityBody['data'];
-    devices: unknown[];
-    ssoIdentities: Array<{
-      providerId: string;
-      providerName: string;
-      providerSubject: string;
-    }>;
-  };
-}
-
-interface ManagedSecurityBody {
-  data: {
-    mfaSettings: {
-      mfaRequiredForSso: boolean;
-      passkeyCount: number;
-      twoStepEnabled: boolean;
-    };
-    passkeys: unknown[];
-    totpStatus: {
-      enabled: boolean;
-      recoveryCodesRemaining: number;
-    };
-  };
-}
-
-interface ManagedSsoIdentitiesBody {
-  data: {
-    identities: unknown[];
-  };
-}

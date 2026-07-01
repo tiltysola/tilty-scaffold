@@ -1,23 +1,34 @@
+import { useIntl } from 'react-intl';
+
 import { LaptopIcon, LogOutIcon, MonitorIcon, SmartphoneIcon, TabletIcon } from 'lucide-react';
 
 import { type AuthDeviceSession } from '@/lib/auth';
+import { formatSecurityDate } from '@/lib/security-display';
 import { Badge } from '@/shadcn/components/ui/badge';
 import { Button } from '@/shadcn/components/ui/button';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from '@/shadcn/components/ui/item';
 
 import { ConfirmActionDialog } from '@/components/ConfirmActionDialog';
 
-import { formatSecurityDate } from './utils';
-
-export function DeviceItem({
-  device,
-  disabled,
-  onRevoke,
-}: {
+interface AuthDeviceItemProps {
   device: AuthDeviceSession;
   disabled: boolean;
   onRevoke: (sessionId: string) => void;
-}) {
+  revokeDescription: string;
+  revokeLabel: string;
+  revokeTitle: string;
+}
+
+export function AuthDeviceItem({
+  device,
+  disabled,
+  onRevoke,
+  revokeDescription,
+  revokeLabel,
+  revokeTitle,
+}: AuthDeviceItemProps) {
+  const intl = useIntl();
+
   return (
     <Item>
       <ItemMedia>
@@ -26,26 +37,26 @@ export function DeviceItem({
       <ItemContent>
         <ItemTitle>
           {device.deviceName}
-          {device.isCurrent ? <Badge variant="secondary">Current</Badge> : null}
+          {device.isCurrent ? <Badge variant="secondary">{intl.formatMessage({ id: 'common.current' })}</Badge> : null}
         </ItemTitle>
         <ItemDescription>
           {device.browser} · {device.os}
         </ItemDescription>
         <ItemDescription>
-          {formatSecurityDate(device.lastActiveAt)} · {device.ipAddress}
+          {formatSecurityDate(device.lastActiveAt, intl)} · {device.ipAddress}
         </ItemDescription>
       </ItemContent>
       {!device.isCurrent ? (
         <ItemActions>
           <ConfirmActionDialog
-            confirmLabel="Sign out"
-            description="This device session will be revoked immediately. The user will need to sign in again on that device."
+            confirmLabel={revokeLabel}
+            description={revokeDescription}
             onConfirm={() => onRevoke(device.id)}
-            title="Sign out this device?"
+            title={revokeTitle}
           >
             <Button disabled={disabled} size="sm" type="button" variant="destructive">
               <LogOutIcon />
-              Sign out
+              {revokeLabel}
             </Button>
           </ConfirmActionDialog>
         </ItemActions>

@@ -1,6 +1,8 @@
+import { SetupSmsPhoneCountryCode, setupSmsPhoneCountryCodeValues } from '@tilty/shared/setup';
+
 import { type PhoneCountryCode } from './auth';
 
-export const supportedPhoneCountryCodes: PhoneCountryCode[] = ['+86', '+852', '+853'];
+export const supportedPhoneCountryCodes: PhoneCountryCode[] = [...setupSmsPhoneCountryCodeValues];
 
 export function getPhoneCountryCode(phoneNumber: string | undefined, phoneCountryCodes: readonly PhoneCountryCode[]) {
   return [...phoneCountryCodes]
@@ -18,24 +20,16 @@ export function composePhoneNumber(form: { phoneCountryCode: PhoneCountryCode; p
   return localNumber ? `${form.phoneCountryCode}${localNumber}` : '';
 }
 
-export function formatPhoneCountryCode(countryCode: PhoneCountryCode) {
-  if (countryCode === '+86') {
-    return 'China Mainland (+86)';
-  }
-
-  if (countryCode === '+852') {
-    return 'Hong Kong, China (+852)';
-  }
-
-  return 'Macao, China (+853)';
+export function getPhoneCountryCodeMessageId(countryCode: PhoneCountryCode) {
+  return `setup.sms.profile.phone.country.code.${countryCode.replace('+', '')}`;
 }
 
 export function getPhonePlaceholder(countryCode: PhoneCountryCode) {
-  if (countryCode === '+86') {
+  if (countryCode === SetupSmsPhoneCountryCode.ChinaMainland) {
     return '13800138000';
   }
 
-  if (countryCode === '+852') {
+  if (countryCode === SetupSmsPhoneCountryCode.HongKong) {
     return '51234567';
   }
 

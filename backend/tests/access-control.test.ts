@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { SystemPermission, SystemRole } from '@tilty/shared/access-control';
+import { localeRequestHeader } from '@tilty/shared/i18n';
 
 import { initModels } from '../src/composition/models';
 import { createServices } from '../src/composition/services';
@@ -8,6 +9,7 @@ import { type RouteDefinition } from '../src/core/module';
 import { createSequelize } from '../src/infra/database';
 import { createMigrator } from '../src/infra/migrator';
 import { errorMiddleware } from '../src/middleware/error';
+import { localeMiddleware } from '../src/middleware/locale';
 import { defaultAuthCookieConfig } from '../src/modules/auth/auth.http';
 import { createUsersModule } from '../src/modules/users';
 import {
@@ -16,6 +18,24 @@ import {
   registerUserWithUserManagementAccess,
 } from './support/auth';
 import { createTestContext, getTestRoute, runMiddlewares } from './support/http';
+
+interface UserListBody {
+  data: {
+    roles: Array<{
+      description: string;
+      key: string;
+      name: string;
+    }>;
+    users: unknown[];
+  };
+}
+
+interface UserBody {
+  data: {
+    permissions: string[];
+    roles: string[];
+  };
+}
 
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
 
@@ -92,6 +112,29 @@ describe('access control', () => {
       SystemRole.UserAdmin,
       SystemRole.UserList,
     ]);
+
+    const localizedContext = await runMiddlewares(
+      [errorMiddleware(), localeMiddleware(), ...listRoute.handlers],
+      createTestContext(
+        undefined,
+        {
+          [localeRequestHeader]: 'zh-CN',
+        },
+        undefined,
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
+    );
+    const localizedBody = localizedContext.body as UserListBody;
+
+    expect(localizedBody.data.roles[0]).toMatchObject({
+      key: SystemRole.Root,
+      name: '根管理员',
+      description: '完整的平台管理权限。',
+    });
   });
 
   it('updates user roles and prevents removing the final root', async () => {
@@ -166,19 +209,3 @@ describe('access control', () => {
     });
   });
 });
-
-interface UserListBody {
-  data: {
-    roles: Array<{
-      key: string;
-    }>;
-    users: unknown[];
-  };
-}
-
-interface UserBody {
-  data: {
-    permissions: string[];
-    roles: string[];
-  };
-}

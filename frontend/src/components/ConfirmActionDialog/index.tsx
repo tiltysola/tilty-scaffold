@@ -1,4 +1,5 @@
 import { type ComponentProps, type ReactNode } from 'react';
+import { useIntl } from 'react-intl';
 
 import { AlertTriangleIcon } from 'lucide-react';
 
@@ -6,15 +7,15 @@ import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
-  AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogMedia,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/shadcn/components/ui/alert-dialog';
 import { type Button } from '@/shadcn/components/ui/button';
+
+import { AppAlertDialogContent } from '@/components/AppDialog';
 
 interface ConfirmActionDialogProps {
   cancelLabel?: string;
@@ -30,7 +31,7 @@ interface ConfirmActionDialogProps {
 }
 
 export function ConfirmActionDialog({
-  cancelLabel = 'Cancel',
+  cancelLabel,
   children,
   confirmLabel,
   confirmVariant = 'destructive',
@@ -41,22 +42,30 @@ export function ConfirmActionDialog({
   open,
   title,
 }: ConfirmActionDialogProps) {
+  const intl = useIntl();
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       {children ? <AlertDialogTrigger asChild>{children}</AlertDialogTrigger> : null}
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          {icon ? <AlertDialogMedia className="bg-destructive/10 text-destructive">{icon}</AlertDialogMedia> : null}
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
-        </AlertDialogHeader>
+      <AppAlertDialogContent className="grid-rows-[auto_auto]">
+        <div className={icon ? 'grid grid-cols-[auto_minmax(0,1fr)] gap-4' : 'grid gap-3 text-center'}>
+          {icon ? (
+            <AlertDialogMedia className="!m-0 bg-destructive/10 text-destructive sm:!row-span-1">
+              {icon}
+            </AlertDialogMedia>
+          ) : null}
+          <div className={icon ? 'grid min-w-0 gap-3 text-left' : 'grid gap-3'}>
+            <AlertDialogTitle className="sm:!col-start-auto">{title}</AlertDialogTitle>
+            <AlertDialogDescription>{description}</AlertDialogDescription>
+          </div>
+        </div>
         <AlertDialogFooter>
-          <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
+          <AlertDialogCancel>{cancelLabel ?? intl.formatMessage({ id: 'common.cancel' })}</AlertDialogCancel>
           <AlertDialogAction onClick={onConfirm} variant={confirmVariant}>
             {confirmLabel}
           </AlertDialogAction>
         </AlertDialogFooter>
-      </AlertDialogContent>
+      </AppAlertDialogContent>
     </AlertDialog>
   );
 }

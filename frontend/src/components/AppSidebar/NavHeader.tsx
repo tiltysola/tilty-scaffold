@@ -1,11 +1,13 @@
+import { useIntl } from 'react-intl';
 import { useLocation } from 'react-router-dom';
 
-import { getPageTitle } from '@/router';
+import { getPageTitleMessageId } from '@/router';
 import { SidebarTrigger } from '@/shadcn/components/ui/sidebar';
 
 const Index = () => {
   const { pathname } = useLocation();
-  const title = getPageTitle(pathname);
+  const intl = useIntl();
+  const title = intl.formatMessage({ id: getPageTitleMessageId(pathname) });
 
   return (
     <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b border-foreground/5 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-(--header-height)">

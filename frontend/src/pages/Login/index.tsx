@@ -1,17 +1,18 @@
 import { type SubmitEventHandler, useEffect, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import { type z } from 'zod';
 
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { useFormState } from '@/hooks/useFormState';
-import { ApiError } from '@/lib/api';
+import { ApiError, getApiErrorMessage } from '@/lib/api';
 import { fetchSsoConfig, getSsoStartUrl, isVerificationRequired, login, type SsoPublicConfig } from '@/lib/auth';
-import { loginCredentialsSchema } from '@/lib/auth-validation';
 import { routePath } from '@/router';
 import { Button } from '@/shadcn/components/ui/button';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
+import { loginCredentialsSchema } from '@tilty/shared/validation';
 
 import { AuthCard } from '@/components/AuthCard';
 import FormMessage from '@/components/FormMessage';
@@ -29,6 +30,7 @@ const Index = () => {
   });
   const location = useLocation();
   const navigate = useNavigate();
+  const intl = useIntl();
   const { error, pending: submitting, run, setError } = useAsyncAction();
   const { form, handleChange } = useFormState<LoginFormState>({
     identifier: '',
@@ -54,14 +56,14 @@ const Index = () => {
 
         setSsoConfig({ enabled: false, loginEnabled: false, providers: [] });
         if (requestError instanceof ApiError && requestError.code === 'SETUP_RESTART_REQUIRED') {
-          setError(requestError.message);
+          setError(getApiErrorMessage(requestError, intl.formatMessage({ id: 'api.error.SETUP_RESTART_REQUIRED' })));
         }
       });
 
     return () => {
       isActive = false;
     };
-  }, [setError]);
+  }, [intl, setError]);
 
   const handleSubmit: SubmitEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
@@ -70,11 +72,11 @@ const Index = () => {
     const parsed = loginCredentialsSchema.safeParse(form);
 
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? 'Login credentials are invalid.');
+      setError(intl.formatMessage({ id: parsed.error.issues[0]?.message ?? 'validation.login.credentials.invalid' }));
       return;
     }
 
-    const session = await run(() => login(parsed.data), 'Login could not be completed.');
+    const session = await run(() => login(parsed.data), intl.formatMessage({ id: 'auth.login.failed' }));
 
     if (session) {
       if (isVerificationRequired(session)) {
@@ -96,22 +98,22 @@ const Index = () => {
 
   return (
     <AuthCard
-      description="Log in with account credentials to access the dashboard."
+      description={intl.formatMessage({ id: 'auth.login.description' })}
       footer={
         <>
           <div className="flex gap-2">
-            <span>Need an account?</span>
+            <span>{intl.formatMessage({ id: 'auth.need.account' })}</span>
             <Link className="font-medium text-primary hover:underline" to={routePath('register')}>
-              Create account
+              {intl.formatMessage({ id: 'auth.create.account' })}
             </Link>
           </div>
           <Link className="font-medium text-primary hover:underline" to={routePath('forgotPassword')}>
-            Password recovery
+            {intl.formatMessage({ id: 'auth.forgot.password.title' })}
           </Link>
         </>
       }
       footerClassName="flex-col justify-center gap-2 text-sm text-muted-foreground"
-      title="Log in"
+      title={intl.formatMessage({ id: 'auth.login' })}
     >
       {ssoLoginProviders.length > 0 ? (
         <div className="mb-4 grid gap-4">
@@ -125,46 +127,46 @@ const Index = () => {
                 variant="outline"
               >
                 <SsoProviderIcon iconUrl={provider.iconUrl} name={provider.name} size="compact" />
-                Log in with {provider.name}
+                {intl.formatMessage({ id: 'auth.login.with.provider' }, { name: provider.name })}
               </Button>
             ))}
           </div>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <div className="h-px flex-1 bg-border" />
-            <span>Alternative</span>
+            <span>{intl.formatMessage({ id: 'auth.alternative' })}</span>
             <div className="h-px flex-1 bg-border" />
           </div>
         </div>
       ) : null}
       <form className="grid gap-4" onSubmit={handleSubmit}>
         <div className="grid gap-2">
-          <Label htmlFor="identifier">Email or username</Label>
+          <Label htmlFor="identifier">{intl.formatMessage({ id: 'auth.email.or.username' })}</Label>
           <Input
             autoComplete="username"
             disabled={submitting}
             id="identifier"
             name="identifier"
             onChange={handleChange('identifier')}
-            placeholder="name@example.com or username"
+            placeholder={intl.formatMessage({ id: 'auth.email.or.username.placeholder' })}
             value={form.identifier}
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="password">Password</Label>
+          <Label htmlFor="password">{intl.formatMessage({ id: 'auth.password' })}</Label>
           <Input
             autoComplete="current-password"
             disabled={submitting}
             id="password"
             name="password"
             onChange={handleChange('password')}
-            placeholder="Enter your password"
+            placeholder={intl.formatMessage({ id: 'auth.password.placeholder' })}
             type="password"
             value={form.password}
           />
         </div>
         <FormMessage message={error} variant="error" />
         <Button className="w-full" disabled={submitting} type="submit">
-          {submitting ? 'Logging in' : 'Log in'}
+          {intl.formatMessage({ id: submitting ? 'auth.processing' : 'auth.login' })}
         </Button>
       </form>
     </AuthCard>

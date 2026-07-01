@@ -2,14 +2,21 @@ import { Op, type Transaction } from 'sequelize';
 
 import {
   hasPermission as hasGrantedPermission,
+  isSystemPermissionKey,
+  isSystemRoleKey,
+  SystemPermission,
   systemPermissionDefinitions,
+  type SystemPermissionKey,
   systemPermissionKeys,
   SystemRole,
   systemRoleDefinitions,
+  type SystemRoleKey,
   systemRoleKeys,
 } from '@tilty/shared/access-control';
+import { defaultLocale, type SupportedLocale } from '@tilty/shared/i18n';
 
 import { AppError } from '../../core/errors';
+import { type BackendMessageId, getBackendMessage } from '../../i18n';
 import { type UserModel } from '../users/user.model';
 import {
   type PermissionModel,
@@ -45,6 +52,41 @@ interface DatabaseWriteOptions {
   transaction?: Transaction;
 }
 
+type SystemAccessMessageIds<Key extends string> = Record<
+  Key,
+  { description: BackendMessageId; name: BackendMessageId }
+>;
+
+const systemPermissionMessageIds = {
+  [SystemPermission.Root]: {
+    description: 'access.permission.ROOT.description',
+    name: 'access.permission.ROOT.name',
+  },
+  [SystemPermission.UserAdmin]: {
+    description: 'access.permission.USER_ADMIN.description',
+    name: 'access.permission.USER_ADMIN.name',
+  },
+  [SystemPermission.UserList]: {
+    description: 'access.permission.USER_LIST.description',
+    name: 'access.permission.USER_LIST.name',
+  },
+} as const satisfies SystemAccessMessageIds<SystemPermissionKey>;
+
+const systemRoleMessageIds = {
+  [SystemRole.Root]: {
+    description: 'access.role.ROOT.description',
+    name: 'access.role.ROOT.name',
+  },
+  [SystemRole.UserAdmin]: {
+    description: 'access.role.USER_ADMIN.description',
+    name: 'access.role.USER_ADMIN.name',
+  },
+  [SystemRole.UserList]: {
+    description: 'access.role.USER_LIST.description',
+    name: 'access.role.USER_LIST.name',
+  },
+} as const satisfies SystemAccessMessageIds<SystemRoleKey>;
+
 export class AccessControlService {
   constructor(private readonly models: AccessControlModels) {}
 
@@ -57,6 +99,9 @@ export class AccessControlService {
 
     await sequelize.transaction(async (transaction) => {
       for (const permission of systemPermissionDefinitions) {
+        const messages = systemPermissionMessageIds[permission.key];
+        const name = getBackendMessage(defaultLocale, messages.name);
+        const description = getBackendMessage(defaultLocale, messages.description);
         const [record, created] = await this.models.permission.findOrCreate({
           transaction,
           where: {
@@ -64,8 +109,8 @@ export class AccessControlService {
           },
           defaults: {
             key: permission.key,
-            name: permission.name,
-            description: permission.description,
+            name,
+            description,
             system: true,
           },
         });
@@ -73,8 +118,8 @@ export class AccessControlService {
         if (!created) {
           await record.update(
             {
-              name: permission.name,
-              description: permission.description,
+              name,
+              description,
               system: true,
             },
             {
@@ -85,6 +130,9 @@ export class AccessControlService {
       }
 
       for (const role of systemRoleDefinitions) {
+        const messages = systemRoleMessageIds[role.key];
+        const name = getBackendMessage(defaultLocale, messages.name);
+        const description = getBackendMessage(defaultLocale, messages.description);
         const [record, created] = await this.models.role.findOrCreate({
           transaction,
           where: {
@@ -92,8 +140,8 @@ export class AccessControlService {
           },
           defaults: {
             key: role.key,
-            name: role.name,
-            description: role.description,
+            name,
+            description,
             system: true,
             available: true,
           },
@@ -102,8 +150,8 @@ export class AccessControlService {
         if (!created) {
           await record.update(
             {
-              name: role.name,
-              description: role.description,
+              name,
+              description,
               system: true,
               available: true,
             },
@@ -137,20 +185,15 @@ export class AccessControlService {
     });
   }
 
-  async listPermissions() {
+  async listPermissions(locale: SupportedLocale = defaultLocale) {
     const permissions = await this.models.permission.findAll({
       order: [['key', 'ASC']],
     });
 
-    return permissions.map((permission) => ({
-      key: permission.key,
-      name: permission.name,
-      description: permission.description,
-      system: permission.system,
-    }));
+    return permissions.map((permission) => toPermissionSummary(permission, locale));
   }
 
-  async listRoles() {
+  async listRoles(locale: SupportedLocale = defaultLocale) {
     const roles = await this.models.role.findAll({
       order: [
         ['system', 'DESC'],
@@ -159,7 +202,7 @@ export class AccessControlService {
     });
     const permissionKeysByRoleId = await this.getPermissionKeysByRoleIds(roles.map((role) => role.id));
 
-    return roles.map((role) => toRoleSummary(role, permissionKeysByRoleId.get(role.id) ?? []));
+    return roles.map((role) => toRoleSummary(role, permissionKeysByRoleId.get(role.id) ?? [], locale));
   }
 
   async getUserAccess(userId: string) {
@@ -225,7 +268,7 @@ export class AccessControlService {
     const role = await this.findAvailableRoleByKey(roleKey);
 
     if (!role?.system) {
-      throw new AppError('ROLE_NOT_FOUND', 'Role was not found.', 404);
+      throw new AppError('ROLE_NOT_FOUND', 'error.ROLE_NOT_FOUND', 404);
     }
 
     await this.models.userRole.findOrCreate({
@@ -245,7 +288,7 @@ export class AccessControlService {
     const roles = await this.findAvailableRolesByKeys(normalizedRoleKeys, options);
 
     if (roles.length !== normalizedRoleKeys.length) {
-      throw new AppError('ROLE_NOT_FOUND', 'One or more roles were not found.', 404);
+      throw new AppError('ROLE_NOT_FOUND', 'error.ROLE_NOT_FOUND', 404);
     }
 
     await this.preventRemovingLastRoot(
@@ -446,18 +489,32 @@ export function hasPermission(access: UserAccess, requiredPermission: string) {
 
 export function assertPermission(access: UserAccess, requiredPermission: string) {
   if (!hasPermission(access, requiredPermission)) {
-    throw new AppError('AUTH_FORBIDDEN', 'You do not have permission to perform this action.', 403, {
+    throw new AppError('AUTH_FORBIDDEN', 'error.AUTH_FORBIDDEN', 403, {
       requiredPermission,
     });
   }
 }
 
-function toRoleSummary(role: RoleModel, permissionKeys: string[]): RoleSummary {
+function toPermissionSummary(permission: PermissionModel, locale: SupportedLocale) {
+  const systemMessages =
+    permission.system && isSystemPermissionKey(permission.key) ? systemPermissionMessageIds[permission.key] : null;
+
+  return {
+    key: permission.key,
+    name: systemMessages ? getBackendMessage(locale, systemMessages.name) : permission.name,
+    description: systemMessages ? getBackendMessage(locale, systemMessages.description) : permission.description,
+    system: permission.system,
+  };
+}
+
+function toRoleSummary(role: RoleModel, permissionKeys: string[], locale: SupportedLocale): RoleSummary {
+  const systemMessages = role.system && isSystemRoleKey(role.key) ? systemRoleMessageIds[role.key] : null;
+
   return {
     id: role.id,
     key: role.key,
-    name: role.name,
-    description: role.description,
+    name: systemMessages ? getBackendMessage(locale, systemMessages.name) : role.name,
+    description: systemMessages ? getBackendMessage(locale, systemMessages.description) : role.description,
     system: role.system,
     available: role.available,
     permissionKeys,
@@ -509,5 +566,5 @@ function sortKeys(keys: string[], systemOrder: readonly string[]) {
 }
 
 function throwLastRootRequired(): never {
-  throw new AppError('LAST_ROOT_ROLE_REQUIRED', 'At least one available user must keep the ROOT role.', 409);
+  throw new AppError('LAST_ROOT_ROLE_REQUIRED', 'error.LAST_ROOT_ROLE_REQUIRED', 409);
 }

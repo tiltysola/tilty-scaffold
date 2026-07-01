@@ -17,7 +17,10 @@ export default defineConfig({
     alias: {
       '@': path.resolve(dirname, 'src'),
       '@tilty/shared/access-control': path.resolve(sharedSourceRoot, 'access-control.ts'),
+      '@tilty/shared/auth': path.resolve(sharedSourceRoot, 'auth.ts'),
+      '@tilty/shared/i18n': path.resolve(sharedSourceRoot, 'i18n.ts'),
       '@tilty/shared/paths': path.resolve(sharedSourceRoot, 'paths.ts'),
+      '@tilty/shared/setup': path.resolve(sharedSourceRoot, 'setup.ts'),
       '@tilty/shared/validation': path.resolve(sharedSourceRoot, 'validation.ts'),
       '@tilty/shared': path.resolve(sharedSourceRoot, 'index.ts'),
     },
@@ -38,6 +41,7 @@ export default defineConfig({
       '/api': 'http://localhost:3000',
       '/uploads': 'http://localhost:3000',
     },
+    allowedHosts: ['dev.tiltysola.com'],
     strictPort: true,
   },
 });

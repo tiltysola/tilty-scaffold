@@ -1,21 +1,20 @@
-import { type ReactNode, useState } from 'react';
+import { useIntl } from 'react-intl';
 
-import { CheckIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react';
+import { PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react';
 
 import { Button } from '@/shadcn/components/ui/button';
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from '@/shadcn/components/ui/sheet';
+import { Sheet } from '@/shadcn/components/ui/sheet';
 
 import { ConfirmActionDialog } from '@/components/ConfirmActionDialog';
 
-import { ConfigurationTextInput, SelectControl } from './FormControls';
+import {
+  SetupProfileBooleanSelect,
+  SetupProfileSection,
+  SetupProfileSheet,
+  type SetupProfileTextField,
+  SetupProfileTextFields,
+} from './ProfileSheetControls';
+import { useProfileListEditor } from './useProfileListEditor';
 import { isProfileObject, parseProfileArray } from './utils';
 
 interface SmtpProfileDraft {
@@ -30,12 +29,6 @@ interface SmtpProfileDraft {
 }
 
 type SmtpProfileField = keyof SmtpProfileDraft;
-type SmtpTextField = {
-  key: SmtpProfileField;
-  label: string;
-  placeholder: string;
-  type?: 'password' | 'text';
-};
 
 const defaultSmtpProfile: SmtpProfileDraft = {
   from: '',
@@ -48,20 +41,18 @@ const defaultSmtpProfile: SmtpProfileDraft = {
   username: '',
 };
 
-const smtpServerTextFields: SmtpTextField[] = [
-  { key: 'host', label: 'SMTP Host', placeholder: 'smtp.example.com' },
-  { key: 'port', label: 'SMTP Port', placeholder: '465' },
-  { key: 'from', label: 'SMTP Sender', placeholder: 'Tilty <no-reply@example.com>' },
+const smtpServerTextFields: Array<SetupProfileTextField<SmtpProfileField>> = [
+  { key: 'host' },
+  { key: 'port' },
+  { key: 'from' },
 ];
 
-const smtpCredentialTextFields: SmtpTextField[] = [
-  { key: 'username', label: 'SMTP Username', placeholder: 'no-reply@example.com' },
-  { key: 'password', label: 'SMTP Password', placeholder: 'SMTP password or app token', type: 'password' },
+const smtpCredentialTextFields: Array<SetupProfileTextField<SmtpProfileField>> = [
+  { key: 'username' },
+  { key: 'password', type: 'password' },
 ];
 
-const smtpOptionsTextFields: SmtpTextField[] = [
-  { key: 'timeoutMs', label: 'SMTP Request Timeout (ms)', placeholder: '10000' },
-];
+const smtpOptionsTextFields: Array<SetupProfileTextField<SmtpProfileField>> = [{ key: 'timeoutMs' }];
 
 export function SmtpProfilesField({
   disabled,
@@ -72,36 +63,24 @@ export function SmtpProfilesField({
   onValueChange: (value: string) => void;
   value: string;
 }) {
-  const [activeProfileIndex, setActiveProfileIndex] = useState<number | null>(null);
+  const intl = useIntl();
   const profiles = parseProfileArray(value, isProfileObject).map(normalizeSmtpProfileDraft);
-  const activeProfile = activeProfileIndex === null ? null : profiles[activeProfileIndex];
-  const updateProfiles = (nextProfiles: SmtpProfileDraft[]) => {
-    onValueChange(JSON.stringify(nextProfiles.map(normalizeSmtpProfileForStorage)));
-  };
-  const updateProfile = (index: number, field: SmtpProfileField, fieldValue: string | boolean) => {
-    updateProfiles(
-      profiles.map((profile, profileIndex) => (profileIndex === index ? { ...profile, [field]: fieldValue } : profile)),
-    );
-  };
+  const { activeProfile, activeProfileIndex, closeProfile, openProfile, removeProfile, updateProfile, updateProfiles } =
+    useProfileListEditor({
+      normalizeForStorage: normalizeSmtpProfileForStorage,
+      onValueChange,
+      profiles,
+    });
   const addProfile = () => {
     updateProfiles([...profiles, { ...defaultSmtpProfile }]);
-    setActiveProfileIndex(profiles.length);
-  };
-  const removeProfile = (index: number) => {
-    updateProfiles(profiles.filter((_, profileIndex) => profileIndex !== index));
-
-    if (activeProfileIndex === index) {
-      setActiveProfileIndex(null);
-    } else if (activeProfileIndex !== null && activeProfileIndex > index) {
-      setActiveProfileIndex(activeProfileIndex - 1);
-    }
+    openProfile(profiles.length);
   };
 
   return (
     <div className="grid gap-4">
       {profiles.length === 0 ? (
         <div className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
-          No SMTP profiles are configured.
+          {intl.formatMessage({ id: 'setup.smtp.profiles.empty' })}
         </div>
       ) : null}
       {profiles.map((profile, index) => (
@@ -111,30 +90,26 @@ export function SmtpProfilesField({
         >
           <div className="grid min-w-0 gap-2">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <div className="min-w-0 truncate text-sm font-medium">{getSmtpProfileLabel(profile, index)}</div>
+              <div className="min-w-0 truncate text-sm font-medium">{getSmtpProfileLabel(profile, index, intl)}</div>
             </div>
-            <div className="truncate text-xs text-muted-foreground">{profile.from || 'SMTP sender is required'}</div>
+            <div className="truncate text-xs text-muted-foreground">
+              {profile.from || intl.formatMessage({ id: 'setup.smtp.profiles.sender.required' })}
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-1 self-start">
-            <Button
-              disabled={disabled}
-              onClick={() => setActiveProfileIndex(index)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
+            <Button disabled={disabled} onClick={() => openProfile(index)} size="sm" type="button" variant="outline">
               <PencilIcon />
-              Edit
+              {intl.formatMessage({ id: 'common.edit' })}
             </Button>
             <ConfirmActionDialog
-              confirmLabel="Remove"
-              description="This SMTP profile will be removed from the current configuration form. Save changes to apply it."
+              confirmLabel={intl.formatMessage({ id: 'common.remove' })}
+              description={intl.formatMessage({ id: 'setup.smtp.profiles.remove.description' })}
               onConfirm={() => removeProfile(index)}
-              title="Remove SMTP profile?"
+              title={intl.formatMessage({ id: 'setup.remove.smtp.profile.title' })}
             >
               <Button disabled={disabled} size="icon-sm" type="button" variant="destructive">
                 <Trash2Icon />
-                <span className="sr-only">Remove SMTP profile</span>
+                <span className="sr-only">{intl.formatMessage({ id: 'setup.remove.smtp.profile' })}</span>
               </Button>
             </ConfirmActionDialog>
           </div>
@@ -143,14 +118,14 @@ export function SmtpProfilesField({
       <div>
         <Button disabled={disabled} onClick={addProfile} type="button" variant="outline">
           <PlusIcon />
-          Add SMTP profile
+          {intl.formatMessage({ id: 'setup.smtp.profiles.add' })}
         </Button>
       </div>
       <Sheet
         open={Boolean(activeProfile)}
         onOpenChange={(open: boolean) => {
           if (!open) {
-            setActiveProfileIndex(null);
+            closeProfile();
           }
         }}
       >
@@ -178,146 +153,68 @@ function SmtpProfileSheetContent({
   onFieldChange: (index: number, field: SmtpProfileField, value: string | boolean) => void;
   profile: SmtpProfileDraft;
 }) {
+  const intl = useIntl();
+
   return (
-    <SheetContent className="w-full overflow-hidden p-0 sm:max-w-2xl lg:max-w-3xl">
-      <SheetHeader className="border-b pr-12">
-        <SheetTitle>{getSmtpProfileLabel(profile, index)}</SheetTitle>
-        <SheetDescription>{profile.from || 'SMTP sender is required'}</SheetDescription>
-      </SheetHeader>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4">
-        <div className="grid gap-6 py-1 pb-4">
-          <SmtpProfileSection title="Server">
-            <div className="grid gap-4">
-              <SmtpProfileTextFields
-                disabled={disabled}
-                fields={smtpServerTextFields}
-                index={index}
-                onFieldChange={onFieldChange}
-                profile={profile}
-              />
-            </div>
-          </SmtpProfileSection>
-          <SmtpProfileSection title="Credentials">
-            <div className="grid gap-4">
-              <SmtpProfileTextFields
-                disabled={disabled}
-                fields={smtpCredentialTextFields}
-                index={index}
-                onFieldChange={onFieldChange}
-                profile={profile}
-              />
-            </div>
-          </SmtpProfileSection>
-          <SmtpProfileSection title="Transport">
-            <div className="grid gap-4">
-              <SmtpProfileBooleanSelect
-                disabled={disabled}
-                id={`setup-smtp-profile-${index}-secure`}
-                label="SMTP Implicit TLS"
-                onChange={(enabled) => onFieldChange(index, 'secure', enabled)}
-                value={profile.secure}
-              />
-              <SmtpProfileBooleanSelect
-                disabled={disabled}
-                falseLabel="Disabled"
-                id={`setup-smtp-profile-${index}-starttls`}
-                label="SMTP STARTTLS"
-                onChange={(enabled) => onFieldChange(index, 'startTls', enabled)}
-                trueLabel="Enabled"
-                value={profile.startTls}
-              />
-            </div>
-          </SmtpProfileSection>
-          <SmtpProfileSection title="Options">
-            <div className="grid gap-4">
-              <SmtpProfileTextFields
-                disabled={disabled}
-                fields={smtpOptionsTextFields}
-                index={index}
-                onFieldChange={onFieldChange}
-                profile={profile}
-              />
-            </div>
-          </SmtpProfileSection>
+    <SetupProfileSheet
+      description={profile.from || intl.formatMessage({ id: 'setup.smtp.profiles.sender.required' })}
+      title={getSmtpProfileLabel(profile, index, intl)}
+    >
+      <SetupProfileSection title={intl.formatMessage({ id: 'setup.section.server' })}>
+        <div className="grid gap-4">
+          <SetupProfileTextFields
+            disabled={disabled}
+            fields={smtpServerTextFields}
+            idPrefix={`setup-smtp-profile-${index}`}
+            messagePrefix="setup.smtp.profile"
+            onFieldChange={(field, fieldValue) => onFieldChange(index, field, fieldValue)}
+            values={profile}
+          />
         </div>
-      </div>
-      <SheetFooter className="border-t">
-        <SheetClose asChild>
-          <Button type="button">
-            <CheckIcon />
-            Done
-          </Button>
-        </SheetClose>
-      </SheetFooter>
-    </SheetContent>
-  );
-}
-
-function SmtpProfileSection({ children, title }: { children: ReactNode; title: string }) {
-  return (
-    <section className="grid gap-3">
-      <h4 className="text-sm font-semibold text-foreground">{title}</h4>
-      {children}
-    </section>
-  );
-}
-
-function SmtpProfileTextFields({
-  disabled,
-  fields,
-  index,
-  onFieldChange,
-  profile,
-}: {
-  disabled: boolean;
-  fields: SmtpTextField[];
-  index: number;
-  onFieldChange: (index: number, field: SmtpProfileField, value: string | boolean) => void;
-  profile: SmtpProfileDraft;
-}) {
-  return fields.map((field) => (
-    <ConfigurationTextInput
-      disabled={disabled}
-      id={`setup-smtp-profile-${index}-${field.key}`}
-      key={field.key}
-      label={field.label}
-      onChange={(fieldValue) => onFieldChange(index, field.key, fieldValue)}
-      placeholder={field.placeholder}
-      type={field.type}
-      value={String(profile[field.key])}
-    />
-  ));
-}
-
-function SmtpProfileBooleanSelect({
-  disabled,
-  falseLabel = 'Disabled',
-  id,
-  label,
-  onChange,
-  trueLabel = 'Enabled',
-  value,
-}: {
-  disabled: boolean;
-  falseLabel?: string;
-  id: string;
-  label: string;
-  onChange: (value: boolean) => void;
-  trueLabel?: string;
-  value: boolean;
-}) {
-  return (
-    <SelectControl
-      disabled={disabled}
-      id={id}
-      label={label}
-      onValueChange={(fieldValue) => onChange(fieldValue === 'true')}
-      options={[
-        { label: trueLabel, value: 'true' },
-        { label: falseLabel, value: 'false' },
-      ]}
-      value={String(value)}
-    />
+      </SetupProfileSection>
+      <SetupProfileSection title={intl.formatMessage({ id: 'setup.section.credentials' })}>
+        <div className="grid gap-4">
+          <SetupProfileTextFields
+            disabled={disabled}
+            fields={smtpCredentialTextFields}
+            idPrefix={`setup-smtp-profile-${index}`}
+            messagePrefix="setup.smtp.profile"
+            onFieldChange={(field, fieldValue) => onFieldChange(index, field, fieldValue)}
+            values={profile}
+          />
+        </div>
+      </SetupProfileSection>
+      <SetupProfileSection title={intl.formatMessage({ id: 'setup.section.transport' })}>
+        <div className="grid gap-4">
+          <SetupProfileBooleanSelect
+            disabled={disabled}
+            id={`setup-smtp-profile-${index}-secure`}
+            label={intl.formatMessage({ id: 'setup.smtp.profile.secure.label' })}
+            onChange={(enabled) => onFieldChange(index, 'secure', enabled)}
+            value={profile.secure}
+          />
+          <SetupProfileBooleanSelect
+            disabled={disabled}
+            id={`setup-smtp-profile-${index}-starttls`}
+            label={intl.formatMessage({ id: 'setup.smtp.profile.start.tls.label' })}
+            onChange={(enabled) => onFieldChange(index, 'startTls', enabled)}
+            value={profile.startTls}
+          />
+        </div>
+      </SetupProfileSection>
+      <SetupProfileSection title={intl.formatMessage({ id: 'setup.section.options' })}>
+        <div className="grid gap-4">
+          <SetupProfileTextFields
+            disabled={disabled}
+            fields={smtpOptionsTextFields}
+            idPrefix={`setup-smtp-profile-${index}`}
+            messagePrefix="setup.smtp.profile"
+            onFieldChange={(field, fieldValue) => onFieldChange(index, field, fieldValue)}
+            values={profile}
+          />
+        </div>
+      </SetupProfileSection>
+    </SetupProfileSheet>
   );
 }
 
@@ -347,6 +244,10 @@ function normalizeSmtpProfileForStorage(profile: SmtpProfileDraft) {
   };
 }
 
-function getSmtpProfileLabel(profile: SmtpProfileDraft, index: number) {
-  return profile.host.trim() || profile.from.trim() || `SMTP profile ${index + 1}`;
+function getSmtpProfileLabel(profile: SmtpProfileDraft, index: number, intl: ReturnType<typeof useIntl>) {
+  return (
+    profile.host.trim() ||
+    profile.from.trim() ||
+    intl.formatMessage({ id: 'setup.smtp.profiles.default.name' }, { index: index + 1 })
+  );
 }

@@ -117,6 +117,18 @@ export async function fetchUserDetails(userId: string) {
   });
 }
 
+export function revokeUserDeviceSession(userId: string, sessionId: string) {
+  return authenticatedApiRequest<{ revoked: true }>(`/api/users/${userId}/devices/${sessionId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function revokeUserDeviceSessions(userId: string) {
+  return authenticatedApiRequest<{ revoked: true }>(`/api/users/${userId}/devices`, {
+    method: 'DELETE',
+  });
+}
+
 export async function updateUserRoles(userId: string, roleKeys: string[]) {
   return authenticatedApiRequest<UserListItem>(`/api/users/${userId}/roles`, {
     body: {

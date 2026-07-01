@@ -1,3 +1,4 @@
+import { formatStaticMessage } from '@/i18n';
 import {
   type AuthenticationResponseJSON,
   type PublicKeyCredentialCreationOptionsJSON,
@@ -6,14 +7,20 @@ import {
   startAuthentication,
   startRegistration,
 } from '@simplewebauthn/browser';
+import {
+  type AuthMfaMethodValue,
+  authMfaMethodValues,
+  type AuthSelectableVerificationPurposeValue,
+  type AuthSessionDeviceTypeValue,
+  type AuthVerificationCodeMethodValue,
+  AuthVerificationMethod,
+  type AuthVerificationMethodValue,
+  type AuthVerificationPurposeValue,
+} from '@tilty/shared/auth';
 import { isSafeRelativePath } from '@tilty/shared/paths';
+import { type SetupSmsPhoneCountryCodeValue, type SetupSsoProtocolValue } from '@tilty/shared/setup';
 
 import { ApiError, apiRequest, type ApiRequestOptions } from './api';
-
-const authSessionStorageKey = 'tilty-scaffold.auth.session';
-
-const accessTokenRefreshSkewMs = 30_000;
-const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 export interface AuthUser {
   username: string;
@@ -48,8 +55,6 @@ interface PersistedAuthSession {
   refreshTokenExpiresAt: string;
 }
 
-const persistedAuthSessionKeys = new Set(['accessTokenExpiresAt', 'refreshTokenExpiresAt']);
-
 export type AuthStatus = 'anonymous' | 'authenticated' | 'restoring';
 
 export interface AuthSnapshot {
@@ -58,7 +63,7 @@ export interface AuthSnapshot {
   status: AuthStatus;
 }
 
-export type PhoneCountryCode = '+86' | '+852' | '+853';
+export type PhoneCountryCode = SetupSmsPhoneCountryCodeValue;
 
 export interface AuthPublicConfig {
   fileUploadMaxBytes: number;
@@ -82,23 +87,12 @@ interface LoginInput {
   password: string;
 }
 
-export type MfaMethod = 'email' | 'passkey' | 'sms' | 'totp';
-export type VerificationMethodName = MfaMethod | 'password';
-export type VerificationPurpose =
-  | 'change_password'
-  | 'login'
-  | 'manage_mfa'
-  | 'manage_passkey'
-  | 'manage_sso'
-  | 'manage_totp'
-  | 'system_settings'
-  | 'sso'
-  | 'update_contact'
-  | 'user_management';
+export type MfaMethod = AuthMfaMethodValue;
+export type VerificationMethodName = AuthVerificationMethodValue;
+export type VerificationPurpose = AuthVerificationPurposeValue;
 
 export interface VerificationMethod {
   method: VerificationMethodName;
-  label: string;
   maskedTarget?: string;
 }
 
@@ -195,7 +189,7 @@ export interface SsoPublicProvider {
   id: string;
   name: string;
   iconUrl?: string;
-  protocol: 'oauth2' | 'oidc';
+  protocol: SetupSsoProtocolValue;
   loginEnabled: boolean;
   bindingEnabled: boolean;
 }
@@ -242,7 +236,7 @@ export interface TotpRecoveryCodesResult {
 export interface AuthDeviceSession {
   id: string;
   deviceName: string;
-  deviceType: 'desktop' | 'mobile' | 'tablet';
+  deviceType: AuthSessionDeviceTypeValue;
   browser: string;
   os: string;
   ipAddress: string;
@@ -292,6 +286,12 @@ interface AuthStoreRuntime {
 interface AuthStoreGlobal {
   __tiltyScaffoldAuthStoreRuntime__?: AuthStoreRuntime;
 }
+
+const authSessionStorageKey = 'tilty-scaffold.auth.session';
+const accessTokenRefreshSkewMs = 30_000;
+const authMfaMethodSet = new Set<string>(authMfaMethodValues);
+const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const persistedAuthSessionKeys = new Set(['accessTokenExpiresAt', 'refreshTokenExpiresAt']);
 
 const authStoreRuntime = getAuthStoreRuntime();
 
@@ -587,14 +587,14 @@ export function updateMfaSettings(input: { enabled?: boolean; requiredForSso?: b
   });
 }
 
-export function createVerificationChallenge(purpose: Exclude<VerificationPurpose, 'login' | 'sso'>) {
+export function createVerificationChallenge(purpose: AuthSelectableVerificationPurposeValue) {
   return authenticatedApiRequest<VerificationChallengeResult>('/api/auth/verification/challenges', {
     body: { purpose },
     method: 'POST',
   });
 }
 
-export function sendVerificationCode(input: { method: 'email' | 'sms'; verificationToken: string }) {
+export function sendVerificationCode(input: { method: AuthVerificationCodeMethodValue; verificationToken: string }) {
   return apiRequest<VerificationCodeSendResult>('/api/auth/verification/code', {
     body: input,
     method: 'POST',
@@ -630,7 +630,7 @@ export async function verifyWithPasskey(verificationToken: string) {
 
   return verifyAuthenticationChallenge({
     verificationToken,
-    method: 'passkey',
+    method: AuthVerificationMethod.Passkey,
     passkeyResponse,
   });
 }
@@ -836,7 +836,7 @@ async function ensureAuthenticatedSession() {
     return restoredSession;
   }
 
-  throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication is required.');
+  throw new ApiError(401, 'AUTH_REQUIRED', formatStaticMessage('api.error.AUTH_REQUIRED'));
 }
 
 function getStoredSession() {
@@ -935,7 +935,7 @@ function replaceStoredUser(user: AuthUser) {
   const session = getStoredSession();
 
   if (!session) {
-    throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication is required.');
+    throw new ApiError(401, 'AUTH_REQUIRED', formatStaticMessage('api.error.AUTH_REQUIRED'));
   }
 
   storeSession({
@@ -1173,8 +1173,5 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function isMfaMethodArray(value: unknown): value is MfaMethod[] {
-  return (
-    Array.isArray(value) &&
-    value.every((item) => item === 'email' || item === 'passkey' || item === 'sms' || item === 'totp')
-  );
+  return Array.isArray(value) && value.every((item) => typeof item === 'string' && authMfaMethodSet.has(item));
 }

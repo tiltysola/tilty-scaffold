@@ -1,7 +1,15 @@
-export const mfaMethods = ['passkey', 'totp', 'sms', 'email'] as const;
-export type MfaMethod = (typeof mfaMethods)[number];
+import { AuthMfaMethod, type AuthMfaMethodValue, authMfaMethodValues } from '@tilty/shared/auth';
 
-export const mfaMethodOrder: MfaMethod[] = ['passkey', 'totp', 'sms', 'email'];
+export type MfaMethod = AuthMfaMethodValue;
+
+export const mfaMethods = authMfaMethodValues;
+
+export const mfaMethodOrder: MfaMethod[] = [
+  AuthMfaMethod.Passkey,
+  AuthMfaMethod.Totp,
+  AuthMfaMethod.Sms,
+  AuthMfaMethod.Email,
+];
 
 const mfaMethodSet = new Set<string>(mfaMethods);
 

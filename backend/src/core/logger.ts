@@ -1,3 +1,5 @@
+import { withTimeout } from './async';
+
 type LogArg = string | number | boolean | null | undefined | object | Error;
 type LogLevel = 'debug' | 'error' | 'info' | 'warn';
 
@@ -61,6 +63,13 @@ const consoleLogSink: LogSink = {
 
 sinks = [consoleLogSink];
 
+export const logger = {
+  debug: (...args: LogArg[]) => write('debug', args),
+  error: (...args: LogArg[]) => write('error', args),
+  info: (...args: LogArg[]) => write('info', args),
+  warn: (...args: LogArg[]) => write('warn', args),
+};
+
 export function setLoggerSinks(nextSinks: LogSink[], options: LoggerSinkOptions = {}) {
   maxPendingWrites = options.maxPendingWrites ?? 1000;
   writeTimeoutMs = options.writeTimeoutMs ?? 5000;
@@ -71,13 +80,6 @@ export async function flushLogger() {
   await Promise.allSettled([...pendingWrites]);
   await Promise.allSettled(sinks.map((sink) => sink.flush?.()).filter(isPromise));
 }
-
-export const logger = {
-  debug: (...args: LogArg[]) => write('debug', args),
-  error: (...args: LogArg[]) => write('error', args),
-  info: (...args: LogArg[]) => write('info', args),
-  warn: (...args: LogArg[]) => write('warn', args),
-};
 
 export function formatLogRecordAsJsonLine(record: LogRecord) {
   return JSON.stringify({
@@ -119,7 +121,7 @@ function trackWrite(result: Promise<void> | void) {
     return;
   }
 
-  const pending = withTimeout(result, writeTimeoutMs, 'Logger sink write timed out.')
+  const pending = withTimeout(result, writeTimeoutMs, () => new Error('Logger sink write timed out.'))
     .catch((error: unknown) => {
       console.error(`[${new Date().toISOString()}] ERROR`, 'Logger sink write could not be completed.', error);
     })
@@ -128,25 +130,6 @@ function trackWrite(result: Promise<void> | void) {
     });
 
   pendingWrites.add(pending);
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
-  return new Promise<T>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error(message));
-    }, timeoutMs);
-
-    promise.then(
-      (value) => {
-        clearTimeout(timeout);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timeout);
-        reject(error);
-      },
-    );
-  });
 }
 
 function isPromise<T>(value: T | Promise<T> | undefined): value is Promise<T> {

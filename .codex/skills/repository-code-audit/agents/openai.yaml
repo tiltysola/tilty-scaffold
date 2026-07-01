@@ -1,4 +1,0 @@
-interface:
-  display_name: 'Repository Code Audit'
-  short_description: 'Full repo audit, cleanup, and summary'
-  default_prompt: 'Use $repository-code-audit to audit the repository, fix quality issues, validate checks, and keep a final audit summary.'

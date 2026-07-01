@@ -1,4 +1,5 @@
 import { type Ref } from 'react';
+import { useIntl } from 'react-intl';
 
 import { EllipsisVerticalIcon, ImageIcon, ImageUpIcon, PencilIcon } from 'lucide-react';
 
@@ -16,11 +17,13 @@ export function ProfileHeader({
   avatarAlt,
   avatarBusy,
   avatarUrl,
+  backgroundBusy,
   bannerBusy,
   bannerUrl,
   descriptionClassName,
   fallback,
   onChangeAvatar,
+  onChangeBackground,
   onChangeBanner,
   onEditProfileDetails,
   sectionRef,
@@ -28,6 +31,7 @@ export function ProfileHeader({
   title,
   titleClassName,
   uploadingAvatar,
+  uploadingBackground,
   uploadingBanner,
   userHandle,
 }: {
@@ -35,21 +39,26 @@ export function ProfileHeader({
   avatarAlt: string;
   avatarBusy: boolean;
   avatarUrl: string | undefined;
+  backgroundBusy: boolean;
   bannerBusy: boolean;
   bannerUrl: string | undefined;
   descriptionClassName?: string;
   fallback: string;
-  onChangeAvatar: () => void;
-  onChangeBanner: () => void;
+  onChangeAvatar?: () => void;
+  onChangeBackground?: () => void;
+  onChangeBanner?: () => void;
   onEditProfileDetails: () => void;
   sectionRef: Ref<HTMLElement>;
   textRef: Ref<HTMLDivElement>;
   title: string;
   titleClassName?: string;
   uploadingAvatar: boolean;
+  uploadingBackground: boolean;
   uploadingBanner: boolean;
   userHandle: string;
 }) {
+  const intl = useIntl();
+
   return (
     <section ref={sectionRef} className="relative min-h-32 overflow-hidden rounded-lg bg-muted/40 p-4">
       {bannerUrl ? (
@@ -75,22 +84,38 @@ export function ProfileHeader({
           <DropdownMenuTrigger asChild>
             <Button className={actionClassName} size="icon-sm" type="button" variant="ghost">
               <EllipsisVerticalIcon />
-              <span className="sr-only">Open profile actions</span>
+              <span className="sr-only">{intl.formatMessage({ id: 'profile.action.open.actions' })}</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-44">
-            <DropdownMenuItem disabled={avatarBusy} onSelect={onChangeAvatar}>
-              <ImageUpIcon />
-              {uploadingAvatar ? 'Uploading' : 'Change avatar'}
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={bannerBusy} onSelect={onChangeBanner}>
-              <ImageIcon />
-              {uploadingBanner ? 'Uploading' : 'Change profile banner'}
-            </DropdownMenuItem>
             <DropdownMenuItem onSelect={onEditProfileDetails}>
               <PencilIcon />
-              Edit profile details
+              {intl.formatMessage({ id: 'profile.details.edit.title' })}
             </DropdownMenuItem>
+            {onChangeAvatar ? (
+              <DropdownMenuItem disabled={avatarBusy} onSelect={onChangeAvatar}>
+                <ImageUpIcon />
+                {uploadingAvatar
+                  ? intl.formatMessage({ id: 'common.uploading' })
+                  : intl.formatMessage({ id: 'profile.action.change.avatar' })}
+              </DropdownMenuItem>
+            ) : null}
+            {onChangeBanner ? (
+              <DropdownMenuItem disabled={bannerBusy} onSelect={onChangeBanner}>
+                <ImageIcon />
+                {uploadingBanner
+                  ? intl.formatMessage({ id: 'common.uploading' })
+                  : intl.formatMessage({ id: 'profile.action.change.banner' })}
+              </DropdownMenuItem>
+            ) : null}
+            {onChangeBackground ? (
+              <DropdownMenuItem disabled={backgroundBusy} onSelect={onChangeBackground}>
+                <ImageIcon />
+                {uploadingBackground
+                  ? intl.formatMessage({ id: 'common.uploading' })
+                  : intl.formatMessage({ id: 'profile.action.change.background' })}
+              </DropdownMenuItem>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

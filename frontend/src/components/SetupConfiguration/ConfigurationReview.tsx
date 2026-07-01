@@ -1,8 +1,28 @@
+import { useIntl } from 'react-intl';
+
 import { type SetupAdministrator, type SetupEnvironment } from '@/lib/setup';
 import { cn } from '@/shadcn/lib/utils';
 
 import { setupSteps } from './definitions';
-import { fieldGroupsNeedHeader, getFieldGroups } from './utils';
+import { formatSetupFieldGroupName, formatSetupFieldLabel, formatSetupStepTitle, getFieldGroups } from './utils';
+
+interface ReviewField {
+  key: string;
+  label: string;
+  value: string;
+}
+
+interface ReviewFieldGroup {
+  fields: ReviewField[];
+  key: string;
+  name: string;
+}
+
+interface ReviewSectionDefinition {
+  emptyLabel?: string;
+  groups: ReviewFieldGroup[];
+  title: string;
+}
 
 export function ConfigurationReview({
   administrator,
@@ -13,17 +33,30 @@ export function ConfigurationReview({
   environment: SetupEnvironment;
   hasExistingUsers?: boolean;
 }) {
-  const environmentSections = getEnvironmentReviewSections(environment);
+  const intl = useIntl();
+  const environmentSections = getEnvironmentReviewSections(environment, intl);
   const administratorFields =
     administrator && !hasExistingUsers
       ? [
-          { key: 'ADMIN_USERNAME', label: 'Administrator Username', value: administrator.username },
-          { key: 'ADMIN_DISPLAY_NAME', label: 'Administrator Display Name', value: administrator.displayName },
-          { key: 'ADMIN_EMAIL', label: 'Administrator Email', value: administrator.email },
-          { key: 'ADMIN_PASSWORD', label: 'Administrator Password', value: administrator.password },
+          {
+            key: 'ADMIN_USERNAME',
+            label: intl.formatMessage({ id: 'setup.admin.username' }),
+            value: administrator.username,
+          },
+          {
+            key: 'ADMIN_DISPLAY_NAME',
+            label: intl.formatMessage({ id: 'setup.admin.display.name' }),
+            value: administrator.displayName,
+          },
+          { key: 'ADMIN_EMAIL', label: intl.formatMessage({ id: 'setup.admin.email' }), value: administrator.email },
+          {
+            key: 'ADMIN_PASSWORD',
+            label: intl.formatMessage({ id: 'setup.admin.password' }),
+            value: administrator.password,
+          },
           {
             key: 'ADMIN_CONFIRM_PASSWORD',
-            label: 'Confirm Administrator Password',
+            label: intl.formatMessage({ id: 'setup.admin.confirm.password' }),
             value: administrator.confirmPassword,
           },
         ]
@@ -38,55 +71,54 @@ export function ConfigurationReview({
               fields: [
                 {
                   key: 'ADMINISTRATOR',
-                  label: 'Administrator',
-                  value: 'Existing users retained',
+                  label: intl.formatMessage({ id: 'setup.review.administrator' }),
+                  value: intl.formatMessage({ id: 'setup.review.existing.users.retained' }),
                 },
               ],
-              name: 'General',
+              key: 'general',
+              name: intl.formatMessage({ id: 'setup.section.general' }),
             },
           ]}
-          title="Administrator"
+          title={intl.formatMessage({ id: 'setup.review.administrator' })}
         />
       ) : null}
       {administratorFields.length > 0 ? (
-        <ReviewSection groups={[{ fields: administratorFields, name: 'General' }]} title="Administrator" />
+        <ReviewSection
+          groups={[
+            {
+              fields: administratorFields,
+              key: 'general',
+              name: intl.formatMessage({ id: 'setup.section.general' }),
+            },
+          ]}
+          title={intl.formatMessage({ id: 'setup.review.administrator' })}
+        />
       ) : null}
       {environmentSections.map((section) => (
-        <ReviewSection groups={section.groups} key={section.title} title={section.title} />
+        <ReviewSection
+          emptyLabel={intl.formatMessage({ id: 'setup.review.empty' })}
+          groups={section.groups}
+          key={section.title}
+          title={section.title}
+        />
       ))}
     </div>
   );
 }
 
-interface ReviewField {
-  key: string;
-  label: string;
-  value: string;
-}
-
-interface ReviewFieldGroup {
-  fields: ReviewField[];
-  name: string;
-}
-
-interface ReviewSectionDefinition {
-  groups: ReviewFieldGroup[];
-  title: string;
-}
-
-function ReviewSection({ groups, title }: ReviewSectionDefinition) {
+function ReviewSection({ emptyLabel = 'Empty', groups, title }: ReviewSectionDefinition) {
   return (
     <section className="grid min-w-0 gap-4 border-b border-border/45 pb-6 last:border-b-0 last:pb-0">
       <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       <div className="grid gap-5">
         {groups.map((group) => (
-          <div className="grid min-w-0 gap-3" key={group.name}>
-            {fieldGroupsNeedHeader(groups) ? (
+          <div className="grid min-w-0 gap-3" key={group.key}>
+            {reviewGroupsNeedHeader(groups) ? (
               <h4 className="text-xs font-semibold uppercase text-muted-foreground">{group.name}</h4>
             ) : null}
             <div className="grid min-w-0 gap-2">
               {group.fields.map((field) => (
-                <ReviewFieldRow field={field} key={field.key} />
+                <ReviewFieldRow emptyLabel={emptyLabel} field={field} key={field.key} />
               ))}
             </div>
           </div>
@@ -96,8 +128,12 @@ function ReviewSection({ groups, title }: ReviewSectionDefinition) {
   );
 }
 
-function ReviewFieldRow({ field }: { field: ReviewField }) {
-  const value = formatReviewValue(field.key, field.value);
+function reviewGroupsNeedHeader(groups: ReviewFieldGroup[]) {
+  return groups.length > 1 || groups[0]?.key !== 'general';
+}
+
+function ReviewFieldRow({ emptyLabel, field }: { emptyLabel: string; field: ReviewField }) {
+  const value = formatReviewValue(field.key, field.value, emptyLabel);
 
   return (
     <div className="grid min-w-0 items-start gap-2 rounded-md border bg-card/70 p-3 lg:grid-cols-[minmax(13rem,18rem)_minmax(0,1fr)] lg:gap-4">
@@ -132,7 +168,10 @@ function ReviewFieldRow({ field }: { field: ReviewField }) {
   );
 }
 
-function getEnvironmentReviewSections(environment: SetupEnvironment): ReviewSectionDefinition[] {
+function getEnvironmentReviewSections(
+  environment: SetupEnvironment,
+  intl: ReturnType<typeof useIntl>,
+): ReviewSectionDefinition[] {
   const knownKeys = new Set<string>();
   const sections: ReviewSectionDefinition[] = setupSteps.flatMap((step) => {
     if (!step.fields) {
@@ -145,22 +184,23 @@ function getEnvironmentReviewSections(environment: SetupEnvironment): ReviewSect
 
     const groups = getFieldGroups(step.fields)
       .map((group) => ({
-        name: group.name,
         fields: group.fields
           .filter((field) => !field.visible || field.visible(environment))
           .map((field) => ({
             key: field.key,
-            label: field.label,
+            label: formatSetupFieldLabel(field, intl),
             value: environment[field.key] ?? '',
           })),
+        key: group.name,
+        name: formatSetupFieldGroupName(group.name, intl),
       }))
       .filter((group) => group.fields.length > 0);
 
     return groups.length > 0
       ? [
           {
-            title: step.title,
             groups,
+            title: formatSetupStepTitle(step, intl),
           },
         ]
       : [];
@@ -176,27 +216,28 @@ function getEnvironmentReviewSections(environment: SetupEnvironment): ReviewSect
 
   if (additionalFields.length > 0) {
     sections.push({
-      title: 'Additional',
       groups: [
         {
           fields: additionalFields,
-          name: 'General',
+          key: 'general',
+          name: intl.formatMessage({ id: 'setup.section.general' }),
         },
       ],
+      title: intl.formatMessage({ id: 'setup.review.additional' }),
     });
   }
 
   return sections;
 }
 
-function formatReviewValue(key: string, value: string) {
+function formatReviewValue(key: string, value: string, emptyLabel: string) {
   const normalized = value.trim();
 
   if (!normalized) {
     return {
       empty: true,
       multiline: false,
-      text: 'Empty',
+      text: emptyLabel,
     };
   }
 

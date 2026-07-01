@@ -326,7 +326,6 @@ describe('auth API client', () => {
       methods: [
         {
           method: 'email',
-          label: 'Email',
           maskedTarget: '***@example.com',
         },
       ],

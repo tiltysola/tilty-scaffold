@@ -142,6 +142,7 @@ async function syncDatabaseAlter(sequelize: Sequelize) {
   }
 
   await cleanupSqliteAlterBackupTables(sequelize);
+  await removeSqliteAlterConflictingIndexes(sequelize);
 
   const foreignKeysEnabled = await getSqliteForeignKeysEnabled(sequelize);
 
@@ -239,12 +240,9 @@ async function getSqliteAlterBackupSafety(sequelize: Sequelize, baseTableName: s
   }
 
   try {
-    const [baseExceptBackup, backupExceptBase] = await Promise.all([
-      countSqliteRowsExcept(sequelize, baseTableName, backupTableName),
-      countSqliteRowsExcept(sequelize, backupTableName, baseTableName),
-    ]);
+    const backupExceptBase = await countSqliteRowsExcept(sequelize, backupTableName, baseTableName);
 
-    if (baseExceptBackup === 0 && backupExceptBase === 0) {
+    if (backupExceptBase === 0) {
       return {
         safe: true,
       } as const;
@@ -290,6 +288,37 @@ async function countSqliteRowsExcept(sequelize: Sequelize, sourceTableName: stri
   const [row] = rows;
 
   return row?.count ?? 0;
+}
+
+async function removeSqliteAlterConflictingIndexes(sequelize: Sequelize) {
+  const queryInterface = sequelize.getQueryInterface();
+
+  for (const model of Object.values(sequelize.models)) {
+    const tableName = getTableNameString(model.getTableName());
+
+    if (!(await tableExists(sequelize, tableName))) {
+      continue;
+    }
+
+    let existingIndexes = (await queryInterface.showIndex(tableName)) as ExistingIndex[];
+
+    for (const declaredIndex of model.options.indexes ?? []) {
+      const indexName = declaredIndex.name;
+      const declaredFields = getDeclaredIndexFields(declaredIndex);
+
+      if (!indexName || !declaredIndex.unique || declaredFields.length < 2) {
+        continue;
+      }
+
+      if (!existingIndexes.some((index) => index.name === indexName)) {
+        continue;
+      }
+
+      await queryInterface.removeIndex(tableName, indexName);
+      existingIndexes = existingIndexes.filter((index) => index.name !== indexName);
+      logger.info(`Temporarily removed SQLite composite unique index ${indexName} before alter sync.`);
+    }
+  }
 }
 
 async function reconcileDeclaredIndexes(sequelize: Sequelize) {

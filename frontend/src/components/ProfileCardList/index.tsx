@@ -19,6 +19,7 @@ interface ProfileSectionProps {
   actionIcon?: ReactNode;
   actionLabel?: string;
   actionTooltip?: string;
+  actions?: ReactNode;
   children: ReactNode;
   description: string;
   onAction?: () => void;
@@ -46,6 +47,7 @@ export function ProfileSection({
   actionIcon,
   actionLabel,
   actionTooltip,
+  actions,
   children,
   description,
   onAction,
@@ -53,12 +55,14 @@ export function ProfileSection({
 }: ProfileSectionProps) {
   return (
     <section className="grid gap-3">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="grid min-w-0 gap-1">
           <h2 className="text-base font-semibold">{title}</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">{description}</p>
         </div>
-        {onAction && actionLabel ? (
+        {actions ? (
+          <div className="flex shrink-0 items-center gap-2">{actions}</div>
+        ) : onAction && actionLabel ? (
           <ActionButton
             disabled={actionDisabled}
             icon={actionIcon}
