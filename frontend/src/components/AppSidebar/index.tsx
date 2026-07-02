@@ -136,7 +136,7 @@ const Index = ({ children }: AppSidebarProps) => {
         </Sidebar>
         <SidebarInset
           className={cn(
-            'min-h-0 overflow-hidden md:peer-data-[variant=inset]:mr-0! md:peer-data-[variant=inset]:transition-[margin] md:peer-data-[variant=inset]:duration-200 md:peer-data-[variant=inset]:ease-linear',
+            'min-h-0 overflow-hidden md:peer-data-[variant=inset]:transition-[margin] md:peer-data-[variant=inset]:duration-200 md:peer-data-[variant=inset]:ease-linear',
             hasProfileBackground &&
               'bg-background/25 shadow-lg ring-1 ring-border/25 backdrop-blur-xl supports-backdrop-filter:bg-background/20',
           )}
