@@ -3,7 +3,7 @@ import { dirname } from 'path';
 import { QueryTypes, Sequelize } from 'sequelize';
 import { type ModelIndexesOptions } from 'sequelize/types/model';
 
-import { resolveApplicationPath } from '../core/files';
+import { resolveRuntimePath } from '../core/files';
 import { logger } from '../core/logger';
 
 type DatabaseSyncMode = 'off' | 'alter' | 'force';
@@ -116,7 +116,7 @@ function normalizeSqliteStorage(storage: string) {
     throw new Error('SQLite URI storage paths are not supported.');
   }
 
-  const storagePath = resolveApplicationPath(storage, 'DATABASE_STORAGE');
+  const storagePath = resolveRuntimePath(storage, 'DATABASE_STORAGE');
 
   mkdirSync(dirname(storagePath), { recursive: true });
 

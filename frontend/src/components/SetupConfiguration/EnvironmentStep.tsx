@@ -17,13 +17,13 @@ import { SmsProfilesField } from './SmsProfilesField';
 import { SmtpProfilesField } from './SmtpProfilesField';
 import { SsoProfilesField } from './SsoProfilesField';
 import {
-  fieldGroupsNeedHeader,
   formatSetupFieldDescription,
   formatSetupFieldGroupName,
   formatSetupFieldLabel,
   formatSetupFieldOptions,
   formatSetupFieldPlaceholder,
   getFieldGroups,
+  shouldShowFieldGroupHeaders,
 } from './utils';
 
 export function EnvironmentStep({
@@ -44,7 +44,7 @@ export function EnvironmentStep({
   const intl = useIntl();
   const visibleFields = fields.filter((field) => !field.visible || field.visible(environment));
   const fieldGroups = getFieldGroups(visibleFields);
-  const shouldShowGroupHeaders = fieldGroupsNeedHeader(fieldGroups);
+  const shouldShowGroupHeaders = shouldShowFieldGroupHeaders(fieldGroups);
 
   return (
     <div className="grid w-full max-w-5xl gap-6">

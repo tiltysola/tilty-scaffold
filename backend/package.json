@@ -1,6 +1,6 @@
 {
   "name": "@tilty/backend",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "description": "Tilty backend scaffold.",
   "scripts": {
@@ -19,8 +19,8 @@
     "typecheck": "tsc --noEmit",
     "prebuild": "npm --prefix ../shared run build",
     "build": "npm run clean && tsc -p tsconfig.json",
-    "start": "node dist/index.js",
-    "clean": "node ../scripts/clean.mjs dist"
+    "start": "node ../scripts/start.mjs",
+    "clean": "node ../scripts/clean.mjs ../dist/backend"
   },
   "dependencies": {
     "@alicloud/openapi-core": "^1.0.7",

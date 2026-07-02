@@ -22,13 +22,7 @@ interface VerificationMethodSwitchProps {
   onOpen?: () => void;
 }
 
-const VerificationMethodSwitch = ({
-  currentMethod,
-  disabled = false,
-  methods,
-  onChange,
-  onOpen,
-}: VerificationMethodSwitchProps) => {
+const Index = ({ currentMethod, disabled = false, methods, onChange, onOpen }: VerificationMethodSwitchProps) => {
   const intl = useIntl();
   const current = methods.find((method) => method.method === currentMethod);
   const alternatives = methods.filter((method) => method.method !== currentMethod);
@@ -72,4 +66,4 @@ function getUnavailableLabel(
   );
 }
 
-export default VerificationMethodSwitch;
+export default Index;

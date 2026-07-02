@@ -1,6 +1,6 @@
 import { useIntl } from 'react-intl';
 
-import { LaptopIcon, LogOutIcon, MonitorIcon, SmartphoneIcon, TabletIcon } from 'lucide-react';
+import { LogOutIcon } from 'lucide-react';
 
 import { type AuthDeviceSession } from '@/lib/auth';
 import { formatSecurityDate } from '@/lib/security-display';
@@ -9,6 +9,8 @@ import { Button } from '@/shadcn/components/ui/button';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from '@/shadcn/components/ui/item';
 
 import { ConfirmActionDialog } from '@/components/ConfirmActionDialog';
+
+import { DeviceIcon } from './DeviceIcon';
 
 interface AuthDeviceItemProps {
   device: AuthDeviceSession;
@@ -62,22 +64,5 @@ export function AuthDeviceItem({
         </ItemActions>
       ) : null}
     </Item>
-  );
-}
-
-function DeviceIcon({ deviceType }: { deviceType: AuthDeviceSession['deviceType'] }) {
-  if (deviceType === 'mobile') {
-    return <SmartphoneIcon className="size-4" />;
-  }
-
-  if (deviceType === 'tablet') {
-    return <TabletIcon className="size-4" />;
-  }
-
-  return (
-    <>
-      <MonitorIcon className="hidden size-4 sm:block" />
-      <LaptopIcon className="size-4 sm:hidden" />
-    </>
   );
 }

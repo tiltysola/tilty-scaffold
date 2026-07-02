@@ -2,16 +2,18 @@ import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 
+import { resolveRuntimePath } from '../src/core/files';
 import { staticFilesMiddleware } from '../src/middleware/static-files';
 import { createTestContext, runMiddleware } from './support/http';
 
 describe('static file middleware', () => {
   it('serves upload files with cache and same-site resource policy headers', async () => {
     const root = `./data/static-files-test-${Date.now()}`;
+    const rootPath = resolveRuntimePath(root, 'FILE_LOCAL_ROOT');
     const fileName = 'avatar.png';
 
-    await mkdir(root, { recursive: true });
-    await writeFile(join(root, fileName), Buffer.from('89504e470d0a1a0a', 'hex'));
+    await mkdir(rootPath, { recursive: true });
+    await writeFile(join(rootPath, fileName), Buffer.from('89504e470d0a1a0a', 'hex'));
 
     try {
       const middleware = staticFilesMiddleware({
@@ -30,7 +32,7 @@ describe('static file middleware', () => {
       expect(context.responseHeaders['cross-origin-resource-policy']).toBe('same-site');
       expect(context.type).toBe('image/png');
     } finally {
-      await rm(root, { force: true, recursive: true });
+      await rm(rootPath, { force: true, recursive: true });
     }
   });
 

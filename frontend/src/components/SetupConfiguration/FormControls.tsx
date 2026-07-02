@@ -3,8 +3,8 @@ import { useIntl } from 'react-intl';
 
 import { EyeIcon, EyeOffIcon } from 'lucide-react';
 
-import { Button } from '@/shadcn/components/ui/button';
 import { Input } from '@/shadcn/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/shadcn/components/ui/input-group';
 import { Label } from '@/shadcn/components/ui/label';
 import {
   Select,
@@ -66,31 +66,28 @@ export function PasswordInput({ className, disabled, ...props }: ComponentPropsW
   const ToggleIcon = passwordVisible ? EyeOffIcon : EyeIcon;
 
   return (
-    <div className="relative">
-      <Input
-        className={className ? `${className} pr-9` : 'pr-9'}
-        disabled={disabled}
-        type={passwordVisible ? 'text' : 'password'}
-        {...props}
-      />
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            aria-label={toggleLabel}
-            aria-pressed={passwordVisible}
-            className="absolute top-1/2 right-0.5 -translate-y-1/2 text-muted-foreground hover:text-foreground active:not-aria-[haspopup]:-translate-y-1/2"
-            disabled={disabled}
-            onClick={() => setPasswordVisible((current) => !current)}
-            size="icon-xs"
-            type="button"
-            variant="ghost"
-          >
-            <ToggleIcon />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{toggleLabel}</TooltipContent>
-      </Tooltip>
-    </div>
+    <InputGroup className={className}>
+      <InputGroupInput disabled={disabled} type={passwordVisible ? 'text' : 'password'} {...props} />
+      <InputGroupAddon align="inline-end">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <InputGroupButton
+              aria-label={toggleLabel}
+              aria-pressed={passwordVisible}
+              className="text-muted-foreground hover:text-foreground"
+              disabled={disabled}
+              onClick={() => setPasswordVisible((current) => !current)}
+              size="icon-xs"
+              type="button"
+              variant="ghost"
+            >
+              <ToggleIcon />
+            </InputGroupButton>
+          </TooltipTrigger>
+          <TooltipContent>{toggleLabel}</TooltipContent>
+        </Tooltip>
+      </InputGroupAddon>
+    </InputGroup>
   );
 }
 

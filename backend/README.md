@@ -12,24 +12,25 @@ Database commands depend on built `@tilty/shared` outputs. From a fresh
 checkout, run `npm --prefix ../shared run build` before `db:migrate`, or
 complete setup.
 
-| Command                | Description                          |
-| ---------------------- | ------------------------------------ |
-| `npm run dev`          | Start development server             |
-| `npm run db:migrate`   | Apply migrations                     |
-| `npm run db:rollback`  | Roll back the latest migration       |
-| `npm run db:status`    | Show migration status                |
-| `npm run test`         | Run backend tests                    |
-| `npm run lint`         | Run ESLint                           |
-| `npm run format`       | Format backend files with Prettier   |
-| `npm run format:check` | Check backend formatting             |
-| `npm run fix`          | Format files and fix lint violations |
-| `npm run typecheck`    | Run TypeScript checks                |
-| `npm run build`        | Clean and compile to `dist/`         |
-| `npm run clean`        | Remove compiled output               |
-| `npm start`            | Start compiled server                |
+| Command                | Description                             |
+| ---------------------- | --------------------------------------- |
+| `npm run dev`          | Start development server                |
+| `npm run db:migrate`   | Apply migrations                        |
+| `npm run db:rollback`  | Roll back the latest migration          |
+| `npm run db:status`    | Show migration status                   |
+| `npm run test`         | Run backend tests                       |
+| `npm run lint`         | Run ESLint                              |
+| `npm run format`       | Format backend files with Prettier      |
+| `npm run format:check` | Check backend formatting                |
+| `npm run fix`          | Format files and fix lint violations    |
+| `npm run typecheck`    | Run TypeScript checks                   |
+| `npm run build`        | Clean and compile to `../dist/backend/` |
+| `npm run clean`        | Remove compiled output                  |
+| `npm start`            | Start compiled server                   |
 
 In production, the compiled backend serves API routes and the compiled frontend
-files from `../frontend/dist`.
+files from `../dist/frontend`. From the repository root, run `npm run build`
+and `npm start`.
 
 ## Configuration
 
@@ -64,11 +65,11 @@ After startup, users with `ROOT` can update the same runtime configuration from
 the system settings page. Saving settings writes `config.toml` and requires a
 backend restart before changes take effect. System settings access requires a
 configured passkey or authenticator app and a verified `system_settings`
-step-up challenge before settings are displayed or saved. The setup and system
+step-up challenge before configuration is shown or saved. The setup and system
 settings review pages list active configuration fields with sensitive values
 masked; inactive provider fields are omitted.
 Relative runtime paths such as `DATABASE_STORAGE`, `LOG_LOCAL_PATH`, and
-`FILE_LOCAL_ROOT` must resolve inside the backend application directory.
+`FILE_LOCAL_ROOT` must resolve inside the project root.
 
 Local defaults use SQLite, `DATABASE_SYNC=off`, and schema migrations.
 `db:migrate` applies migrations and synchronizes built-in permissions and roles.
@@ -313,7 +314,7 @@ The scheduler core runs module-owned jobs when modules define them and
 
 ## Generated and Local Files
 
-Compiled output is written to `dist/` and should be recreated with
+Compiled output is written to `../dist/backend` and should be recreated with
 `npm run build`. Local SQLite data, uploaded files, and logs are written under
-`data/` and `logs/`. Do not edit generated output or local runtime state as
-source files.
+root `../data/` and `../logs/`. Do not edit generated output or local runtime
+state as source files.

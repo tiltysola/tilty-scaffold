@@ -4,9 +4,10 @@ import { Button } from '@/shadcn/components/ui/button';
 import { TabsList, TabsTrigger } from '@/shadcn/components/ui/tabs';
 import { cn } from '@/shadcn/lib/utils';
 
-import { HoverScrollArea } from '@/components/HoverScrollArea';
 import { type SetupStepDefinition } from '@/components/SetupConfiguration/definitions';
 import { formatSetupStepTitle } from '@/components/SetupConfiguration/utils';
+
+import { HoverScrollArea } from './HoverScrollArea';
 
 type SettingsStepNavStep = Pick<SetupStepDefinition, 'icon' | 'id'>;
 

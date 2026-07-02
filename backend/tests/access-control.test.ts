@@ -133,7 +133,7 @@ describe('access control', () => {
     expect(localizedBody.data.roles[0]).toMatchObject({
       key: SystemRole.Root,
       name: '根管理员',
-      description: '完整的平台管理权限。',
+      description: '完整的平台管理访问权限。',
     });
   });
 

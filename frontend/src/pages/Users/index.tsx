@@ -19,12 +19,12 @@ import { IdentityVerificationDialog } from '@/components/IdentityVerification';
 import { EditUserDialog } from './components/EditUserDialog';
 import { UsersTable } from './components/UsersTable';
 import {
-  arraysEqual,
   defaultEditUserForm,
   defaultPagination,
   type EditUserForm,
+  getUniqueRoleKeys,
+  haveSameRoleKeys,
   parseEditUserForm,
-  unique,
   userPageSize,
 } from './utils';
 
@@ -219,7 +219,7 @@ const Index = () => {
   const handleRoleToggle = (roleKey: string, enabled: boolean) => {
     setEditingRoleKeys((currentRoles) =>
       enabled
-        ? unique([...currentRoles, roleKey])
+        ? getUniqueRoleKeys([...currentRoles, roleKey])
         : currentRoles.filter((currentRoleKey) => currentRoleKey !== roleKey),
     );
   };
@@ -247,7 +247,7 @@ const Index = () => {
       return;
     }
 
-    const roleKeysChanged = !arraysEqual(editingRoleKeys, editingUser.roles);
+    const roleKeysChanged = !haveSameRoleKeys(editingRoleKeys, editingUser.roles);
 
     setSavingUserId(editingUser.id);
     setEditError(null);

@@ -64,6 +64,7 @@ export interface SetupStepDefinition {
 }
 
 interface FieldHelp {
+  descriptionMessageId?: string;
   placeholder?: string;
   placeholderMessageId?: string;
 }
@@ -202,11 +203,26 @@ export const setupFieldHelp: Record<string, FieldHelp> = {
 };
 
 export const administratorFieldHelp: Record<keyof SetupAdministrator, FieldHelp> = {
-  username: { placeholderMessageId: 'setup.admin.username.placeholder' },
-  displayName: { placeholderMessageId: 'setup.admin.display.name.placeholder' },
-  email: { placeholderMessageId: 'setup.admin.email.placeholder' },
-  password: { placeholderMessageId: 'setup.admin.password.placeholder' },
-  confirmPassword: { placeholderMessageId: 'setup.admin.confirm.password.placeholder' },
+  username: {
+    descriptionMessageId: 'setup.admin.username.description',
+    placeholderMessageId: 'setup.admin.username.placeholder',
+  },
+  displayName: {
+    descriptionMessageId: 'setup.admin.display.name.description',
+    placeholderMessageId: 'setup.admin.display.name.placeholder',
+  },
+  email: {
+    descriptionMessageId: 'setup.admin.email.description',
+    placeholderMessageId: 'setup.admin.email.placeholder',
+  },
+  password: {
+    descriptionMessageId: 'setup.admin.password.description',
+    placeholderMessageId: 'setup.admin.password.placeholder',
+  },
+  confirmPassword: {
+    descriptionMessageId: 'setup.admin.confirm.password.description',
+    placeholderMessageId: 'setup.admin.confirm.password.placeholder',
+  },
 };
 
 export const setupSteps: SetupStepDefinition[] = [

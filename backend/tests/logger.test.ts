@@ -77,9 +77,9 @@ describe('logger', () => {
     }
   });
 
-  it('rejects local log paths outside the application directory', () => {
+  it('rejects local log paths outside the runtime root directory', () => {
     expect(() => configureLogger({ localPath: '../backend.log', targets: ['local'] })).toThrow(
-      'LOG_LOCAL_PATH must resolve inside the application directory.',
+      'LOG_LOCAL_PATH must resolve inside the runtime root directory.',
     );
   });
 });

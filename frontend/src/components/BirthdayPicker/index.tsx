@@ -6,6 +6,7 @@ import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon, XIcon } from 'lucide-r
 
 import { formatDateOnlyDate, getDatePickerLocale, getMonthOptions } from '@/i18n';
 import { Button } from '@/shadcn/components/ui/button';
+import { InputGroupButton } from '@/shadcn/components/ui/input-group';
 import { Popover, PopoverContent, PopoverTrigger } from '@/shadcn/components/ui/popover';
 import {
   Select,
@@ -16,6 +17,16 @@ import {
   SelectValue,
 } from '@/shadcn/components/ui/select';
 import { cn } from '@/shadcn/lib/utils';
+
+import {
+  birthdayStartMonth,
+  buildBirthdayYearOptions,
+  clampBirthdayMonth,
+  defaultBirthdayMonth,
+  formatBirthdayDateOnly,
+  getBirthdayMonthOffset,
+  parseBirthdayDateOnly,
+} from './utils';
 
 interface BirthdayPickerProps {
   disabled?: boolean;
@@ -30,23 +41,21 @@ interface InteractOutsideEvent {
   preventDefault: () => void;
 }
 
-const birthdayStartMonth = new Date(1900, 0, 1);
-const defaultBirthdayMonth = new Date(2000, 0, 1);
 const defaultClassNames = getDefaultClassNames();
 
-export default function BirthdayPicker({ disabled, id, name, onChange, value }: BirthdayPickerProps) {
+export default function Index({ disabled, id, name, onChange, value }: BirthdayPickerProps) {
   const [open, setOpen] = useState(false);
   const [displayMonth, setDisplayMonth] = useState(defaultBirthdayMonth);
   const intl = useIntl();
-  const selectedDate = useMemo(() => parseDateOnly(value), [value]);
+  const selectedDate = useMemo(() => parseBirthdayDateOnly(value), [value]);
   const today = useMemo(() => new Date(), []);
   const datePickerLocale = useMemo(() => getDatePickerLocale(intl.locale), [intl.locale]);
   const monthOptions = useMemo(() => getMonthOptions(intl.locale), [intl.locale]);
-  const yearOptions = useMemo(() => buildYearOptions(today), [today]);
+  const yearOptions = useMemo(() => buildBirthdayYearOptions(today), [today]);
   const displayedMonthIndex = displayMonth.getMonth();
   const displayedYear = displayMonth.getFullYear();
-  const canShowPreviousMonth = getMonthOffset(displayMonth) > getMonthOffset(birthdayStartMonth);
-  const canShowNextMonth = getMonthOffset(displayMonth) < getMonthOffset(today);
+  const canShowPreviousMonth = getBirthdayMonthOffset(displayMonth) > getBirthdayMonthOffset(birthdayStartMonth);
+  const canShowNextMonth = getBirthdayMonthOffset(displayMonth) < getBirthdayMonthOffset(today);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (nextOpen) {
@@ -61,7 +70,7 @@ export default function BirthdayPicker({ disabled, id, name, onChange, value }: 
       return;
     }
 
-    onChange(formatDateOnly(date));
+    onChange(formatBirthdayDateOnly(date));
     setOpen(false);
   };
 
@@ -92,19 +101,44 @@ export default function BirthdayPicker({ disabled, id, name, onChange, value }: 
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        <Button
-          className={cn('w-full justify-start font-normal', !selectedDate && 'text-muted-foreground')}
-          disabled={disabled}
-          id={id}
-          name={name}
-          type="button"
-          variant="outline"
-        >
-          <CalendarIcon />
-          {selectedDate ? formatDateOnlyDate(selectedDate, intl.locale) : intl.formatMessage({ id: 'common.not.set' })}
-        </Button>
-      </PopoverTrigger>
+      <div className="relative">
+        <PopoverTrigger asChild>
+          <Button
+            className={cn(
+              'w-full justify-start font-normal',
+              selectedDate && 'pr-10',
+              !selectedDate && 'text-muted-foreground',
+            )}
+            disabled={disabled}
+            id={id}
+            name={name}
+            type="button"
+            variant="outline"
+          >
+            <CalendarIcon />
+            {selectedDate
+              ? formatDateOnlyDate(selectedDate, intl.locale)
+              : intl.formatMessage({ id: 'common.not.set' })}
+          </Button>
+        </PopoverTrigger>
+        {selectedDate ? (
+          <InputGroupButton
+            aria-label={intl.formatMessage({ id: 'common.clear' })}
+            className="absolute top-1/2 right-1 -translate-y-1/2 text-muted-foreground hover:text-foreground active:not-aria-[haspopup]:-translate-y-1/2"
+            disabled={disabled}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              handleClear();
+            }}
+            size="icon-xs"
+            type="button"
+            variant="ghost"
+          >
+            <XIcon className="pointer-events-none" />
+          </InputGroupButton>
+        ) : null}
+      </div>
       <PopoverContent
         align="start"
         className="w-[18rem] rounded-xl p-2"
@@ -167,7 +201,7 @@ export default function BirthdayPicker({ disabled, id, name, onChange, value }: 
           </Button>
         </div>
         <DayPicker
-          className="w-full bg-background px-1 pt-3 pb-1 [--cell-radius:var(--radius-md)] [--cell-size:2rem]"
+          className="w-full bg-background px-1 pt-3 pb-1 [--cell-radius:var(--radius-md)] [--cell-size:2rem] in-data-[slot=popover-content]:bg-transparent"
           classNames={{
             root: cn('w-full', defaultClassNames.root),
             months: cn('relative flex w-full flex-col gap-2 md:flex-row', defaultClassNames.months),
@@ -191,18 +225,18 @@ export default function BirthdayPicker({ disabled, id, name, onChange, value }: 
             ),
             week: cn('mt-1 flex w-full', defaultClassNames.week),
             day: cn(
-              'relative flex flex-1 items-center justify-center rounded-(--cell-radius) p-0 text-center',
+              'group/day relative flex flex-1 items-center justify-center rounded-(--cell-radius) p-0 text-center',
               defaultClassNames.day,
             ),
             day_button: cn(
-              'flex size-(--cell-size) items-center justify-center rounded-(--cell-radius) border-0 text-sm font-normal transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-selected:bg-primary aria-selected:text-primary-foreground',
+              'flex size-(--cell-size) items-center justify-center rounded-(--cell-radius) border-0 text-sm font-normal transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-data-[today=true]/day:bg-muted group-data-[today=true]/day:text-foreground group-data-[selected=true]/day:bg-primary group-data-[selected=true]/day:text-primary-foreground group-data-[selected=true]/day:hover:bg-primary group-data-[selected=true]/day:hover:text-primary-foreground',
               defaultClassNames.day_button,
             ),
-            today: cn('rounded-(--cell-radius) bg-muted text-foreground', defaultClassNames.today),
+            today: cn(defaultClassNames.today),
             outside: cn('text-muted-foreground aria-selected:text-muted-foreground', defaultClassNames.outside),
             disabled: cn('text-muted-foreground opacity-50', defaultClassNames.disabled),
             hidden: cn('invisible', defaultClassNames.hidden),
-            selected: cn('bg-primary text-primary-foreground', defaultClassNames.selected),
+            selected: cn(defaultClassNames.selected),
           }}
           hideNavigation
           disabled={(date) => date > today}
@@ -215,68 +249,7 @@ export default function BirthdayPicker({ disabled, id, name, onChange, value }: 
           selected={selectedDate ?? undefined}
           startMonth={birthdayStartMonth}
         />
-        {selectedDate ? (
-          <div className="border-t pt-2">
-            <Button className="w-full justify-start" onClick={handleClear} size="sm" type="button" variant="ghost">
-              <XIcon />
-              {intl.formatMessage({ id: 'common.clear' })}
-            </Button>
-          </div>
-        ) : null}
       </PopoverContent>
     </Popover>
   );
-}
-
-function buildYearOptions(today: Date) {
-  const years: string[] = [];
-
-  for (let year = today.getFullYear(); year >= birthdayStartMonth.getFullYear(); year -= 1) {
-    years.push(String(year));
-  }
-
-  return years;
-}
-
-function clampBirthdayMonth(month: Date, today: Date) {
-  const monthOffset = getMonthOffset(month);
-  const startOffset = getMonthOffset(birthdayStartMonth);
-  const endOffset = getMonthOffset(today);
-
-  if (monthOffset < startOffset) {
-    return birthdayStartMonth;
-  }
-
-  if (monthOffset > endOffset) {
-    return new Date(today.getFullYear(), today.getMonth(), 1);
-  }
-
-  return new Date(month.getFullYear(), month.getMonth(), 1);
-}
-
-function getMonthOffset(date: Date) {
-  return date.getFullYear() * 12 + date.getMonth();
-}
-
-function parseDateOnly(value: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-
-  if (!match) {
-    return null;
-  }
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date = new Date(year, month - 1, day);
-
-  return formatDateOnly(date) === value ? date : null;
-}
-
-function formatDateOnly(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
 }

@@ -33,10 +33,10 @@ Backend defaults to `http://localhost:3000`; Swagger UI is available at
 
 After setup, runtime configuration is managed from System Settings. That page
 is available only to `ROOT` users with a configured passkey or authenticator app
-and requires step-up verification before settings are displayed or saved.
+and requires step-up verification before configuration is shown or saved.
 
-For production, run `npm run build` and `npm run start:backend`. The backend
-serves the compiled frontend files from `frontend/dist`.
+For production, run `npm run build` and `npm start`. The backend serves the
+compiled frontend files from `dist/frontend` and starts from `dist/backend`.
 
 ## Commands
 
@@ -53,6 +53,7 @@ serves the compiled frontend files from `frontend/dist`.
 | `npm run build:shared`     | Build shared runtime-neutral utilities |
 | `npm run clean`            | Remove generated build output          |
 | `npm run preview:frontend` | Preview the frontend production build  |
+| `npm start`                | Start the compiled full-stack server   |
 | `npm run start:backend`    | Start the compiled backend server      |
 | `npm run db:migrate`       | Apply backend migrations               |
 | `npm run db:rollback`      | Roll back the latest backend migration |
@@ -87,16 +88,17 @@ requests. The backend uses that locale for server-generated user-facing text,
 including API error messages, setup gate responses, readiness failures, RBAC
 display names, and email verification templates. API errors remain code-first
 contracts; clients should localize known error codes and treat backend messages
-as fallbacks.
+as display fallbacks.
 
 ## Generated and Local Files
 
-Generated build output is written to `dist/` directories and should be recreated
-with package build commands. Do not edit generated output manually.
+Generated backend and frontend build output is written under root `dist/` and
+should be recreated with package build commands. Do not edit generated output
+manually.
 
-Backend local runtime data is written under `backend/data/` and backend local
-logs are written under `backend/logs/`. These directories are local development
-state and are not part of the scaffold source.
+Backend local runtime data is written under root `data/` and backend local logs
+are written under root `logs/`. These directories are local development state
+and are not part of the scaffold source.
 
 Generated shadcn/ui files live under `frontend/src/shadcn/`. Add or update those
 files through the official shadcn CLI.

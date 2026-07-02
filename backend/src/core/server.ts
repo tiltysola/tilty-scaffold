@@ -4,7 +4,7 @@ import { resolve } from 'path';
 
 import { logger } from './logger';
 
-export const frontendDistDirectory = resolve(__dirname, '../../../frontend/dist');
+export const frontendDistDirectory = resolve(__dirname, '../../../dist/frontend');
 const frontendEntryFilePath = resolve(frontendDistDirectory, 'index.html');
 
 export function warnIfFrontendEntryFileMissing() {

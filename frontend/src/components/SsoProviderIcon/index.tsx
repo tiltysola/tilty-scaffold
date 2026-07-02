@@ -28,7 +28,7 @@ const iconSizeClassNames: Record<
   },
 };
 
-function SsoProviderIcon({ iconUrl, name, size = 'default' }: SsoProviderIconProps) {
+function Index({ iconUrl, name, size = 'default' }: SsoProviderIconProps) {
   const classNames = iconSizeClassNames[size];
 
   return iconUrl ? (
@@ -40,4 +40,4 @@ function SsoProviderIcon({ iconUrl, name, size = 'default' }: SsoProviderIconPro
   );
 }
 
-export default SsoProviderIcon;
+export default Index;

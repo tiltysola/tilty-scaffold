@@ -4,6 +4,7 @@ import { useIntl } from 'react-intl';
 import { InfoIcon, type LucideIcon } from 'lucide-react';
 
 import { type SetupAdministrator } from '@/lib/setup';
+import { Alert, AlertDescription, AlertTitle } from '@/shadcn/components/ui/alert';
 import { Input } from '@/shadcn/components/ui/input';
 import { Label } from '@/shadcn/components/ui/label';
 
@@ -30,15 +31,13 @@ export function AdministratorStep({
   if (hasExistingUsers) {
     return (
       <div className="grid max-w-3xl gap-5">
-        <section className="rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-950">
-          <div className="flex items-start gap-3">
-            <InfoIcon className="mt-0.5 size-5 shrink-0" />
-            <div className="grid gap-1">
-              <h3 className="text-sm font-semibold">{intl.formatMessage({ id: 'setup.existing.users.title' })}</h3>
-              <p className="text-sm leading-6">{intl.formatMessage({ id: 'setup.existing.users.description' })}</p>
-            </div>
-          </div>
-        </section>
+        <Alert className="border-amber-200 bg-amber-50 text-amber-950">
+          <InfoIcon />
+          <AlertTitle>{intl.formatMessage({ id: 'setup.existing.users.title' })}</AlertTitle>
+          <AlertDescription className="text-amber-950">
+            {intl.formatMessage({ id: 'setup.existing.users.description' })}
+          </AlertDescription>
+        </Alert>
       </div>
     );
   }
@@ -113,7 +112,7 @@ function AdministratorField({
   const inputId = `setup-admin-${field}`;
   const descriptionId = `${inputId}-description`;
   const help = administratorFieldHelp[field];
-  const description = intl.formatMessage({ id: `setup.admin.${field}.description` });
+  const description = intl.formatMessage({ id: help.descriptionMessageId });
   const placeholder = help.placeholderMessageId
     ? intl.formatMessage({ id: help.placeholderMessageId })
     : help.placeholder;

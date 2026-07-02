@@ -147,18 +147,18 @@ describe('email verification service', () => {
     await service.sendRegistrationCode('localized@example.com', 'zh-CN');
 
     expect(sentSubject).toBe('注册验证码');
-    expect(sentText).toContain('你的注册验证码是');
+    expect(sentText).toContain('注册验证码为');
     expect(sentText).toContain('验证码将在 10 分钟 后过期。');
 
     await service.sendProfileEmailVerificationCode('profile-localized@example.com', 'zh-CN');
 
     expect(sentSubject).toBe('个人邮箱验证码');
-    expect(sentText).toContain('你的个人邮箱验证码是');
+    expect(sentText).toContain('个人邮箱验证码为');
 
     await service.sendMfaCode('mfa-localized@example.com', 'zh-CN');
 
     expect(sentSubject).toBe('安全验证码');
-    expect(sentText).toContain('你的安全验证码是');
+    expect(sentText).toContain('安全验证码为');
   });
 });
 

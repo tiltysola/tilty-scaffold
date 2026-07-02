@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { initModels } from '../src/composition/models';
 import { loadConfigFileSource, loadEnv } from '../src/config/env';
+import { resolveRuntimePath } from '../src/core/files';
 import { createSequelize } from '../src/infra/database';
 import { createMigrator } from '../src/infra/migrator';
 import { SmtpEmailSender } from '../src/modules/auth/auth.email';
@@ -349,7 +350,9 @@ describe('setup service', () => {
         code: 'SETUP_CONFIG_WRITE_FAILED',
         status: 500,
       });
-      await expect(readFile('./data/preflight.sqlite')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(readFile(resolveRuntimePath('./data/preflight.sqlite', 'DATABASE_STORAGE'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
     } finally {
       await chmod('config.toml', 0o600).catch(() => undefined);
     }

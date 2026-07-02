@@ -5,9 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   BracesIcon,
   CommandIcon,
-  EllipsisVerticalIcon,
   LayoutDashboardIcon,
-  LogOutIcon,
   type LucideIcon,
   SettingsIcon,
   ShieldIcon,
@@ -18,17 +16,8 @@ import { toast } from 'sonner';
 
 import { useAuthenticatedSession } from '@/hooks/useAuth';
 import { getApiErrorMessage } from '@/lib/api';
-import { getUserHandle, getUserInitials, logout, resolveAssetUrl } from '@/lib/auth';
+import { logout, resolveAssetUrl } from '@/lib/auth';
 import { getMainNavigationGroups, type NavigationIcon, routePath } from '@/router';
-import { Avatar, AvatarFallback, AvatarImage } from '@/shadcn/components/ui/avatar';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/shadcn/components/ui/dropdown-menu';
 import { ScrollArea } from '@/shadcn/components/ui/scroll-area';
 import {
   Sidebar,
@@ -40,21 +29,15 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-  useSidebar,
 } from '@/shadcn/components/ui/sidebar';
 import { cn } from '@/shadcn/lib/utils';
 
 import NavHeader from './NavHeader';
+import { SidebarUser } from './SidebarUser';
 import SideNav, { type SideNavProps } from './SideNav';
 
 interface AppSidebarProps {
   children: ReactNode;
-}
-
-interface SidebarUserProfile {
-  avatarUrl?: string;
-  name: string;
-  username: string;
 }
 
 const sidebarStyle = {
@@ -69,78 +52,6 @@ const navIcons: Record<NavigationIcon, LucideIcon> = {
   security: ShieldIcon,
   settings: SettingsIcon,
   users: UsersIcon,
-};
-
-const SidebarUser = ({
-  hasProfileBackground,
-  onSignOut,
-  onProfile,
-  signingOut,
-  user,
-}: {
-  hasProfileBackground: boolean;
-  onSignOut: () => void;
-  onProfile: () => void;
-  signingOut: boolean;
-  user: SidebarUserProfile;
-}) => {
-  const intl = useIntl();
-  const { isMobile } = useSidebar();
-  const avatarUrl = resolveAssetUrl(user.avatarUrl);
-  const fallback = getUserInitials(user.name);
-  const userHandle = getUserHandle(user.username);
-
-  return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuButton
-              size="lg"
-              className={cn(
-                'data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground',
-                hasProfileBackground &&
-                  'hover:bg-sidebar-accent/40 active:bg-sidebar-accent/40 data-[state=open]:!bg-sidebar-accent/40 data-[state=open]:hover:!bg-sidebar-accent/40',
-              )}
-            >
-              <Avatar>
-                {avatarUrl ? <AvatarImage src={avatarUrl} alt={user.name} /> : null}
-                <AvatarFallback>{fallback}</AvatarFallback>
-              </Avatar>
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">{user.name}</span>
-                <span className="truncate text-xs text-muted-foreground">{userHandle}</span>
-              </div>
-              <EllipsisVerticalIcon className="ml-auto size-4" />
-            </SidebarMenuButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="min-w-56" side={isMobile ? 'bottom' : 'right'} align="end" sideOffset={4}>
-            <DropdownMenuLabel className="p-0 font-normal">
-              <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                <Avatar>
-                  {avatarUrl ? <AvatarImage src={avatarUrl} alt={user.name} /> : null}
-                  <AvatarFallback>{fallback}</AvatarFallback>
-                </Avatar>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium text-sidebar-accent-foreground">{user.name}</span>
-                  <span className="truncate text-xs text-muted-foreground">{userHandle}</span>
-                </div>
-              </div>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={onProfile}>
-              <UserCircleIcon />
-              {intl.formatMessage({ id: 'route.profile' })}
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={signingOut} onSelect={onSignOut}>
-              <LogOutIcon />
-              {intl.formatMessage({ id: signingOut ? 'profile.signing.out' : 'profile.sign.out' })}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </SidebarMenuItem>
-    </SidebarMenu>
-  );
 };
 
 const Index = ({ children }: AppSidebarProps) => {

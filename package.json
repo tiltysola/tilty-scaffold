@@ -1,6 +1,6 @@
 {
   "name": "tilty-scaffold",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "workspaces": [
     "frontend",
@@ -12,6 +12,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:backend": "npm --prefix backend run dev",
+    "prebuild": "node scripts/clean.mjs dist",
     "build": "npm run build:shared && npm run build:backend && npm run build:frontend",
     "build:shared": "npm --prefix shared run build",
     "build:frontend": "npm --prefix frontend run build",
@@ -38,9 +39,10 @@
     "fix:backend": "npm --prefix backend run fix",
     "fix:frontend": "npm --prefix frontend run fix",
     "fix:shared": "npm --prefix shared run fix",
-    "clean": "npm --prefix shared run clean && npm --prefix backend run clean && npm --prefix frontend run clean",
+    "clean": "node scripts/clean.mjs dist && npm --prefix shared run clean",
     "preview:frontend": "npm --prefix frontend run preview",
-    "start:backend": "npm --prefix backend run start"
+    "start": "node scripts/start.mjs",
+    "start:backend": "node scripts/start.mjs"
   },
   "devDependencies": {
     "prettier": "^3.8.4"

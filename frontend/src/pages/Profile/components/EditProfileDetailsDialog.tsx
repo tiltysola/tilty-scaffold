@@ -13,14 +13,7 @@ import BirthdayPicker from '@/components/BirthdayPicker';
 import FormMessage from '@/components/FormMessage';
 import { ProfileGenderInput, ProfileLocationInput } from '@/components/ProfileInputs';
 
-export interface ProfileDetailsDraft {
-  displayName: string;
-  gender: string;
-  birthday: string;
-  bio: string;
-  location: string;
-  websiteUrl: string;
-}
+import { type ProfileDetailsDraft } from '../utils';
 
 export function EditProfileDetailsDialog({
   changed,

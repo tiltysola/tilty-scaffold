@@ -1,43 +1,14 @@
-import { type Dispatch, type ReactNode, type SetStateAction, useEffect, useState } from 'react';
-import { type IntlShape, useIntl } from 'react-intl';
+import { type Dispatch, type SetStateAction, useEffect, useState } from 'react';
+import { useIntl } from 'react-intl';
 
-import {
-  ChevronDownIcon,
-  FingerprintIcon,
-  ImageIcon,
-  ImageUpIcon,
-  LinkIcon,
-  LogOutIcon,
-  SaveIcon,
-  ShieldCheckIcon,
-  ShieldIcon,
-  ShieldOffIcon,
-  Trash2Icon,
-  WallpaperIcon,
-} from 'lucide-react';
+import { SaveIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { getApiErrorMessage } from '@/lib/api';
-import {
-  type AuthDeviceSession,
-  type PasskeySummary,
-  type PhoneCountryCode,
-  resolveAssetUrl,
-  type SsoIdentityPublic,
-} from '@/lib/auth';
+import { type PhoneCountryCode, resolveAssetUrl } from '@/lib/auth';
 import { createImageObjectUrl } from '@/lib/image-upload';
-import { composePhoneNumber, getPhoneCountryCodeMessageId, getPhonePlaceholder } from '@/lib/phone';
 import {
-  formatPasskeyCount,
-  formatPasskeyDeviceType,
-  formatPasskeyDisplayName,
-  getTwoStepStatusDescription,
-} from '@/lib/security-display';
-import {
-  deleteUserAvatar,
   deleteUserPasskey,
-  deleteUserProfileBackground,
-  deleteUserProfileBanner,
   deleteUserSsoIdentity,
   disableUserTotp,
   fetchUserDetails,
@@ -47,36 +18,11 @@ import {
   revokeUserDeviceSessions,
   type RoleSummary,
   updateUserMfaSettings,
-  uploadUserAvatar,
-  uploadUserProfileBackground,
-  uploadUserProfileBanner,
   type UserListItem,
 } from '@/lib/users';
-import { Avatar, AvatarFallback, AvatarImage } from '@/shadcn/components/ui/avatar';
-import { Badge } from '@/shadcn/components/ui/badge';
 import { Button } from '@/shadcn/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/shadcn/components/ui/dropdown-menu';
-import { Input } from '@/shadcn/components/ui/input';
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemFooter,
-  ItemMedia,
-  ItemSeparator,
-  ItemTitle,
-} from '@/shadcn/components/ui/item';
-import { Label } from '@/shadcn/components/ui/label';
 import { Spinner } from '@/shadcn/components/ui/spinner';
-import { Switch } from '@/shadcn/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shadcn/components/ui/tabs';
-import { Textarea } from '@/shadcn/components/ui/textarea';
 
 import {
   AppDialogBody,
@@ -86,78 +32,30 @@ import {
   AppDialogHeader,
   AppDialogRoot,
 } from '@/components/AppDialog';
-import { AuthDeviceItem } from '@/components/AuthDeviceItem';
-import BirthdayPicker from '@/components/BirthdayPicker';
 import { ConfirmActionDialog } from '@/components/ConfirmActionDialog';
-import FormMessage from '@/components/FormMessage';
 import ImageCropDialog from '@/components/ImageCropDialog';
-import { ImagePreviewMedia, ImagePreviewTrigger } from '@/components/ImagePreviewDialog';
-import { ProfileItem, ProfileSection } from '@/components/ProfileCardList';
-import { ProfileGenderInput, ProfileLocationInput } from '@/components/ProfileInputs';
 
-import { arraysEqual, type EditUserForm, isEditUserFormChanged } from '../utils';
-import { RoleEditor } from './RoleEditor';
-import { ToggleControl } from './ToggleControl';
+import {
+  type EditUserForm,
+  getImageLabel,
+  getImageRemovedMessageId,
+  getImageUpdatedMessageId,
+  getImageUploadDescription,
+  getImageUploadTitle,
+  haveSameRoleKeys,
+  isEditUserFormChanged,
+  userImageConfigs,
+  type UserImageTarget,
+} from '../utils';
+import { AccountTab } from './AccountTab';
+import { DevicesTab } from './DevicesTab';
+import { EditUserDetailsBoundary } from './EditUserDetailsBoundary';
+import { PermissionsTab } from './PermissionsTab';
+import { ProfileTab } from './ProfileTab';
+import { type PendingSecurityConfirmation, SecurityTab } from './SecurityTab';
+import { SsoTab } from './SsoTab';
 
 type UserDialogTab = 'account' | 'permissions' | 'profile' | 'security' | 'devices' | 'sso';
-type UserImageTarget = 'avatar' | 'profileBanner' | 'profileBackground';
-type PendingSecurityConfirmation = 'disable-sso-requirement' | 'disable-two-step' | null;
-
-interface UserImageConfig {
-  aspect: number;
-  output: {
-    contentType?: string;
-    fileName: string;
-    height: number;
-    width: number;
-  };
-  cropShape?: 'rect' | 'round';
-  showAdjustments?: boolean;
-  getUrl: (user: UserListItem) => string | undefined;
-  remove: (userId: string) => Promise<ManagedUserDetails>;
-  upload: (userId: string, file: File) => Promise<ManagedUserDetails>;
-}
-
-const userImageConfigs: Record<UserImageTarget, UserImageConfig> = {
-  avatar: {
-    aspect: 1,
-    cropShape: 'round',
-    output: {
-      fileName: 'avatar.png',
-      height: 512,
-      width: 512,
-    },
-    getUrl: (user) => user.avatarUrl,
-    remove: deleteUserAvatar,
-    upload: uploadUserAvatar,
-  },
-  profileBanner: {
-    aspect: 4,
-    showAdjustments: true,
-    output: {
-      contentType: 'image/webp',
-      fileName: 'profile-banner.webp',
-      height: 400,
-      width: 1600,
-    },
-    getUrl: (user) => user.profileBannerUrl,
-    remove: deleteUserProfileBanner,
-    upload: uploadUserProfileBanner,
-  },
-  profileBackground: {
-    aspect: 16 / 9,
-    showAdjustments: true,
-    output: {
-      contentType: 'image/webp',
-      fileName: 'profile-background.webp',
-      height: 1080,
-      width: 1920,
-    },
-    getUrl: (user) => user.profileBackgroundUrl,
-    remove: deleteUserProfileBackground,
-    upload: uploadUserProfileBackground,
-  },
-};
 
 export function EditUserDialog({
   availableRoles,
@@ -214,9 +112,9 @@ export function EditUserDialog({
   const saving = Boolean(editingUser && savingUserId === editingUser.id);
   const changed = editingUser
     ? isEditUserFormChanged(editingForm, editingUser, phoneBindingEnabled, profileEmailVerificationEnabled) ||
-      !arraysEqual(editingRoleKeys, editingUser.roles)
+      !haveSameRoleKeys(editingRoleKeys, editingUser.roles)
     : false;
-  const rolesChanged = editingUser ? !arraysEqual(editingRoleKeys, editingUser.roles) : false;
+  const rolesChanged = editingUser ? !haveSameRoleKeys(editingRoleKeys, editingUser.roles) : false;
   const sensitiveChanges = Boolean(
     editingUser &&
     (editingForm.password.trim() ||
@@ -587,7 +485,7 @@ export function EditUserDialog({
                 />
               </TabsContent>
               <TabsContent value="profile">
-                <DetailsBoundary
+                <EditUserDetailsBoundary
                   error={currentDetailsError}
                   loading={detailsLoading}
                   onRetry={() => void handleReloadDetails()}
@@ -604,10 +502,10 @@ export function EditUserDialog({
                       user={currentManagedUser}
                     />
                   ) : null}
-                </DetailsBoundary>
+                </EditUserDetailsBoundary>
               </TabsContent>
               <TabsContent value="security">
-                <DetailsBoundary
+                <EditUserDetailsBoundary
                   error={currentDetailsError}
                   loading={detailsLoading}
                   onRetry={() => void handleReloadDetails()}
@@ -624,10 +522,10 @@ export function EditUserDialog({
                       setPendingConfirmation={setPendingSecurityConfirmation}
                     />
                   ) : null}
-                </DetailsBoundary>
+                </EditUserDetailsBoundary>
               </TabsContent>
               <TabsContent value="devices">
-                <DetailsBoundary
+                <EditUserDetailsBoundary
                   error={currentDetailsError}
                   loading={detailsLoading}
                   onRetry={() => void handleReloadDetails()}
@@ -640,10 +538,10 @@ export function EditUserDialog({
                       onRevokeDevices={handleRevokeDevices}
                     />
                   ) : null}
-                </DetailsBoundary>
+                </EditUserDetailsBoundary>
               </TabsContent>
               <TabsContent value="sso">
-                <DetailsBoundary
+                <EditUserDetailsBoundary
                   error={currentDetailsError}
                   loading={detailsLoading}
                   onRetry={() => void handleReloadDetails()}
@@ -655,7 +553,7 @@ export function EditUserDialog({
                       onDeleteIdentity={handleDeleteSsoIdentity}
                     />
                   ) : null}
-                </DetailsBoundary>
+                </EditUserDetailsBoundary>
               </TabsContent>
             </Tabs>
           </AppDialogBody>
@@ -709,923 +607,4 @@ export function EditUserDialog({
       ) : null}
     </>
   );
-}
-
-function AccountTab({
-  editError,
-  editingDisabled,
-  editingForm,
-  editingUser,
-  emailVerifiedDisabled,
-  onFormChange,
-  phoneBindingEnabled,
-  phoneCountryCodes,
-  phoneDisabled,
-  profileEmailVerificationEnabled,
-  saving,
-}: {
-  editError: string | null;
-  editingDisabled: boolean;
-  editingForm: EditUserForm;
-  editingUser: UserListItem | null;
-  emailVerifiedDisabled: boolean;
-  onFormChange: Dispatch<SetStateAction<EditUserForm>>;
-  phoneBindingEnabled: boolean;
-  phoneCountryCodes: PhoneCountryCode[];
-  phoneDisabled: boolean;
-  profileEmailVerificationEnabled: boolean;
-  saving: boolean;
-}) {
-  const intl = useIntl();
-
-  return (
-    <div className="grid gap-5 pt-2">
-      <div className="grid gap-4">
-        <div className="grid gap-2">
-          <Label htmlFor="editUsername">{intl.formatMessage({ id: 'auth.username' })}</Label>
-          <Input
-            autoComplete="username"
-            disabled={saving}
-            id="editUsername"
-            onChange={(event) => onFormChange((current) => ({ ...current, username: event.target.value }))}
-            placeholder={intl.formatMessage({ id: 'auth.username.placeholder' })}
-            value={editingForm.username}
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="editDisplayName">{intl.formatMessage({ id: 'profile.display.name' })}</Label>
-          <Input
-            autoComplete="name"
-            disabled={saving}
-            id="editDisplayName"
-            onChange={(event) => onFormChange((current) => ({ ...current, displayName: event.target.value }))}
-            placeholder={intl.formatMessage({ id: 'profile.display.name.placeholder' })}
-            value={editingForm.displayName}
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="editEmail">{intl.formatMessage({ id: 'profile.email' })}</Label>
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-            <Input
-              autoComplete="email"
-              disabled={editingDisabled}
-              id="editEmail"
-              onChange={(event) => {
-                const email = event.target.value;
-
-                onFormChange((current) => ({
-                  ...current,
-                  email,
-                  emailVerified: editingUser && email === editingUser.email ? editingUser.emailVerified : false,
-                }));
-              }}
-              placeholder={intl.formatMessage({ id: 'auth.email.placeholder' })}
-              type="email"
-              value={editingForm.email}
-            />
-            <ToggleControl
-              checked={editingForm.emailVerified}
-              disabled={emailVerifiedDisabled}
-              label={intl.formatMessage({ id: 'users.edit.email.verified.label' })}
-              onCheckedChange={(checked) => onFormChange((current) => ({ ...current, emailVerified: checked }))}
-              showLabel={false}
-              tooltip={formatVerifiedStateTooltip(
-                intl,
-                intl.formatMessage({ id: 'profile.email' }),
-                editingForm.emailVerified,
-                profileEmailVerificationEnabled
-                  ? undefined
-                  : intl.formatMessage({ id: 'users.edit.email.verification.not.configured' }),
-              )}
-            />
-          </div>
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="editPhoneLocalNumber">{intl.formatMessage({ id: 'profile.phone' })}</Label>
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-            <div className="flex gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild disabled={phoneDisabled}>
-                  <Button className="w-24 shrink-0 justify-between" type="button" variant="outline">
-                    {editingForm.phoneCountryCode}
-                    <ChevronDownIcon />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="z-[60] min-w-56">
-                  {phoneCountryCodes.map((countryCode) => (
-                    <DropdownMenuItem
-                      key={countryCode}
-                      onSelect={() =>
-                        onFormChange((current) => {
-                          const phoneNumber = composePhoneNumber({
-                            ...current,
-                            phoneCountryCode: countryCode,
-                          });
-
-                          return {
-                            ...current,
-                            phoneCountryCode: countryCode,
-                            phoneVerified:
-                              editingUser && phoneNumber === (editingUser.phoneNumber ?? '')
-                                ? editingUser.phoneVerified
-                                : false,
-                          };
-                        })
-                      }
-                    >
-                      {intl.formatMessage({ id: getPhoneCountryCodeMessageId(countryCode) })}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Input
-                autoComplete="tel-national"
-                disabled={phoneDisabled}
-                id="editPhoneLocalNumber"
-                onChange={(event) => {
-                  const phoneLocalNumber = event.target.value;
-
-                  onFormChange((current) => {
-                    const phoneNumber = composePhoneNumber({
-                      ...current,
-                      phoneLocalNumber,
-                    });
-
-                    return {
-                      ...current,
-                      phoneLocalNumber,
-                      phoneVerified:
-                        editingUser && phoneNumber === (editingUser.phoneNumber ?? '')
-                          ? editingUser.phoneVerified
-                          : false,
-                    };
-                  });
-                }}
-                placeholder={
-                  phoneBindingEnabled
-                    ? getPhonePlaceholder(editingForm.phoneCountryCode)
-                    : intl.formatMessage({ id: 'common.not.configured' })
-                }
-                value={editingForm.phoneLocalNumber}
-              />
-            </div>
-            <ToggleControl
-              checked={editingForm.phoneVerified}
-              disabled={phoneDisabled || !editingForm.phoneLocalNumber.trim()}
-              label={intl.formatMessage({ id: 'users.edit.phone.verified.label' })}
-              onCheckedChange={(checked) => onFormChange((current) => ({ ...current, phoneVerified: checked }))}
-              showLabel={false}
-              tooltip={formatVerifiedStateTooltip(
-                intl,
-                intl.formatMessage({ id: 'profile.phone' }),
-                editingForm.phoneVerified,
-                !phoneBindingEnabled
-                  ? intl.formatMessage({ id: 'users.edit.sms.verification.not.configured' })
-                  : editingForm.phoneLocalNumber.trim()
-                    ? undefined
-                    : intl.formatMessage({ id: 'users.edit.phone.verification.requires.phone' }),
-              )}
-            />
-          </div>
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="editPassword">{intl.formatMessage({ id: 'auth.password' })}</Label>
-          <Input
-            autoComplete="new-password"
-            disabled={editingDisabled}
-            id="editPassword"
-            onChange={(event) => onFormChange((current) => ({ ...current, password: event.target.value }))}
-            placeholder={intl.formatMessage({ id: 'users.edit.password.placeholder' })}
-            type="password"
-            value={editingForm.password}
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label>{intl.formatMessage({ id: 'users.edit.availability' })}</Label>
-          <ToggleControl
-            checked={editingForm.available}
-            disabled={editingDisabled}
-            label={intl.formatMessage({ id: editingForm.available ? 'users.available' : 'users.disabled' })}
-            onCheckedChange={(checked) => onFormChange((current) => ({ ...current, available: checked }))}
-            tooltip={intl.formatMessage({ id: editingForm.available ? 'users.available' : 'users.disabled' })}
-          />
-        </div>
-      </div>
-      <FormMessage message={editError} variant="error" />
-    </div>
-  );
-}
-
-function PermissionsTab({
-  availableRoles,
-  disabled,
-  editingRoleKeys,
-  onRoleToggle,
-}: {
-  availableRoles: RoleSummary[];
-  disabled: boolean;
-  editingRoleKeys: string[];
-  onRoleToggle: (roleKey: string, enabled: boolean) => void;
-}) {
-  const intl = useIntl();
-  const selectedPermissionKeys = resolveSelectedPermissionKeys(availableRoles, editingRoleKeys);
-
-  return (
-    <div className="grid gap-4 pt-2">
-      <ProfileSection
-        title={intl.formatMessage({ id: 'users.roles' })}
-        description={intl.formatMessage({ id: 'users.edit.roles.description' })}
-      >
-        <div className="p-4">
-          <RoleEditor
-            disabled={disabled}
-            onToggle={onRoleToggle}
-            roles={availableRoles}
-            selectedRoleKeys={editingRoleKeys}
-          />
-        </div>
-      </ProfileSection>
-      <ProfileSection
-        title={intl.formatMessage({ id: 'users.permissions' })}
-        description={intl.formatMessage({ id: 'users.edit.permissions.description' })}
-      >
-        <div className="p-4">
-          {selectedPermissionKeys.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {selectedPermissionKeys.map((permissionKey) => (
-                <Badge key={permissionKey} variant="outline">
-                  {permissionKey}
-                </Badge>
-              ))}
-            </div>
-          ) : (
-            <span className="text-sm text-muted-foreground">{intl.formatMessage({ id: 'users.no.permissions' })}</span>
-          )}
-        </div>
-      </ProfileSection>
-    </div>
-  );
-}
-
-function ProfileTab({
-  disabled,
-  editingDisabled,
-  editingForm,
-  imagePreviewTarget,
-  onFormChange,
-  onOpenImageDialog,
-  onPreviewOpenChange,
-  user,
-}: {
-  disabled: boolean;
-  editingDisabled: boolean;
-  editingForm: EditUserForm;
-  imagePreviewTarget: UserImageTarget | null;
-  onFormChange: Dispatch<SetStateAction<EditUserForm>>;
-  onOpenImageDialog: (target: UserImageTarget) => void;
-  onPreviewOpenChange: (target: UserImageTarget, open: boolean) => void;
-  user: UserListItem;
-}) {
-  const intl = useIntl();
-  const avatarUrl = resolveAssetUrl(user.avatarUrl);
-  const profileBannerUrl = resolveAssetUrl(user.profileBannerUrl);
-  const profileBackgroundUrl = resolveAssetUrl(user.profileBackgroundUrl);
-
-  return (
-    <div className="grid gap-4 pt-2">
-      <ProfileSection
-        title={intl.formatMessage({ id: 'profile.details' })}
-        description={intl.formatMessage({ id: 'profile.details.description' })}
-      >
-        <div className="grid gap-4 p-4">
-          <div className="grid gap-2">
-            <Label htmlFor="editGender">{intl.formatMessage({ id: 'profile.gender' })}</Label>
-            <ProfileGenderInput
-              disabled={editingDisabled}
-              id="editGender"
-              onValueChange={(value) => onFormChange((current) => ({ ...current, gender: value }))}
-              value={editingForm.gender}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="editBirthday">{intl.formatMessage({ id: 'profile.birthday' })}</Label>
-            <BirthdayPicker
-              disabled={editingDisabled}
-              id="editBirthday"
-              name="birthday"
-              onChange={(value) => onFormChange((current) => ({ ...current, birthday: value }))}
-              value={editingForm.birthday}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="editBio">{intl.formatMessage({ id: 'profile.bio' })}</Label>
-            <Textarea
-              disabled={editingDisabled}
-              id="editBio"
-              maxLength={280}
-              onChange={(event) => onFormChange((current) => ({ ...current, bio: event.target.value }))}
-              placeholder={intl.formatMessage({ id: 'users.edit.introduce.user.placeholder' })}
-              rows={4}
-              value={editingForm.bio}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="editLocation">{intl.formatMessage({ id: 'profile.location' })}</Label>
-            <ProfileLocationInput
-              disabled={editingDisabled}
-              id="editLocation"
-              onValueChange={(value) => onFormChange((current) => ({ ...current, location: value }))}
-              value={editingForm.location}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="editWebsiteUrl">{intl.formatMessage({ id: 'profile.homepage' })}</Label>
-            <Input
-              autoComplete="url"
-              disabled={editingDisabled}
-              id="editWebsiteUrl"
-              onChange={(event) => onFormChange((current) => ({ ...current, websiteUrl: event.target.value }))}
-              placeholder={intl.formatMessage({ id: 'profile.website.placeholder' })}
-              type="url"
-              value={editingForm.websiteUrl}
-            />
-          </div>
-        </div>
-      </ProfileSection>
-      <ProfileSection
-        title={intl.formatMessage({ id: 'users.profile.visuals' })}
-        description={intl.formatMessage({ id: 'users.profile.visuals.description' })}
-      >
-        <ProfileItem
-          actionDisabled={disabled}
-          actionIcon={<ImageUpIcon />}
-          actionLabel={intl.formatMessage({ id: 'common.change' })}
-          description={intl.formatMessage({ id: 'users.profile.visuals.avatar.description' })}
-          media={
-            <ImagePreviewTrigger
-              imageAlt={intl.formatMessage({ id: 'profile.avatar.alt' }, { name: user.displayName })}
-              imageUrl={avatarUrl}
-              onOpenChange={(open) => onPreviewOpenChange('avatar', open)}
-              open={imagePreviewTarget === 'avatar'}
-              title={intl.formatMessage({ id: 'profile.avatar.preview' })}
-            >
-              <Avatar className="size-full">
-                <AvatarImage src={avatarUrl} alt={user.displayName} />
-                <AvatarFallback>{getUserFallback(user.displayName)}</AvatarFallback>
-              </Avatar>
-            </ImagePreviewTrigger>
-          }
-          mediaClassName="size-10 rounded-full"
-          mediaVariant="default"
-          onAction={() => onOpenImageDialog('avatar')}
-          status={intl.formatMessage({ id: avatarUrl ? 'common.custom' : 'common.default' })}
-          statusVariant={avatarUrl ? 'secondary' : 'outline'}
-          title={intl.formatMessage({ id: 'profile.avatar' })}
-        />
-        <ItemSeparator className="!my-0" />
-        <ProfileItem
-          actionDisabled={disabled}
-          actionIcon={<ImageUpIcon />}
-          actionLabel={intl.formatMessage({ id: 'common.change' })}
-          description={intl.formatMessage({ id: 'users.profile.visuals.banner.description' })}
-          media={
-            <ImagePreviewTrigger
-              imageAlt={intl.formatMessage({ id: 'profile.banner.alt' }, { name: user.displayName })}
-              imageUrl={profileBannerUrl}
-              onOpenChange={(open) => onPreviewOpenChange('profileBanner', open)}
-              open={imagePreviewTarget === 'profileBanner'}
-              title={intl.formatMessage({ id: 'profile.banner.preview' })}
-            >
-              <ImagePreviewMedia fallbackIcon={<ImageIcon className="size-4" />} imageUrl={profileBannerUrl} />
-            </ImagePreviewTrigger>
-          }
-          mediaClassName="size-10 rounded-full"
-          mediaVariant="default"
-          onAction={() => onOpenImageDialog('profileBanner')}
-          status={intl.formatMessage({ id: profileBannerUrl ? 'common.custom' : 'common.default' })}
-          statusVariant={profileBannerUrl ? 'secondary' : 'outline'}
-          title={intl.formatMessage({ id: 'profile.banner' })}
-        />
-        <ItemSeparator className="!my-0" />
-        <ProfileItem
-          actionDisabled={disabled}
-          actionIcon={<ImageUpIcon />}
-          actionLabel={intl.formatMessage({ id: 'common.change' })}
-          description={intl.formatMessage({ id: 'users.profile.visuals.background.description' })}
-          media={
-            <ImagePreviewTrigger
-              imageAlt={intl.formatMessage({ id: 'profile.background.alt' }, { name: user.displayName })}
-              imageUrl={profileBackgroundUrl}
-              onOpenChange={(open) => onPreviewOpenChange('profileBackground', open)}
-              open={imagePreviewTarget === 'profileBackground'}
-              title={intl.formatMessage({ id: 'profile.background.preview' })}
-            >
-              <ImagePreviewMedia fallbackIcon={<WallpaperIcon className="size-4" />} imageUrl={profileBackgroundUrl} />
-            </ImagePreviewTrigger>
-          }
-          mediaClassName="size-10 rounded-full"
-          mediaVariant="default"
-          onAction={() => onOpenImageDialog('profileBackground')}
-          status={intl.formatMessage({ id: profileBackgroundUrl ? 'common.custom' : 'common.default' })}
-          statusVariant={profileBackgroundUrl ? 'secondary' : 'outline'}
-          title={intl.formatMessage({ id: 'profile.background' })}
-        />
-      </ProfileSection>
-    </div>
-  );
-}
-
-function SecurityTab({
-  disabled,
-  onDeletePasskey,
-  onDisableTotp,
-  onSsoRequirementChange,
-  onTwoStepEnabledChange,
-  pendingConfirmation,
-  security,
-  setPendingConfirmation,
-}: {
-  disabled: boolean;
-  onDeletePasskey: (passkeyId: string) => void;
-  onDisableTotp: () => void;
-  onSsoRequirementChange: (enabled: boolean) => void;
-  onTwoStepEnabledChange: (enabled: boolean) => void;
-  pendingConfirmation: PendingSecurityConfirmation;
-  security: ManagedUserSecurity;
-  setPendingConfirmation: (confirmation: PendingSecurityConfirmation) => void;
-}) {
-  const intl = useIntl();
-  const twoStepSwitchDisabled =
-    disabled ||
-    (security.mfaSettings.twoStepEnabled
-      ? !security.mfaSettings.twoStepCanDisable
-      : !security.mfaSettings.twoStepCanEnable);
-
-  return (
-    <div className="grid gap-4 pt-2">
-      <ProfileSection
-        title={intl.formatMessage({ id: 'security.two.step.authentication' })}
-        description={intl.formatMessage({ id: 'users.edit.two.step.description' })}
-      >
-        <Item>
-          <ItemMedia>
-            <ShieldCheckIcon className="size-4" />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>
-              {intl.formatMessage({ id: 'security.authenticator.app' })}
-              <Badge variant={security.totpStatus.enabled ? 'secondary' : 'outline'}>
-                {intl.formatMessage({ id: security.totpStatus.enabled ? 'common.enabled' : 'common.disabled' })}
-              </Badge>
-            </ItemTitle>
-            <ItemDescription>
-              {security.totpStatus.enabled
-                ? intl.formatMessage(
-                    { id: 'security.recovery.codes.remaining' },
-                    { count: security.totpStatus.recoveryCodesRemaining },
-                  )
-                : intl.formatMessage({ id: 'users.edit.no.authenticator.configured' })}
-            </ItemDescription>
-          </ItemContent>
-          {security.totpStatus.enabled ? (
-            <ItemActions>
-              <ConfirmActionDialog
-                confirmLabel={intl.formatMessage({ id: 'common.remove' })}
-                description={intl.formatMessage({ id: 'users.edit.remove.authenticator.description' })}
-                onConfirm={onDisableTotp}
-                title={intl.formatMessage({ id: 'users.edit.remove.authenticator.title' })}
-              >
-                <Button disabled={disabled} size="sm" type="button" variant="destructive">
-                  <ShieldOffIcon />
-                  {intl.formatMessage({ id: 'common.remove' })}
-                </Button>
-              </ConfirmActionDialog>
-            </ItemActions>
-          ) : null}
-        </Item>
-        <ItemSeparator className="!my-0" />
-        <PasskeyItem disabled={disabled} onDeletePasskey={onDeletePasskey} passkeys={security.passkeys} />
-        <ItemSeparator className="!my-0" />
-        <MfaSwitchItem
-          checked={security.mfaSettings.twoStepEnabled}
-          description={getTwoStepStatusDescription(security.mfaSettings, intl)}
-          disabled={twoStepSwitchDisabled}
-          icon={<ShieldIcon className="size-4" />}
-          onCheckedChange={(checked) => {
-            if (!checked) {
-              setPendingConfirmation('disable-two-step');
-              return;
-            }
-
-            onTwoStepEnabledChange(true);
-          }}
-          status={intl.formatMessage({
-            id: security.mfaSettings.twoStepEnabled ? 'common.enabled' : 'common.disabled',
-          })}
-          title={intl.formatMessage({ id: 'security.two.step.verification' })}
-        />
-        <ItemSeparator className="!my-0" />
-        <MfaSwitchItem
-          checked={security.mfaSettings.mfaRequiredForSso}
-          description={intl.formatMessage({ id: 'security.sso.mfa.description' })}
-          disabled={disabled || !security.mfaSettings.twoStepEnabled}
-          icon={<LinkIcon className="size-4" />}
-          onCheckedChange={(checked) => {
-            if (!checked) {
-              setPendingConfirmation('disable-sso-requirement');
-              return;
-            }
-
-            onSsoRequirementChange(true);
-          }}
-          status={intl.formatMessage({
-            id: security.mfaSettings.mfaRequiredForSso ? 'common.enabled' : 'common.disabled',
-          })}
-          title={intl.formatMessage({ id: 'security.sso.mfa' })}
-        />
-      </ProfileSection>
-      <ConfirmActionDialog
-        confirmLabel={intl.formatMessage({ id: 'common.disable' })}
-        description={intl.formatMessage({ id: 'security.disable.totp.description' })}
-        onConfirm={() => {
-          setPendingConfirmation(null);
-          onTwoStepEnabledChange(false);
-        }}
-        onOpenChange={(open) => (!open ? setPendingConfirmation(null) : undefined)}
-        open={pendingConfirmation === 'disable-two-step'}
-        title={intl.formatMessage({ id: 'security.disable.totp.title' })}
-      />
-      <ConfirmActionDialog
-        confirmLabel={intl.formatMessage({ id: 'common.disable' })}
-        description={intl.formatMessage({ id: 'security.disable.sso.mfa.description' })}
-        onConfirm={() => {
-          setPendingConfirmation(null);
-          onSsoRequirementChange(false);
-        }}
-        onOpenChange={(open) => (!open ? setPendingConfirmation(null) : undefined)}
-        open={pendingConfirmation === 'disable-sso-requirement'}
-        title={intl.formatMessage({ id: 'security.disable.sso.mfa.title' })}
-      />
-    </div>
-  );
-}
-
-function PasskeyItem({
-  disabled,
-  onDeletePasskey,
-  passkeys,
-}: {
-  disabled: boolean;
-  onDeletePasskey: (passkeyId: string) => void;
-  passkeys: PasskeySummary[];
-}) {
-  const intl = useIntl();
-
-  return (
-    <Item>
-      <ItemMedia>
-        <FingerprintIcon className="size-4" />
-      </ItemMedia>
-      <ItemContent>
-        <ItemTitle>
-          {intl.formatMessage({ id: 'security.passkeys' })}
-          <Badge variant={passkeys.length > 0 ? 'secondary' : 'outline'}>
-            {formatPasskeyCount(passkeys.length, intl)}
-          </Badge>
-        </ItemTitle>
-        <ItemDescription>{intl.formatMessage({ id: 'users.edit.passkeys.description' })}</ItemDescription>
-      </ItemContent>
-      {passkeys.length > 0 ? (
-        <ItemFooter className="mt-1 pl-7">
-          <div className="grid w-full gap-0.5 border-t pt-2">
-            {passkeys.map((passkey) => (
-              <div className="flex items-center justify-between gap-3 py-1.5" key={passkey.id}>
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{formatPasskeyDisplayName(passkey.name, intl)}</div>
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                    <span>{formatPasskeyDeviceType(passkey.deviceType, intl)}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>
-                      {intl.formatMessage({
-                        id: passkey.backedUp ? 'security.passkey.backed.up' : 'security.passkey.single.device',
-                      })}
-                    </span>
-                  </div>
-                </div>
-                <ConfirmActionDialog
-                  confirmLabel={intl.formatMessage({ id: 'common.remove' })}
-                  description={intl.formatMessage({ id: 'security.passkey.remove.description' })}
-                  onConfirm={() => onDeletePasskey(passkey.id)}
-                  title={intl.formatMessage({ id: 'security.passkey.remove.title' })}
-                >
-                  <Button
-                    aria-label={intl.formatMessage({ id: 'security.remove.passkey.label' })}
-                    disabled={disabled}
-                    size="icon"
-                    type="button"
-                    variant="destructive"
-                  >
-                    <Trash2Icon />
-                  </Button>
-                </ConfirmActionDialog>
-              </div>
-            ))}
-          </div>
-        </ItemFooter>
-      ) : null}
-    </Item>
-  );
-}
-
-function MfaSwitchItem({
-  checked,
-  description,
-  disabled,
-  icon,
-  onCheckedChange,
-  status,
-  title,
-}: {
-  checked: boolean;
-  description: string;
-  disabled: boolean;
-  icon: ReactNode;
-  onCheckedChange: (checked: boolean) => void;
-  status: string;
-  title: string;
-}) {
-  return (
-    <Item>
-      <ItemMedia>{icon}</ItemMedia>
-      <ItemContent>
-        <ItemTitle>
-          {title}
-          <Badge variant={checked ? 'secondary' : 'outline'}>{status}</Badge>
-        </ItemTitle>
-        <ItemDescription>{description}</ItemDescription>
-      </ItemContent>
-      <ItemActions>
-        <Switch checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
-      </ItemActions>
-    </Item>
-  );
-}
-
-function DevicesTab({
-  devices,
-  disabled,
-  onRevokeDevice,
-  onRevokeDevices,
-}: {
-  devices: AuthDeviceSession[];
-  disabled: boolean;
-  onRevokeDevice: (sessionId: string) => void;
-  onRevokeDevices: () => void;
-}) {
-  const intl = useIntl();
-  const revocableDeviceCount = devices.filter((device) => !device.isCurrent).length;
-
-  return (
-    <div className="grid gap-4 pt-2">
-      <ProfileSection
-        actions={
-          revocableDeviceCount > 0 ? (
-            <ConfirmActionDialog
-              confirmLabel={intl.formatMessage({ id: 'security.sign.out.all.devices' })}
-              description={intl.formatMessage({ id: 'users.edit.devices.sign.out.all.description' })}
-              onConfirm={onRevokeDevices}
-              title={intl.formatMessage({ id: 'users.edit.devices.sign.out.all.title' })}
-            >
-              <Button disabled={disabled} size="sm" type="button" variant="destructive">
-                <LogOutIcon />
-                {intl.formatMessage({ id: 'security.sign.out.all.devices' })}
-              </Button>
-            </ConfirmActionDialog>
-          ) : undefined
-        }
-        title={intl.formatMessage({ id: 'security.login.devices' })}
-        description={intl.formatMessage({ id: 'security.login.devices.description' })}
-      >
-        {devices.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground">
-            {intl.formatMessage({ id: 'security.login.devices.none' })}
-          </div>
-        ) : (
-          devices.map((device, index) => (
-            <div key={device.id}>
-              <AuthDeviceItem
-                device={device}
-                disabled={disabled}
-                onRevoke={onRevokeDevice}
-                revokeDescription={intl.formatMessage({ id: 'security.device.revoke.description' })}
-                revokeLabel={intl.formatMessage({ id: 'security.sign.out.device' })}
-                revokeTitle={intl.formatMessage({ id: 'security.device.revoke.title' })}
-              />
-              {index < devices.length - 1 ? <ItemSeparator className="!my-0" /> : null}
-            </div>
-          ))
-        )}
-      </ProfileSection>
-    </div>
-  );
-}
-
-function SsoTab({
-  disabled,
-  identities,
-  onDeleteIdentity,
-}: {
-  disabled: boolean;
-  identities: SsoIdentityPublic[];
-  onDeleteIdentity: (providerId: string) => void;
-}) {
-  const intl = useIntl();
-
-  return (
-    <div className="grid gap-4 pt-2">
-      <ProfileSection
-        title={intl.formatMessage({ id: 'users.edit.sso.bindings' })}
-        description={intl.formatMessage({ id: 'users.edit.sso.bindings.description' })}
-      >
-        {identities.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground">
-            {intl.formatMessage({ id: 'users.edit.sso.bindings.none' })}
-          </div>
-        ) : (
-          identities.map((identity, index) => (
-            <div key={identity.providerId}>
-              <Item>
-                <ItemMedia>
-                  <LinkIcon className="size-4" />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>{identity.providerName}</ItemTitle>
-                  <ItemDescription>{identity.providerSubject}</ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <ConfirmActionDialog
-                    confirmLabel={intl.formatMessage({ id: 'common.remove' })}
-                    description={intl.formatMessage({ id: 'users.edit.remove.sso.binding.description' })}
-                    onConfirm={() => onDeleteIdentity(identity.providerId)}
-                    title={intl.formatMessage({ id: 'users.edit.remove.sso.binding.title' })}
-                  >
-                    <Button
-                      aria-label={intl.formatMessage({ id: 'users.edit.remove.sso.binding.label' })}
-                      disabled={disabled}
-                      size="icon"
-                      type="button"
-                      variant="destructive"
-                    >
-                      <Trash2Icon />
-                    </Button>
-                  </ConfirmActionDialog>
-                </ItemActions>
-              </Item>
-              {index < identities.length - 1 ? <ItemSeparator className="!my-0" /> : null}
-            </div>
-          ))
-        )}
-      </ProfileSection>
-    </div>
-  );
-}
-
-function DetailsBoundary({
-  children,
-  error,
-  loading,
-  onRetry,
-}: {
-  children: ReactNode;
-  error: string | null;
-  loading: boolean;
-  onRetry: () => void;
-}) {
-  const intl = useIntl();
-
-  if (loading) {
-    return (
-      <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
-        <Spinner />
-        {intl.formatMessage({ id: 'users.edit.details.loading' })}
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="grid min-h-48 place-items-center rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-        <div className="grid justify-items-center gap-3">
-          <span>{error}</span>
-          <Button onClick={onRetry} size="sm" type="button" variant="outline">
-            {intl.formatMessage({ id: 'common.retry' })}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  return children;
-}
-
-function resolveSelectedPermissionKeys(roles: RoleSummary[], selectedRoleKeys: string[]) {
-  const selectedRoleSet = new Set(selectedRoleKeys);
-  const permissionKeySet = new Set<string>();
-
-  roles.forEach((role) => {
-    if (!selectedRoleSet.has(role.key)) {
-      return;
-    }
-
-    role.permissionKeys.forEach((permissionKey) => permissionKeySet.add(permissionKey));
-  });
-
-  return Array.from(permissionKeySet).sort();
-}
-
-function getUserFallback(displayName: string) {
-  return (
-    displayName
-      .trim()
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((part) => part[0])
-      .join('')
-      .toUpperCase() || 'U'
-  );
-}
-
-function formatVerifiedStateTooltip(intl: IntlShape, label: string, verified: boolean, reason?: string) {
-  const messageId = reason
-    ? 'users.edit.verification.state.tooltip.with.reason'
-    : 'users.edit.verification.state.tooltip';
-
-  return intl.formatMessage(
-    { id: messageId },
-    {
-      label,
-      reason,
-      state: intl.formatMessage({ id: verified ? 'users.edit.verified.state' : 'users.edit.unverified.state' }),
-    },
-  );
-}
-
-function getImageLabel(target: UserImageTarget | null, intl: IntlShape) {
-  if (target === 'avatar') {
-    return intl.formatMessage({ id: 'profile.avatar' });
-  }
-
-  if (target === 'profileBanner') {
-    return intl.formatMessage({ id: 'profile.banner' });
-  }
-
-  return intl.formatMessage({ id: 'profile.background' });
-}
-
-function getImageUploadTitle(target: UserImageTarget, intl: IntlShape) {
-  if (target === 'avatar') {
-    return intl.formatMessage({ id: 'profile.image.upload.avatar' });
-  }
-
-  if (target === 'profileBanner') {
-    return intl.formatMessage({ id: 'profile.image.upload.banner' });
-  }
-
-  return intl.formatMessage({ id: 'profile.image.upload.background' });
-}
-
-function getImageUploadDescription(target: UserImageTarget, intl: IntlShape) {
-  if (target === 'avatar') {
-    return intl.formatMessage({ id: 'users.profile.visuals.avatar.upload.description' });
-  }
-
-  if (target === 'profileBanner') {
-    return intl.formatMessage({ id: 'users.profile.visuals.banner.upload.description' });
-  }
-
-  return intl.formatMessage({ id: 'users.profile.visuals.background.upload.description' });
-}
-
-function getImageUpdatedMessageId(target: UserImageTarget | null) {
-  if (target === 'avatar') {
-    return 'profile.avatar.updated';
-  }
-
-  if (target === 'profileBanner') {
-    return 'profile.banner.updated';
-  }
-
-  return 'profile.background.updated';
-}
-
-function getImageRemovedMessageId(target: UserImageTarget | null) {
-  if (target === 'avatar') {
-    return 'profile.avatar.removed';
-  }
-
-  if (target === 'profileBanner') {
-    return 'profile.banner.removed';
-  }
-
-  return 'profile.background.removed';
 }

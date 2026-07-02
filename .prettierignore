@@ -5,6 +5,7 @@ coverage
 .env.*
 *.log
 package-lock.json
-backend/data
-backend/logs
+.agents
+data
+logs
 frontend/src/shadcn

@@ -52,7 +52,7 @@ DATABASE_DIALECT = "sqlite"
 # SQLite database file path.
 # Used only when DATABASE_DIALECT is sqlite.
 # Use :memory: for a database that is erased when the process exits.
-# Relative paths resolve from the backend application directory.
+# Relative paths resolve from the project root.
 DATABASE_STORAGE = "./data/database.sqlite"
 
 # MySQL or PostgreSQL connection URL.
@@ -128,7 +128,7 @@ FILE_PUBLIC_BASE_URL = "/uploads"
 
 # Local uploaded file storage directory.
 # Used only when FILE_STORAGE_DRIVER is local.
-# Relative paths resolve from the backend application directory.
+# Relative paths resolve from the project root.
 FILE_LOCAL_ROOT = "./data/uploads"
 
 # Aliyun OSS access key ID.
@@ -254,7 +254,7 @@ LOG_WRITE_TIMEOUT_MS = "5000"
 
 # Local JSONL log file path.
 # Used only when LOG_TARGETS includes local.
-# Relative paths resolve from the backend application directory.
+# Relative paths resolve from the project root.
 LOG_LOCAL_PATH = "./logs/backend.log"
 
 # Aliyun Simple Log Service endpoint.

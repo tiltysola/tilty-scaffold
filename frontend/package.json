@@ -1,12 +1,13 @@
 {
   "name": "@tilty/frontend",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "test": "vitest run",
     "typecheck": "tsc -b",
+    "prebuild": "npm run clean",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
@@ -14,7 +15,7 @@
     "format": "prettier --write . --ignore-unknown",
     "format:check": "prettier --check . --ignore-unknown",
     "fix": "npm run format && npm run lint:fix",
-    "clean": "node ../scripts/clean.mjs dist"
+    "clean": "node ../scripts/clean.mjs ../dist/frontend"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

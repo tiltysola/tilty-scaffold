@@ -2,7 +2,7 @@ import { mkdir, unlink, writeFile } from 'fs/promises';
 import { dirname, join, posix } from 'path';
 
 import { AppError } from '../core/errors';
-import { resolveApplicationPath } from '../core/files';
+import { resolveRuntimePath } from '../core/files';
 
 type FileStorageConfig =
   | {
@@ -65,7 +65,7 @@ class LocalFileStorage implements FileStorage {
   private readonly root: string;
 
   constructor(private readonly config: Extract<FileStorageConfig, { driver: 'local' }>) {
-    this.root = resolveApplicationPath(config.root, 'FILE_LOCAL_ROOT');
+    this.root = resolveRuntimePath(config.root, 'FILE_LOCAL_ROOT');
   }
 
   async save(input: SaveFileInput) {

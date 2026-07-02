@@ -80,7 +80,7 @@ export function getFieldGroups(fields: SetupFieldDefinition[]) {
   return groups;
 }
 
-export function fieldGroupsNeedHeader(groups: SetupFieldGroup[]) {
+export function shouldShowFieldGroupHeaders(groups: SetupFieldGroup[]) {
   return groups.length > 1 || groups[0]?.name !== 'general';
 }
 

@@ -1,7 +1,7 @@
 import { appendFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 
-import { resolveApplicationPath } from '../core/files';
+import { resolveRuntimePath } from '../core/files';
 import {
   formatLogRecordAsJsonLine,
   formatLogRecordData,
@@ -61,7 +61,7 @@ class LocalFileLogSink implements LogSink {
   private readonly ready: Promise<void>;
 
   constructor(filePath: string) {
-    this.filePath = resolveApplicationPath(filePath, 'LOG_LOCAL_PATH');
+    this.filePath = resolveRuntimePath(filePath, 'LOG_LOCAL_PATH');
     this.ready = mkdir(dirname(this.filePath), { recursive: true }).then(() => undefined);
   }
 

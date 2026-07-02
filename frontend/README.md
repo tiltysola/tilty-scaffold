@@ -22,6 +22,9 @@ Run commands from `frontend/`.
 | `npm run fix`          | Format files and fix lint violations |
 | `npm run clean`        | Remove production build output       |
 
+Production output is written to `../dist/frontend` and is served by the
+compiled backend when running `npm start` from the repository root.
+
 ## Environment
 
 The frontend uses relative API paths. During development, Vite proxies `/api`
@@ -66,9 +69,10 @@ displays authenticated user context and application status. The sidebar and
 protected routes use role and permission keys for navigation and page access;
 the backend remains the source of truth for API authorization.
 
-The profile page updates the current user's public profile details through
+The profile page updates the current user's profile fields through
 `PATCH /api/auth/me`. Gender and location editing use server-provided options
-while allowing custom text. Avatar, profile banner, and profile background uploads use `/api/auth/avatar`, `/api/auth/profile-banner`, and
+while allowing custom text. Avatar, profile banner, and profile background
+uploads use `/api/auth/avatar`, `/api/auth/profile-banner`, and
 `/api/auth/profile-background`. Unverified email status uses
 `/api/auth/me/email-verification` and `/api/auth/me/email-verification/confirm`.
 Phone binding uses `/api/auth/me/phone-verification` and
@@ -139,6 +143,6 @@ components through the official CLI:
 npx shadcn@latest add <component>
 ```
 
-Production output is written to `dist/` and should be recreated with
+Production output is written to `../dist/frontend` and should be recreated with
 `npm run build`. Generated shadcn/ui files should be changed only through the
 official CLI.

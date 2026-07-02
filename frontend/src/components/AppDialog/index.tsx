@@ -13,8 +13,14 @@ import {
 import { ScrollArea } from '@/shadcn/components/ui/scroll-area';
 import { cn } from '@/shadcn/lib/utils';
 
-type DialogRootProps = ComponentProps<typeof Dialog>;
 type DialogContentProps = ComponentProps<typeof DialogContent>;
+
+interface DialogRootProps {
+  defaultOpen?: boolean;
+  modal?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  open?: boolean;
+}
 
 interface AppDialogHeaderProps {
   className?: string;

@@ -1,4 +1,4 @@
-import { type ComponentPropsWithoutRef, useEffect, useMemo, useState } from 'react';
+import { type ComponentPropsWithoutRef, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from 'react-intl';
 
 import {
@@ -8,16 +8,49 @@ import {
   fetchProfileLocationRegions,
   type ProfileOption,
 } from '@/lib/profile-options';
+import {
+  Combobox,
+  ComboboxCollection,
+  ComboboxEmpty,
+  ComboboxInput as ShadcnComboboxInput,
+  ComboboxItem,
+} from '@/shadcn/components/ui/combobox';
+import { cn } from '@/shadcn/lib/utils';
 
-import { ComboboxInput } from '@/components/ComboboxInput';
+import { ProfileComboboxContent } from './ProfileComboboxContent';
+import { ProfileComboboxList } from './ProfileComboboxList';
+import { ProfileLocationCombobox } from './ProfileLocationCombobox';
+import {
+  formatProfileLocationLevels,
+  getProfileLocationParentKey,
+  getProfileOptionLabel,
+  getProfileOptionsWithValueFallback,
+  getProfileOptionValue,
+  isProfileOptionEqualToValue,
+  parseProfileLocationLevels,
+  type ProfileLocationLevels,
+} from './utils';
 
-type InputProps = Omit<ComponentPropsWithoutRef<typeof ComboboxInput>, 'onValueChange' | 'options' | 'value'>;
-type ProfileLocationLevels = [string, string, string];
+type InputProps = Omit<ComponentPropsWithoutRef<'input'>, 'onChange' | 'value'>;
 
-export function ProfileGenderInput(props: InputProps & { onValueChange: (value: string) => void; value: string }) {
+export function ProfileGenderInput({
+  className,
+  name,
+  onValueChange,
+  value,
+  ...inputProps
+}: InputProps & { onValueChange: (value: string) => void; value: string }) {
   const [genderOptions, setGenderOptions] = useState<ProfileOption[]>([]);
+  const comboboxPortalContainerRef = useRef<HTMLDivElement | null>(null);
   const intl = useIntl();
-  const { value } = props;
+  const comboboxOptions = useMemo(
+    () => getProfileOptionsWithValueFallback(genderOptions, value),
+    [genderOptions, value],
+  );
+  const selectedOption = useMemo(
+    () => comboboxOptions.find((option) => option.value === value.trim()) ?? null,
+    [comboboxOptions, value],
+  );
 
   useEffect(() => {
     let shouldApplyOptions = true;
@@ -40,12 +73,50 @@ export function ProfileGenderInput(props: InputProps & { onValueChange: (value: 
   }, [value]);
 
   return (
-    <ComboboxInput
-      autoComplete="sex"
-      options={genderOptions}
-      placeholder={intl.formatMessage({ id: 'common.not.set' })}
-      {...props}
-    />
+    <>
+      {name ? <input name={name} type="hidden" value={value} /> : null}
+      <div ref={comboboxPortalContainerRef}>
+        <Combobox
+          inputValue={value}
+          isItemEqualToValue={isProfileOptionEqualToValue}
+          itemToStringLabel={getProfileOptionLabel}
+          itemToStringValue={getProfileOptionValue}
+          items={comboboxOptions}
+          onInputValueChange={(nextValue) => {
+            onValueChange(nextValue);
+          }}
+          onValueChange={(option) => {
+            if (option) {
+              onValueChange(option.value);
+            }
+          }}
+          value={selectedOption}
+        >
+          <ShadcnComboboxInput
+            className={cn('w-full', className)}
+            placeholder={intl.formatMessage({ id: 'common.not.set' })}
+            showClear={Boolean(value)}
+            {...inputProps}
+            autoComplete="sex"
+          />
+          <ProfileComboboxContent container={comboboxPortalContainerRef}>
+            <ComboboxEmpty>{intl.formatMessage({ id: 'common.not.set' })}</ComboboxEmpty>
+            <ProfileComboboxList>
+              <ComboboxCollection>
+                {(option: ProfileOption) => (
+                  <ComboboxItem key={option.id ?? option.value} value={option}>
+                    <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                    {option.description ? (
+                      <span className="shrink-0 text-xs text-muted-foreground">{option.description}</span>
+                    ) : null}
+                  </ComboboxItem>
+                )}
+              </ComboboxCollection>
+            </ProfileComboboxList>
+          </ProfileComboboxContent>
+        </Combobox>
+      </div>
+    </>
   );
 }
 
@@ -56,18 +127,45 @@ export function ProfileLocationInput({
   name,
   onValueChange,
   value,
-  ...props
+  ...inputProps
 }: InputProps & { onValueChange: (value: string) => void; value: string }) {
   const [countryOptions, setCountryOptions] = useState<ProfileOption[]>([]);
   const [regionOptions, setRegionOptions] = useState<ProfileOption[]>([]);
+  const [regionOptionsCountry, setRegionOptionsCountry] = useState('');
   const [cityOptions, setCityOptions] = useState<ProfileOption[]>([]);
+  const [cityOptionsParentKey, setCityOptionsParentKey] = useState('');
+  const countryComboboxPortalContainerRef = useRef<HTMLDivElement | null>(null);
+  const regionComboboxPortalContainerRef = useRef<HTMLDivElement | null>(null);
+  const cityComboboxPortalContainerRef = useRef<HTMLDivElement | null>(null);
   const intl = useIntl();
   const locationLevels = useMemo(() => parseProfileLocationLevels(value), [value]);
   const countryValue = locationLevels[0];
   const regionValue = locationLevels[1];
   const cityValue = locationLevels[2];
-  const visibleRegionOptions = countryValue.trim() ? regionOptions : [];
-  const visibleCityOptions = countryValue.trim() && regionValue.trim() ? cityOptions : [];
+  const selectedCityOptionsParentKey = getProfileLocationParentKey(countryValue, regionValue);
+  const visibleRegionOptions = useMemo(
+    () => (countryValue.trim() && regionOptionsCountry === countryValue ? regionOptions : []),
+    [countryValue, regionOptions, regionOptionsCountry],
+  );
+  const visibleCityOptions = useMemo(
+    () =>
+      countryValue.trim() && regionValue.trim() && cityOptionsParentKey === selectedCityOptionsParentKey
+        ? cityOptions
+        : [],
+    [cityOptions, cityOptionsParentKey, countryValue, regionValue, selectedCityOptionsParentKey],
+  );
+  const countryComboboxOptions = useMemo(
+    () => getProfileOptionsWithValueFallback(countryOptions, countryValue),
+    [countryOptions, countryValue],
+  );
+  const regionComboboxOptions = useMemo(
+    () => getProfileOptionsWithValueFallback(visibleRegionOptions, regionValue),
+    [regionValue, visibleRegionOptions],
+  );
+  const cityComboboxOptions = useMemo(
+    () => getProfileOptionsWithValueFallback(visibleCityOptions, cityValue),
+    [cityValue, visibleCityOptions],
+  );
 
   useEffect(() => {
     let shouldApplyOptions = true;
@@ -105,11 +203,13 @@ export function ProfileLocationInput({
       .then(({ options }) => {
         if (shouldApplyOptions) {
           setRegionOptions(options);
+          setRegionOptionsCountry(countryValue);
         }
       })
       .catch(() => {
         if (shouldApplyOptions) {
           setRegionOptions([]);
+          setRegionOptionsCountry(countryValue);
         }
       });
 
@@ -135,18 +235,20 @@ export function ProfileLocationInput({
       .then(({ options }) => {
         if (shouldApplyOptions) {
           setCityOptions(options);
+          setCityOptionsParentKey(selectedCityOptionsParentKey);
         }
       })
       .catch(() => {
         if (shouldApplyOptions) {
           setCityOptions([]);
+          setCityOptionsParentKey(selectedCityOptionsParentKey);
         }
       });
 
     return () => {
       shouldApplyOptions = false;
     };
-  }, [cityValue, countryValue, regionValue]);
+  }, [cityValue, countryValue, regionValue, selectedCityOptionsParentKey]);
 
   const updateLocationLevel = (index: number, nextValue: string) => {
     const nextLocationLevels = [...locationLevels] as ProfileLocationLevels;
@@ -163,64 +265,43 @@ export function ProfileLocationInput({
   return (
     <div className="grid gap-2">
       {name ? <input name={name} type="hidden" value={value} /> : null}
-      <ComboboxInput
-        autoComplete="country-name"
+      <ProfileLocationCombobox
         className={className}
+        containerRef={countryComboboxPortalContainerRef}
         disabled={disabled}
         id={id}
-        onValueChange={(nextValue) => updateLocationLevel(0, nextValue)}
-        options={countryOptions}
+        onValueChange={(nextValue) => {
+          updateLocationLevel(0, nextValue);
+        }}
+        options={countryComboboxOptions}
         placeholder={intl.formatMessage({ id: 'profile.placeholder.country' })}
         value={countryValue}
-        {...props}
+        {...inputProps}
       />
-      <ComboboxInput
-        autoComplete="address-level1"
+      <ProfileLocationCombobox
         className={className}
-        disabled={disabled}
+        containerRef={regionComboboxPortalContainerRef}
+        disabled={disabled || !countryValue.trim()}
         id={id ? `${id}-region` : undefined}
-        onValueChange={(nextValue) => updateLocationLevel(1, nextValue)}
-        options={visibleRegionOptions}
+        onValueChange={(nextValue) => {
+          updateLocationLevel(1, nextValue);
+        }}
+        options={regionComboboxOptions}
         placeholder={intl.formatMessage({ id: 'profile.placeholder.region' })}
         value={regionValue}
       />
-      <ComboboxInput
-        autoComplete="address-level2"
+      <ProfileLocationCombobox
         className={className}
-        disabled={disabled}
+        containerRef={cityComboboxPortalContainerRef}
+        disabled={disabled || !countryValue.trim() || !regionValue.trim()}
         id={id ? `${id}-locality` : undefined}
-        onValueChange={(nextValue) => updateLocationLevel(2, nextValue)}
-        options={visibleCityOptions}
+        onValueChange={(nextValue) => {
+          updateLocationLevel(2, nextValue);
+        }}
+        options={cityComboboxOptions}
         placeholder={intl.formatMessage({ id: 'profile.placeholder.city' })}
         value={cityValue}
       />
     </div>
   );
-}
-
-function parseProfileLocationLevels(value: string): ProfileLocationLevels {
-  const [country = '', region = '', locality = ''] = value.split(',').map((part) => part.trim());
-
-  return [country, region, locality];
-}
-
-function formatProfileLocationLevels(levels: ProfileLocationLevels) {
-  const normalizedLevels = levels.map((level) => level.trim());
-  let lastValueIndex = -1;
-
-  for (let index = normalizedLevels.length - 1; index >= 0; index -= 1) {
-    if (normalizedLevels[index]) {
-      lastValueIndex = index;
-      break;
-    }
-  }
-
-  if (lastValueIndex < 0) {
-    return '';
-  }
-
-  return normalizedLevels
-    .slice(0, lastValueIndex + 1)
-    .filter(Boolean)
-    .join(', ');
 }

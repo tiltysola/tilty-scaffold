@@ -28,7 +28,7 @@ export default defineConfig({
   },
   plugins: [react(), tailwindcss()],
   build: {
-    outDir: path.resolve(dirname, 'dist'),
+    outDir: path.resolve(repositoryRoot, 'dist/frontend'),
     emptyOutDir: true,
   },
   server: {

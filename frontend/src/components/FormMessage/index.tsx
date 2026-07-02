@@ -1,3 +1,4 @@
+import { Alert, AlertDescription } from '@/shadcn/components/ui/alert';
 import { cn } from '@/shadcn/lib/utils';
 
 interface FormMessageProps {
@@ -15,7 +16,14 @@ const Index = ({ message, variant }: FormMessageProps) => {
     return null;
   }
 
-  return <p className={cn('rounded-lg border px-3 py-2 text-sm', formMessageClassNames[variant])}>{message}</p>;
+  return (
+    <Alert
+      className={cn('px-3 py-2', formMessageClassNames[variant])}
+      variant={variant === 'error' ? 'destructive' : 'default'}
+    >
+      <AlertDescription className="text-current">{message}</AlertDescription>
+    </Alert>
+  );
 };
 
 export default Index;

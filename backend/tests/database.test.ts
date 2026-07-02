@@ -1,16 +1,16 @@
 import { existsSync, rmSync } from 'fs';
-import { resolve } from 'path';
 import { DataTypes, Model, type Sequelize } from 'sequelize';
 import { describe, expect, it } from 'vitest';
 
 import { initModels } from '../src/composition/models';
+import { resolveRuntimePath } from '../src/core/files';
 import { connectDatabase, createSequelize } from '../src/infra/database';
 import { initUserModel } from '../src/modules/users/user.model';
 
 describe('database configuration', () => {
-  it('rejects sqlite storage paths outside the application directory', () => {
+  it('rejects sqlite storage paths outside the runtime root directory', () => {
     expect(() => createSequelize({ dialect: 'sqlite', storage: '../database.sqlite' })).toThrow(
-      'DATABASE_STORAGE must resolve inside the application directory.',
+      'DATABASE_STORAGE must resolve inside the runtime root directory.',
     );
     expect(() => createSequelize({ dialect: 'sqlite', storage: 'file:../database.sqlite' })).toThrow(
       'SQLite URI storage paths are not supported.',
@@ -43,11 +43,7 @@ describe('database configuration', () => {
       await expect(sequelize.models.SqliteAlterChild.count()).resolves.toBe(1);
     } finally {
       await sequelize?.close().catch(() => undefined);
-      const databasePath = resolve(process.cwd(), storage);
-
-      if (existsSync(databasePath)) {
-        rmSync(databasePath);
-      }
+      removeSqliteStorage(storage);
     }
   });
 
@@ -72,11 +68,7 @@ describe('database configuration', () => {
       expect(indexes.some((index) => index.name === 'users_phone_number' && index.unique)).toBe(true);
     } finally {
       await sequelize?.close().catch(() => undefined);
-      const databasePath = resolve(process.cwd(), storage);
-
-      if (existsSync(databasePath)) {
-        rmSync(databasePath);
-      }
+      removeSqliteStorage(storage);
     }
   });
 
@@ -98,11 +90,7 @@ describe('database configuration', () => {
       expect(indexes.some((index) => index.name === 'users_email' && index.unique)).toBe(true);
     } finally {
       await sequelize?.close().catch(() => undefined);
-      const databasePath = resolve(process.cwd(), storage);
-
-      if (existsSync(databasePath)) {
-        rmSync(databasePath);
-      }
+      removeSqliteStorage(storage);
     }
   });
 
@@ -168,11 +156,7 @@ describe('database configuration', () => {
       await expect(alteredModels.rolePermission.count()).resolves.toBe(2);
     } finally {
       await sequelize?.close().catch(() => undefined);
-      const databasePath = resolve(process.cwd(), storage);
-
-      if (existsSync(databasePath)) {
-        rmSync(databasePath);
-      }
+      removeSqliteStorage(storage);
     }
   });
 
@@ -197,11 +181,7 @@ describe('database configuration', () => {
       expect(tables).not.toContain('test_alter_parents_backup');
     } finally {
       await sequelize?.close().catch(() => undefined);
-      const databasePath = resolve(process.cwd(), storage);
-
-      if (existsSync(databasePath)) {
-        rmSync(databasePath);
-      }
+      removeSqliteStorage(storage);
     }
   });
 
@@ -223,11 +203,7 @@ describe('database configuration', () => {
       await expect(connectDatabase(sequelize, 'alter')).rejects.toThrow('Unsafe SQLite alter backup table');
     } finally {
       await sequelize?.close().catch(() => undefined);
-      const databasePath = resolve(process.cwd(), storage);
-
-      if (existsSync(databasePath)) {
-        rmSync(databasePath);
-      }
+      removeSqliteStorage(storage);
     }
   });
 
@@ -248,14 +224,18 @@ describe('database configuration', () => {
       expect(tables).toContain('manual_backup');
     } finally {
       await sequelize?.close().catch(() => undefined);
-      const databasePath = resolve(process.cwd(), storage);
-
-      if (existsSync(databasePath)) {
-        rmSync(databasePath);
-      }
+      removeSqliteStorage(storage);
     }
   });
 });
+
+function removeSqliteStorage(storage: string) {
+  const databasePath = resolveRuntimePath(storage, 'DATABASE_STORAGE');
+
+  if (existsSync(databasePath)) {
+    rmSync(databasePath);
+  }
+}
 
 function initSqliteAlterModels(sequelize: Sequelize, options: { nameAllowsNull: boolean }) {
   class SqliteAlterParent extends Model {}

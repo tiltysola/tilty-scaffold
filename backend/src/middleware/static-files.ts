@@ -5,7 +5,7 @@ import { contentType, lookup } from 'mime-types';
 import { resolve } from 'path';
 
 import { AppError } from '../core/errors';
-import { isPathInside, resolveApplicationPath } from '../core/files';
+import { isPathInside, resolveRuntimePath } from '../core/files';
 
 export interface StaticFilesConfig {
   root: string;
@@ -13,7 +13,7 @@ export interface StaticFilesConfig {
 }
 
 export function staticFilesMiddleware(config: StaticFilesConfig): Middleware {
-  const root = resolveApplicationPath(config.root, 'FILE_LOCAL_ROOT');
+  const root = resolveRuntimePath(config.root, 'FILE_LOCAL_ROOT');
   const urlPrefix = normalizeUrlPrefix(config.urlPrefix);
 
   return async (ctx, next) => {
