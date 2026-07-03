@@ -4,7 +4,8 @@ Full-stack application scaffold with a Vite React frontend and a Koa TypeScript
 backend. The scaffold includes local authentication, optional OIDC SSO
 authentication with first-time account binding, and optional SMTP-backed
 registration email verification, password recovery, Aliyun SMS profile
-validation, and RBAC-based access control.
+validation, RBAC-based access control, and a public landing page for
+introducing the deployed system before sign-in.
 
 ## Workspaces
 
@@ -26,10 +27,11 @@ npm run dev
 `npm install` installs workspace dependencies and builds the `shared/` package
 output.
 
-Frontend runs on `http://localhost:8011`. Complete `/setup` to write
-`backend/config.toml`, apply migrations, and seed built-in access control.
-Backend defaults to `http://localhost:3000`; Swagger UI is available at
-`/api/docs`.
+Frontend runs on `http://localhost:8011`. The root route `/` serves the public
+landing page without authentication, and the authenticated console starts at
+`/dashboard`. Complete `/setup` to write `backend/config.toml`, apply
+migrations, and seed built-in access control. Backend defaults to
+`http://localhost:3000`; Swagger UI is available at `/api/docs`.
 
 After setup, runtime configuration is managed from System Settings. That page
 is available only to `ROOT` users with a configured passkey or authenticator app
@@ -76,6 +78,11 @@ Access control is shared across all workspaces. Built-in permission keys live in
 authenticated user's roles and permissions from `/api/auth/me` for navigation
 and route access. Backend synchronization and schema details are documented in
 `backend/README.md`.
+
+The frontend exposes a shared theme mode control on the public landing page and
+inside the authenticated console. Theme modes support Auto, Light, and Dark;
+Auto follows the authenticated user's profile background theme when available
+and otherwise follows the operating system preference.
 
 Runtime-neutral contracts and helpers belong in `shared/`, including
 access-control keys, safe path helpers, locale negotiation helpers, and

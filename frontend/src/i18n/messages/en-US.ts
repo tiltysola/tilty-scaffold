@@ -118,6 +118,38 @@ const messages = {
   'common.uploading': 'Uploading',
   'common.unverified': 'Unverified',
   'common.verified': 'Verified',
+  'dashboard.alert.action.profile': 'Go to profile',
+  'dashboard.alert.action.security': 'Go to security',
+  'dashboard.alert.email.unverified.description':
+    'Verify your email address so it can be used for account recovery, sign-in verification, and sensitive action confirmation.',
+  'dashboard.alert.email.unverified.title': 'Email is not verified',
+  'dashboard.alert.mfa.disabled.description':
+    'Enable two-step verification to require an additional check for sensitive sign-ins and administrative operations.',
+  'dashboard.alert.mfa.disabled.title': 'Two-step verification is not enabled',
+  'dashboard.alert.passkey.missing.description':
+    'Create a passkey to use your device or password manager for phishing-resistant verification.',
+  'dashboard.alert.passkey.missing.title': 'No passkey is configured',
+  'dashboard.alert.phone.missing.description':
+    'Bind a phone number so it can be used for SMS verification and account security notifications.',
+  'dashboard.alert.phone.missing.title': 'Phone number is not bound',
+  'dashboard.alert.phone.unverified.description':
+    'Verify the bound phone number so it can be used for SMS verification and sensitive action confirmation.',
+  'dashboard.alert.phone.unverified.title': 'Phone number is not verified',
+  'dashboard.alert.profile.avatar.missing.description':
+    'Set an avatar so account menus and the profile page can show a clear user identity.',
+  'dashboard.alert.profile.avatar.missing.title': 'Avatar is not set',
+  'dashboard.alert.profile.background.missing.description':
+    'Set a profile background so the signed-in application background can use personal visual content.',
+  'dashboard.alert.profile.background.missing.title': 'Profile background is not set',
+  'dashboard.alert.profile.banner.missing.description':
+    'Set a profile banner so the top of the profile page can show complete visual information.',
+  'dashboard.alert.profile.banner.missing.title': 'Profile banner is not set',
+  'dashboard.alert.profile.details.missing.description':
+    'Add a bio, gender, birthday, location, or homepage so the profile page can provide more complete user information.',
+  'dashboard.alert.profile.details.missing.title': 'Profile details are incomplete',
+  'dashboard.alert.totp.missing.description':
+    'Enable an authenticator app to protect account sign-ins and administrative operations with time-based codes.',
+  'dashboard.alert.totp.missing.title': 'Authenticator app is not enabled',
   'dashboard.description':
     'Tilty Scaffold provides authentication, routing, profile management, role-based access, and OpenAPI documentation for full-stack applications.',
   'dashboard.welcome': 'Welcome back, {name}',
@@ -125,6 +157,49 @@ const messages = {
     'Verification code sent. It expires in {minutes, plural, one {# minute} other {# minutes}}.',
   'fallback.signed.in.user': 'Signed-in user',
   'fallback.user': 'User',
+  'home.badge': 'Production-grade full-stack application infrastructure',
+  'home.capability.access.description':
+    'Control access to APIs, navigation, and administrative functions through role and permission models.',
+  'home.capability.access.title': 'Access control',
+  'home.capability.api.description':
+    'Keep OpenAPI documentation, shared types, and client calls aligned for frontend and integration work.',
+  'home.capability.api.title': 'API contracts',
+  'home.capability.auth.description':
+    'Provide account registration, sign-in, password recovery, SSO, passkeys, and identity verification flows.',
+  'home.capability.auth.title': 'Identity authentication',
+  'home.capability.settings.description':
+    'Separate setup configuration from runtime settings for deployment values, secrets, and operations.',
+  'home.capability.settings.title': 'System configuration',
+  'home.hero.description':
+    'Tilty Scaffold provides authentication, access control, system configuration, and OpenAPI documentation for full-stack applications that require a unified user system and backend API.',
+  'home.hero.primary': 'Log in',
+  'home.hero.primary.authenticated': 'Open dashboard',
+  'home.hero.secondary': 'Create account',
+  'home.hero.tertiary': 'View API docs',
+  'home.meta.api': 'OpenAPI',
+  'home.meta.auth': 'Authentication',
+  'home.meta.rbac': 'Access control',
+  'home.nav.docs': 'Docs',
+  'home.nav.login': 'Log in',
+  'home.nav.register': 'Register',
+  'home.section.capabilities.description':
+    'Tilty Scaffold combines user identity, access control, setup configuration, and API contracts into one application infrastructure.',
+  'home.section.capabilities.heading': 'Authentication, permissions, configuration, and API contracts are integrated.',
+  'home.section.capabilities.title': 'System capabilities',
+  'home.section.workflow.description':
+    'Complete setup first, then support future business modules through controlled access, profile management, and system configuration.',
+  'home.section.workflow.heading':
+    'From setup to runtime management, key workflows remain within one application surface.',
+  'home.section.workflow.title': 'Usage flow',
+  'home.workflow.bootstrap.description':
+    'Configure runtime, database, cache, and the root administrator before first use.',
+  'home.workflow.bootstrap.title': 'Setup',
+  'home.workflow.operate.description':
+    'Extend business modules on top of profile management, system settings, and API documentation.',
+  'home.workflow.operate.title': 'Business extension',
+  'home.workflow.secure.description':
+    'Protect sensitive actions with consistent session, permission, and identity verification checks.',
+  'home.workflow.secure.title': 'Access protection',
   'identity.authenticator.app': 'Authenticator app',
   'identity.authenticator.code': 'Authenticator code',
   'identity.code.not.received': 'Code not received?',
@@ -282,6 +357,7 @@ const messages = {
   'profile.website.placeholder': 'https://example.com',
   'route.account.registration': 'Account registration',
   'route.dashboard': 'Dashboard',
+  'route.home': 'Home',
   'route.login': 'Log in',
   'route.password.recovery': 'Password recovery',
   'route.profile': 'Profile',
@@ -950,6 +1026,10 @@ const messages = {
   'system.settings.unavailable': 'System settings unavailable',
   'system.settings.verification.required': 'System settings verification is required.',
   'system.settings.verify.access.title': 'Verify system settings access',
+  'theme.mode.auto': 'Auto',
+  'theme.mode.dark': 'Dark',
+  'theme.mode.light': 'Light',
+  'theme.mode.switcher': 'Theme mode',
   'users.action': 'Action',
   'users.access.verification.failed': 'Access verification failed.',
   'users.auth.config.load.failed': 'Authentication configuration could not be loaded.',

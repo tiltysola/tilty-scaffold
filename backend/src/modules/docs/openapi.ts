@@ -35,7 +35,9 @@ export const openApiDocument = {
   openapi: '3.1.0',
   info: {
     title: 'Tilty Scaffold API',
-    version: '0.1.9',
+    description:
+      'Backend API contract for Tilty Scaffold. The public frontend landing page is available at /, the authenticated console starts at /dashboard, and Swagger UI is served from /api/docs.',
+    version: '0.1.11',
   },
   servers: [
     {

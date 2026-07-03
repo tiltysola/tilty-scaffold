@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { FastAverageColor } from 'fast-average-color';
 import {
@@ -10,8 +10,15 @@ import {
 import { useAuth } from '@/hooks/useAuth';
 import { type AuthSnapshot, resolveAssetUrl } from '@/lib/auth';
 
-type ResolvedTheme = 'dark' | 'light';
-type NextTheme = ResolvedTheme | 'system';
+import {
+  type AppThemeMode,
+  readStoredThemeMode,
+  resolveAppliedTheme,
+  type ResolvedTheme,
+  ThemeModeContext,
+  useThemeMode,
+  writeStoredThemeMode,
+} from './theme-mode';
 
 interface ThemeProviderProps extends NextThemeProviderProps {
   children: ReactNode;
@@ -25,16 +32,38 @@ interface ProfileBackgroundThemeSample {
 export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
   return (
     <NextThemeProvider {...props}>
-      <ThemeController />
-      {children}
+      <ThemeModeProvider>
+        <ThemeController />
+        {children}
+      </ThemeModeProvider>
     </NextThemeProvider>
   );
+}
+
+function ThemeModeProvider({ children }: { children: ReactNode }) {
+  const [mode, setModeState] = useState<AppThemeMode>(() => readStoredThemeMode());
+
+  const setMode = useCallback((nextMode: AppThemeMode) => {
+    setModeState(nextMode);
+    writeStoredThemeMode(nextMode);
+  }, []);
+
+  const value = useMemo(
+    () => ({
+      mode,
+      setMode,
+    }),
+    [mode, setMode],
+  );
+
+  return <ThemeModeContext.Provider value={value}>{children}</ThemeModeContext.Provider>;
 }
 
 function ThemeController() {
   const { setTheme } = useNextTheme();
   const profileBackgroundTheme = useProfileBackgroundTheme();
-  const nextTheme = resolveNextTheme(profileBackgroundTheme);
+  const { mode } = useThemeMode();
+  const nextTheme = resolveAppliedTheme(mode, profileBackgroundTheme);
 
   useEffect(() => {
     setTheme(nextTheme);
@@ -112,8 +141,4 @@ function getProfileBackgroundTheme(averageColor: FastAverageColor, image: HTMLIm
   } catch {
     return null;
   }
-}
-
-function resolveNextTheme(profileBackgroundTheme: ResolvedTheme | null): NextTheme {
-  return profileBackgroundTheme ?? 'system';
 }

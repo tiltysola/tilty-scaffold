@@ -6,7 +6,8 @@ import { getMainNavigationGroups, getMainNavigationItems, getPageTitleMessageId,
 
 describe('frontend routes', () => {
   it('resolves page title message identifiers from configured routes', () => {
-    expect(getPageTitleMessageId('/')).toBe('route.dashboard');
+    expect(getPageTitleMessageId('/')).toBe('route.home');
+    expect(getPageTitleMessageId(routePath('home'))).toBe('route.home');
     expect(getPageTitleMessageId(routePath('dashboard'))).toBe('route.dashboard');
     expect(getPageTitleMessageId(routePath('profile'))).toBe('route.profile');
     expect(getPageTitleMessageId(routePath('security'))).toBe('route.security');

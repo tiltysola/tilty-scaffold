@@ -229,6 +229,7 @@ export function IdentityVerificationFormContent({
             onChange={handleMethodChange}
             onSwitchOpen={clearMessages}
           />
+          <p className="text-sm text-muted-foreground">{formatMessage({ id: 'identity.passkey.description' })}</p>
         </div>
       ) : method === 'password' ? (
         <div className="grid gap-2">

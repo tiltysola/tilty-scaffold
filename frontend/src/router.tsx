@@ -9,6 +9,7 @@ import { hasPermission, SystemPermission, type SystemPermissionKey } from '@tilt
 export type NavigationGroupId = 'admin' | 'applications' | 'profile';
 export type NavigationIcon = 'apiDocs' | 'dashboard' | 'profile' | 'security' | 'settings' | 'users';
 type RouteId =
+  | 'home'
   | 'dashboard'
   | 'profile'
   | 'security'
@@ -49,6 +50,7 @@ const Layout = lazy(() => import('@/components/Layout'));
 const RequireAuth = lazy(() => import('@/components/RequireAuth'));
 const RequirePermission = lazy(() => import('@/components/RequirePermission'));
 
+const HomePage = lazy(() => import('@/pages/Home'));
 const DashboardPage = lazy(() => import('@/pages/Dashboard'));
 const ProfilePage = lazy(() => import('@/pages/Profile'));
 const SecurityPage = lazy(() => import('@/pages/Security'));
@@ -63,6 +65,13 @@ const VerifySignInPage = lazy(() => import('@/pages/VerifySignIn'));
 const NotFoundPage = lazy(() => import('@/pages/NotFound'));
 
 const pageRoutes: PageRoute[] = [
+  {
+    id: 'home',
+    path: '/',
+    titleMessageId: 'route.home',
+    element: <HomePage />,
+    layout: 'standalone',
+  },
   {
     id: 'dashboard',
     path: '/dashboard',
@@ -191,10 +200,6 @@ const appRouteObjects: RouteObject[] = [
       {
         element: <Layout />,
         children: [
-          {
-            index: true,
-            element: getPageRoute(defaultRouteId).element,
-          },
           ...pageRoutes
             .filter((route) => route.layout === 'app')
             .map((route): RouteObject => {
@@ -244,7 +249,7 @@ function getPageRouteByPath(pathname: string) {
   const normalizedPathname = normalizePathname(pathname);
 
   if (normalizedPathname === '/') {
-    return getPageRoute(defaultRouteId);
+    return getPageRoute('home');
   }
 
   return (

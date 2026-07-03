@@ -4,6 +4,8 @@ import { useLocation } from 'react-router-dom';
 import { getPageTitleMessageId } from '@/router';
 import { SidebarTrigger } from '@/shadcn/components/ui/sidebar';
 
+import { ThemeModeToggle } from '@/components/ThemeModeToggle';
+
 const Index = () => {
   const { pathname } = useLocation();
   const intl = useIntl();
@@ -14,7 +16,8 @@ const Index = () => {
       <div className="flex w-full items-center gap-1 px-4 lg:gap-2 lg:px-6">
         <SidebarTrigger className="-ml-1" />
         <div aria-hidden="true" className="mx-2 h-4 w-px shrink-0 self-center bg-foreground/5" />
-        <h1 className="text-base font-medium">{title}</h1>
+        <h1 className="min-w-0 flex-1 truncate text-base font-medium">{title}</h1>
+        <ThemeModeToggle />
       </div>
     </header>
   );

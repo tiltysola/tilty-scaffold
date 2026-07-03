@@ -2,7 +2,8 @@
 
 Vite React frontend scaffold with React Router, Tailwind CSS, shadcn/ui,
 authentication, registration, password recovery, optional SSO authentication,
-protected dashboard, and permission-gated administration pages.
+public landing page, protected dashboard, and permission-gated administration
+pages.
 
 ## Commands
 
@@ -29,6 +30,13 @@ compiled backend when running `npm start` from the repository root.
 
 The frontend uses relative API paths. During development, Vite proxies `/api`
 and `/uploads` to `http://localhost:3000`.
+
+## Theme Modes
+
+The public landing page and authenticated application layout expose the same
+theme mode dropdown. Supported modes are Auto, Light, and Dark. Auto uses the
+authenticated user's profile background theme when one is available and falls
+back to the operating system preference otherwise.
 
 ## Internationalization
 
@@ -118,7 +126,7 @@ restart before the updated configuration is used.
 
 | Route              | Page                 |
 | ------------------ | -------------------- |
-| `/`                | Dashboard            |
+| `/`                | Landing page         |
 | `/dashboard`       | Dashboard            |
 | `/users`           | Users                |
 | `/settings`        | System Settings      |

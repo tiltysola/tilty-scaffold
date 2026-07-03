@@ -109,7 +109,9 @@ describe('docs API', () => {
     expect(body.openapi).toBe('3.1.0');
     expect(body.info).toEqual({
       title: 'Tilty Scaffold API',
-      version: '0.1.9',
+      description:
+        'Backend API contract for Tilty Scaffold. The public frontend landing page is available at /, the authenticated console starts at /dashboard, and Swagger UI is served from /api/docs.',
+      version: '0.1.11',
     });
     expect(body.servers[0]).toEqual({
       url: '/',
