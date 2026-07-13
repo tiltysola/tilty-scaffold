@@ -15,8 +15,6 @@ import {
   setupCacheStoreValues,
   SetupDatabaseDialect,
   setupDatabaseDialectValues,
-  SetupDatabaseSync,
-  setupDatabaseSyncValues,
   SetupEmailVerificationService,
   setupEmailVerificationServiceValues,
   SetupFileStorageDriver,
@@ -33,6 +31,7 @@ import {
   setupSsoProtocolValues,
 } from '@tilty/shared/setup';
 
+import { getRuntimeRootDirectory } from '../core/files';
 import { parseSeparatedValues, parseUniqueSeparatedValues } from '../core/strings';
 import { defaultSetupEnvironment, developmentAuthTokenSecret } from './defaults';
 
@@ -284,7 +283,6 @@ const envSchema = z
       .int()
       .positive()
       .default(numberDefault(defaultSetupEnvironment.DATABASE_POOL_IDLE_MS)),
-    DATABASE_SYNC: z.enum(setupDatabaseSyncValues).default(defaultSetupEnvironment.DATABASE_SYNC),
     CACHE_STORE: cacheStoreSchema.default(defaultSetupEnvironment.CACHE_STORE),
     CACHE_REDIS_URL: z.string().optional(),
     CACHE_REDIS_REQUEST_TIMEOUT_MS: z.coerce
@@ -572,14 +570,6 @@ const envSchema = z
       });
     }
 
-    if (env.NODE_ENV === SetupNodeEnv.Production && env.DATABASE_SYNC !== SetupDatabaseSync.Off) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['DATABASE_SYNC'],
-        message: 'Must be off when NODE_ENV is production',
-      });
-    }
-
     if (env.NODE_ENV === SetupNodeEnv.Production && !env.AUTH_TOKEN_SECRET) {
       ctx.addIssue({
         code: 'custom',
@@ -787,7 +777,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
     },
     corsOrigins,
     database,
-    databaseSync: parsed.DATABASE_SYNC,
     logger: {
       targets: logTargets,
       localPath: parsed.LOG_LOCAL_PATH,
@@ -897,7 +886,7 @@ function formatEnvValidationIssues(issues: ReadonlyArray<{ path: ReadonlyArray<P
 }
 
 export function getConfigFilePath() {
-  return resolve(process.cwd(), configFileName);
+  return resolve(getRuntimeRootDirectory(), configFileName);
 }
 
 export function hasConfigFile() {

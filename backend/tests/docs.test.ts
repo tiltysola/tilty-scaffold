@@ -2,12 +2,14 @@ import { ReadStream } from 'fs';
 import { describe, expect, it } from 'vitest';
 
 import { systemPermissionKeys, systemRoleKeys } from '@tilty/shared/access-control';
+import { apiKeyActiveLimitPerUser, apiKeyStatusValues } from '@tilty/shared/api-keys';
 import {
   authMfaMethodValues,
   authSelectableVerificationPurposeValues,
   authSessionDeviceTypeValues,
   authVerificationCodeMethodValues,
   authVerificationMethodValues,
+  AuthVerificationPurpose,
   authVerificationPurposeValues,
 } from '@tilty/shared/auth';
 import { localeRequestHeader, supportedLocales } from '@tilty/shared/i18n';
@@ -32,6 +34,7 @@ interface OpenApiDocument {
   components: {
     parameters: Record<string, OpenApiParameter | undefined>;
     responses: Record<string, OpenApiResponse | undefined>;
+    securitySchemes: Record<string, OpenApiSecurityScheme | undefined>;
     schemas: Record<string, OpenApiSchema | undefined>;
   };
   info: {
@@ -60,6 +63,9 @@ interface OpenApiPathItem {
 interface OpenApiOperation {
   description?: string;
   responses: Record<string, unknown>;
+  security?: unknown[];
+  'x-api-key-deny-reason'?: string;
+  'x-api-key-disabled'?: boolean;
 }
 
 interface OpenApiParameter {
@@ -76,6 +82,14 @@ interface OpenApiResponse {
       examples?: Record<string, { value: { error: string; message?: string } }>;
     };
   };
+}
+
+interface OpenApiSecurityScheme {
+  bearerFormat?: string;
+  in?: string;
+  name?: string;
+  scheme?: string;
+  type: string;
 }
 
 interface OpenApiSchema {
@@ -99,6 +113,8 @@ interface OpenApiSchemaResponse {
   };
 }
 
+const openApiMethods = ['delete', 'get', 'patch', 'post', 'put'] as const satisfies readonly OpenApiMethod[];
+
 describe('docs API', () => {
   const routes = createDocsModule().routes;
 
@@ -111,7 +127,7 @@ describe('docs API', () => {
       title: 'Tilty Scaffold API',
       description:
         'Backend API contract for Tilty Scaffold. The public frontend landing page is available at /, the authenticated console starts at /dashboard, and Swagger UI is served from /api/docs.',
-      version: '0.1.11',
+      version: '0.1.12',
     });
     expect(body.servers[0]).toEqual({
       url: '/',
@@ -125,14 +141,20 @@ describe('docs API', () => {
     expect(body.paths['/api/auth/register/email-verification']).toBeDefined();
     expect(body.paths['/api/auth/password-reset']).toBeDefined();
     expect(body.paths['/api/auth/password-reset/email-verification']).toBeDefined();
-    expect(body.paths['/api/auth/me/email-verification']).toBeDefined();
-    expect(body.paths['/api/auth/me/email-verification/confirm']).toBeDefined();
-    expect(body.paths['/api/auth/me/phone-verification']).toBeDefined();
-    expect(body.paths['/api/auth/me/phone-verification/confirm']).toBeDefined();
-    expect(body.paths['/api/auth/me/password']).toBeDefined();
-    expect(body.paths['/api/auth/avatar']).toBeDefined();
-    expect(body.paths['/api/auth/profile-banner']).toBeDefined();
-    expect(body.paths['/api/auth/profile-background']).toBeDefined();
+    expect(body.paths['/api/auth/password']).toBeDefined();
+    expect(body.paths['/api/users/me']).toBeDefined();
+    expect(body.paths['/api/users/me/email-verification']).toBeDefined();
+    expect(body.paths['/api/users/me/email-verification/confirm']).toBeDefined();
+    expect(body.paths['/api/users/me/phone-verification']).toBeDefined();
+    expect(body.paths['/api/users/me/phone-verification/confirm']).toBeDefined();
+    expect(body.paths['/api/users/me/avatar']).toBeDefined();
+    expect(body.paths['/api/users/me/profile-banner']).toBeDefined();
+    expect(body.paths['/api/users/me/profile-background']).toBeDefined();
+    expect(body.paths['/api/auth/me']).toBeUndefined();
+    expect(body.paths['/api/auth/me/password']).toBeUndefined();
+    expect(body.paths['/api/auth/avatar']).toBeUndefined();
+    expect(body.paths['/api/auth/profile-banner']).toBeUndefined();
+    expect(body.paths['/api/auth/profile-background']).toBeUndefined();
     expect(body.paths['/api/auth/sso/config']).toBeDefined();
     expect(body.paths['/api/auth/sso/start']).toBeDefined();
     expect(body.paths['/api/auth/sso/callback']).toBeDefined();
@@ -140,31 +162,59 @@ describe('docs API', () => {
     expect(body.paths['/api/auth/sso/account']).toBeDefined();
     expect(body.paths['/api/auth/sso/bind']).toBeDefined();
     expect(body.paths['/api/auth/logout']).toBeDefined();
-    expect(body.paths['/api/users/']).toBeDefined();
-    expect(body.paths['/api/users/{id}']).toBeDefined();
-    expect(body.paths['/api/users/{id}/roles']).toBeDefined();
-    expect(body.paths['/api/users/{id}/details']).toBeDefined();
-    expect(body.paths['/api/users/{id}/mfa']).toBeDefined();
-    expect(body.paths['/api/users/{id}/totp/disable']).toBeDefined();
-    expect(body.paths['/api/users/{id}/passkeys/{passkeyId}']).toBeDefined();
-    expect(body.paths['/api/users/{id}/devices']).toBeDefined();
-    expect(body.paths['/api/users/{id}/devices/{sessionId}']).toBeDefined();
-    expect(body.paths['/api/users/{id}/sso-identities']).toBeDefined();
-    expect(body.paths['/api/users/{id}/sso-identities/{providerId}']).toBeDefined();
-    expect(body.paths['/api/users/{id}/avatar']).toBeDefined();
-    expect(body.paths['/api/users/{id}/profile-banner']).toBeDefined();
-    expect(body.paths['/api/users/{id}/profile-background']).toBeDefined();
-    expect(body.paths['/api/profile-options/genders']).toBeDefined();
-    expect(body.paths['/api/profile-options/locations/countries']).toBeDefined();
-    expect(body.paths['/api/profile-options/locations/regions']).toBeDefined();
-    expect(body.paths['/api/profile-options/locations/cities']).toBeDefined();
-    expect(body.paths['/api/system-settings/']).toBeDefined();
+    expect(body.paths['/api/api-keys']).toBeDefined();
+    expect(body.paths['/api/api-keys/{id}']).toBeUndefined();
+    expect(body.paths['/api/api-keys/{id}/audit']).toBeUndefined();
+    expect(body.paths['/api/api-keys/{id}/disable']).toBeDefined();
+    expect(body.paths['/api/api-keys/{id}/enable']).toBeDefined();
+    expect(body.paths['/api/api-keys/{id}/revoke']).toBeDefined();
+    expect(body.paths['/api/api-keys/{id}/rotate']).toBeUndefined();
+    expect(body.paths['/api/api-keys/{id}/usage']).toBeUndefined();
+    expect(body.paths['/api/admin/api-keys']).toBeDefined();
+    expect(body.paths['/api/admin/api-keys/{id}/revoke']).toBeDefined();
+    expect(body.paths['/api/admin/users/']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}/roles']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}/details']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}/mfa']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}/totp/disable']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}/passkeys/{passkeyId}']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}/devices']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}/devices/{sessionId}']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}/sso-identities']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}/sso-identities/{providerId}']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}/avatar']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}/profile-banner']).toBeDefined();
+    expect(body.paths['/api/admin/users/{id}/profile-background']).toBeDefined();
+    expect(body.paths['/api/users/']).toBeUndefined();
+    expect(body.paths['/api/users/{id}']).toBeUndefined();
+    expect(body.paths['/api/users/{id}/roles']).toBeUndefined();
+    expect(body.paths['/api/users/{id}/details']).toBeUndefined();
+    expect(body.paths['/api/users/{id}/mfa']).toBeUndefined();
+    expect(body.paths['/api/users/{id}/totp/disable']).toBeUndefined();
+    expect(body.paths['/api/users/{id}/passkeys/{passkeyId}']).toBeUndefined();
+    expect(body.paths['/api/users/{id}/devices']).toBeUndefined();
+    expect(body.paths['/api/users/{id}/devices/{sessionId}']).toBeUndefined();
+    expect(body.paths['/api/users/{id}/sso-identities']).toBeUndefined();
+    expect(body.paths['/api/users/{id}/sso-identities/{providerId}']).toBeUndefined();
+    expect(body.paths['/api/users/{id}/avatar']).toBeUndefined();
+    expect(body.paths['/api/users/{id}/profile-banner']).toBeUndefined();
+    expect(body.paths['/api/users/{id}/profile-background']).toBeUndefined();
+    expect(body.paths['/api/users/profile-options/genders']).toBeDefined();
+    expect(body.paths['/api/users/profile-options/locations/countries']).toBeDefined();
+    expect(body.paths['/api/users/profile-options/locations/regions']).toBeDefined();
+    expect(body.paths['/api/users/profile-options/locations/cities']).toBeDefined();
+    expect(body.paths['/api/profile-options/genders']).toBeUndefined();
+    expect(body.paths['/api/profile-options/locations/countries']).toBeUndefined();
+    expect(body.paths['/api/profile-options/locations/regions']).toBeUndefined();
+    expect(body.paths['/api/profile-options/locations/cities']).toBeUndefined();
+    expect(body.paths['/api/admin/system-settings/']).toBeDefined();
     expect(body.paths['/api/health']).toBeDefined();
     expect(body.paths['/api/health/ready']).toBeDefined();
     expect(body.paths['/api/openapi.json']).toBeDefined();
     expect(body.paths['/api/docs']).toBeDefined();
     expect(body.paths['/api/auth/login']?.parameters).toEqual(localeRequestParameterRefs);
-    expect(body.paths['/api/users/{id}/roles']?.parameters).toEqual(localeRequestParameterRefs);
+    expect(body.paths['/api/admin/users/{id}/roles']?.parameters).toEqual(localeRequestParameterRefs);
     expect(body.components.parameters.LocaleHeader).toMatchObject({
       name: localeRequestHeader,
       in: 'header',
@@ -177,6 +227,11 @@ describe('docs API', () => {
       name: 'Accept-Language',
       in: 'header',
       required: false,
+    });
+    expect(body.components.securitySchemes.apiKeyAuth).toMatchObject({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'API Key',
     });
 
     expectResponseRefs(body, '/api/setup/defaults', 'get', {
@@ -221,21 +276,21 @@ describe('docs API', () => {
       '404': 'EmailVerificationDisabled',
       '429': 'RateLimited',
     });
-    expectResponseRefs(body, '/api/auth/me/email-verification', 'post', {
+    expectResponseRefs(body, '/api/users/me/email-verification', 'post', {
       '401': 'AuthRequired',
       '403': 'CsrfOrVerificationRequired',
       '404': 'EmailVerificationDisabled',
       '409': 'EmailAlreadyVerified',
       '429': 'RateLimited',
     });
-    expectResponseRefs(body, '/api/auth/me/email-verification/confirm', 'post', {
+    expectResponseRefs(body, '/api/users/me/email-verification/confirm', 'post', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
       '403': 'CsrfOrVerificationRequired',
       '404': 'EmailVerificationDisabled',
       '429': 'RateLimited',
     });
-    expectResponseRefs(body, '/api/auth/me/phone-verification', 'post', {
+    expectResponseRefs(body, '/api/users/me/phone-verification', 'post', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
       '403': 'CsrfOrVerificationRequired',
@@ -243,7 +298,7 @@ describe('docs API', () => {
       '409': 'PhoneAlreadyVerified',
       '429': 'RateLimited',
     });
-    expectResponseRefs(body, '/api/auth/me/phone-verification/confirm', 'post', {
+    expectResponseRefs(body, '/api/users/me/phone-verification/confirm', 'post', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
       '403': 'CsrfOrVerificationRequired',
@@ -251,22 +306,22 @@ describe('docs API', () => {
       '409': 'PhoneIdentifierConflict',
       '429': 'RateLimited',
     });
-    expectResponseRefs(body, '/api/auth/me', 'get', {
+    expectResponseRefs(body, '/api/users/me', 'get', {
       '401': 'AuthRequired',
     });
-    expectResponseRefs(body, '/api/auth/me', 'patch', {
+    expectResponseRefs(body, '/api/users/me', 'patch', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
       '403': 'CsrfOrVerificationRequired',
       '429': 'RateLimited',
     });
-    expectResponseRefs(body, '/api/auth/me/password', 'patch', {
+    expectResponseRefs(body, '/api/auth/password', 'patch', {
       '400': 'ValidationError',
       '401': 'ChangePasswordUnauthorized',
       '403': 'CsrfOrVerificationRequired',
       '429': 'RateLimited',
     });
-    expectSuccessSchemaRef(body, '/api/auth/me/password', 'patch', 'PasswordChangeResponse');
+    expectSuccessSchemaRef(body, '/api/auth/password', 'patch', 'PasswordChangeResponse');
     expectResponseRefs(body, '/api/auth/totp/setup', 'post', {
       '401': 'AuthRequired',
       '403': 'CsrfOrVerificationRequired',
@@ -314,35 +369,35 @@ describe('docs API', () => {
       '401': 'AuthRequired',
       '403': 'CsrfForbidden',
     });
-    expectResponseRefs(body, '/api/auth/avatar', 'post', {
+    expectResponseRefs(body, '/api/users/me/avatar', 'post', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
       '403': 'CsrfForbidden',
       '429': 'RateLimited',
     });
-    expectResponseRefs(body, '/api/auth/avatar', 'delete', {
+    expectResponseRefs(body, '/api/users/me/avatar', 'delete', {
       '401': 'AuthRequired',
       '403': 'CsrfForbidden',
       '429': 'RateLimited',
     });
-    expectResponseRefs(body, '/api/auth/profile-banner', 'post', {
+    expectResponseRefs(body, '/api/users/me/profile-banner', 'post', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
       '403': 'CsrfForbidden',
       '429': 'RateLimited',
     });
-    expectResponseRefs(body, '/api/auth/profile-banner', 'delete', {
+    expectResponseRefs(body, '/api/users/me/profile-banner', 'delete', {
       '401': 'AuthRequired',
       '403': 'CsrfForbidden',
       '429': 'RateLimited',
     });
-    expectResponseRefs(body, '/api/auth/profile-background', 'post', {
+    expectResponseRefs(body, '/api/users/me/profile-background', 'post', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
       '403': 'CsrfForbidden',
       '429': 'RateLimited',
     });
-    expectResponseRefs(body, '/api/auth/profile-background', 'delete', {
+    expectResponseRefs(body, '/api/users/me/profile-background', 'delete', {
       '401': 'AuthRequired',
       '403': 'CsrfForbidden',
       '429': 'RateLimited',
@@ -386,30 +441,62 @@ describe('docs API', () => {
       '429': 'RateLimited',
     });
     expectSuccessSchemaRef(body, '/api/auth/sso/bind', 'post', 'LoginResponse');
-    expectResponseRefs(body, '/api/users/{id}/roles', 'put', {
+    expectResponseRefs(body, '/api/api-keys', 'get', {
+      '401': 'AuthRequired',
+      '403': 'ApiKeyManagementAccessRequired',
+    });
+    expectResponseRefs(body, '/api/api-keys', 'post', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
+      '403': 'CsrfOrApiKeyManagementAccessRequired',
+      '409': 'Conflict',
+    });
+    expectCreatedSchemaRef(body, '/api/api-keys', 'post', 'ApiKeyRevealResponse');
+    for (const path of ['/api/api-keys/{id}/disable', '/api/api-keys/{id}/enable', '/api/api-keys/{id}/revoke']) {
+      expectResponseRefs(body, path, 'post', {
+        '400': 'ValidationError',
+        '401': 'AuthRequired',
+        '403': 'CsrfOrApiKeyManagementAccessRequired',
+        '404': 'NotFound',
+      });
+    }
+    expectSuccessSchemaRef(body, '/api/api-keys/{id}/disable', 'post', 'ApiKeySummaryResponse');
+    expectSuccessSchemaRef(body, '/api/api-keys/{id}/enable', 'post', 'ApiKeySummaryResponse');
+    expectSuccessSchemaRef(body, '/api/api-keys/{id}/revoke', 'post', 'ApiKeySummaryResponse');
+    expectResponseRefs(body, '/api/admin/api-keys', 'get', {
+      '401': 'AuthRequired',
+      '403': 'AdminApiKeyManagementAccessRequired',
+    });
+    expectResponseRefs(body, '/api/admin/api-keys/{id}/revoke', 'post', {
+      '400': 'ValidationError',
+      '401': 'AuthRequired',
+      '403': 'CsrfOrAdminApiKeyManagementAccessRequired',
+      '404': 'NotFound',
+    });
+    expectResponseRefs(body, '/api/admin/users/{id}/roles', 'put', {
       '403': 'CsrfOrUserManagementAccessRequired',
     });
-    expectResponseRefs(body, '/api/users/{id}', 'put', {
+    expectResponseRefs(body, '/api/admin/users/{id}', 'put', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
       '403': 'CsrfOrUserManagementAccessRequired',
     });
-    expectSuccessSchemaRef(body, '/api/users/{id}/details', 'get', 'ManagedUserDetailsResponse');
-    expectSuccessSchemaRef(body, '/api/users/{id}/mfa', 'patch', 'ManagedUserSecurityResponse');
-    expectSuccessSchemaRef(body, '/api/users/{id}/totp/disable', 'post', 'ManagedUserSecurityResponse');
-    expectSuccessSchemaRef(body, '/api/users/{id}/passkeys/{passkeyId}', 'delete', 'ManagedUserSecurityResponse');
-    expectSuccessSchemaRef(body, '/api/profile-options/genders', 'get', 'ProfileOptionsResponse');
-    expectSuccessSchemaRef(body, '/api/profile-options/locations/countries', 'get', 'ProfileOptionsResponse');
-    expectSuccessSchemaRef(body, '/api/profile-options/locations/regions', 'get', 'ProfileOptionsResponse');
-    expectSuccessSchemaRef(body, '/api/profile-options/locations/cities', 'get', 'ProfileOptionsResponse');
-    expectResponseRefs(body, '/api/profile-options/genders', 'get', {
+    expectSuccessSchemaRef(body, '/api/admin/users/{id}/details', 'get', 'ManagedUserDetailsResponse');
+    expectSuccessSchemaRef(body, '/api/admin/users/{id}/mfa', 'patch', 'ManagedUserSecurityResponse');
+    expectSuccessSchemaRef(body, '/api/admin/users/{id}/totp/disable', 'post', 'ManagedUserSecurityResponse');
+    expectSuccessSchemaRef(body, '/api/admin/users/{id}/passkeys/{passkeyId}', 'delete', 'ManagedUserSecurityResponse');
+    expectSuccessSchemaRef(body, '/api/users/profile-options/genders', 'get', 'ProfileOptionsResponse');
+    expectSuccessSchemaRef(body, '/api/users/profile-options/locations/countries', 'get', 'ProfileOptionsResponse');
+    expectSuccessSchemaRef(body, '/api/users/profile-options/locations/regions', 'get', 'ProfileOptionsResponse');
+    expectSuccessSchemaRef(body, '/api/users/profile-options/locations/cities', 'get', 'ProfileOptionsResponse');
+    expectResponseRefs(body, '/api/users/profile-options/genders', 'get', {
       '401': 'AuthRequired',
     });
-    expectResponseRefs(body, '/api/system-settings/', 'get', {
+    expectResponseRefs(body, '/api/admin/system-settings/', 'get', {
       '401': 'AuthRequired',
       '403': 'SystemSettingsAccessRequired',
     });
-    expectResponseRefs(body, '/api/system-settings/', 'put', {
+    expectResponseRefs(body, '/api/admin/system-settings/', 'put', {
       '400': 'ValidationError',
       '401': 'AuthRequired',
       '403': 'CsrfOrSystemSettingsAccessRequired',
@@ -418,8 +505,15 @@ describe('docs API', () => {
     const ssoBindUnauthorized = body.components.responses.SsoBindUnauthorized;
     const ssoBindStart = body.paths['/api/auth/sso/bind/start']?.get;
     const ssoBindVerificationRequired = body.components.responses.SsoBindVerificationRequired;
-    const userList = body.paths['/api/users/']?.get;
-    const updateUser = body.paths['/api/users/{id}']?.put;
+    const apiKeyList = body.paths['/api/api-keys']?.get;
+    const apiKeyCreate = body.paths['/api/api-keys']?.post;
+    const profileEmailVerification = body.paths['/api/users/me/email-verification']?.post;
+    const profileEmailVerificationConfirm = body.paths['/api/users/me/email-verification/confirm']?.post;
+    const profilePhoneVerification = body.paths['/api/users/me/phone-verification']?.post;
+    const profilePhoneVerificationConfirm = body.paths['/api/users/me/phone-verification/confirm']?.post;
+    const systemSettingsGet = body.paths['/api/admin/system-settings/']?.get;
+    const userList = body.paths['/api/admin/users/']?.get;
+    const updateUser = body.paths['/api/admin/users/{id}']?.put;
     const verificationChallengeCreate = body.components.schemas.VerificationChallengeCreateRequest;
 
     expect(ssoBindUnauthorized?.content['application/json'].examples).toMatchObject({
@@ -439,11 +533,72 @@ describe('docs API', () => {
         },
       },
     });
-    expect(ssoBindStart?.description).toContain('manage_sso');
-    expect(ssoBindVerificationRequired?.description).toContain('manage_sso');
-    expect(userList?.description).toContain('user_management');
-    expect(updateUser?.description).toContain('user_management');
-    expect(verificationChallengeCreate?.properties?.purpose?.description).toContain('manage_sso');
+    expect(ssoBindStart?.description).toContain(AuthVerificationPurpose.ManageSso);
+    expect(ssoBindVerificationRequired?.description).toContain(AuthVerificationPurpose.ManageSso);
+    expect(userList?.description).toContain(AuthVerificationPurpose.UserManagement);
+    expect(updateUser?.description).toContain(AuthVerificationPurpose.UserManagement);
+    expect(userList?.security).toEqual([{ accessCookieAuth: [] }]);
+    expect(updateUser?.security).toEqual([{ accessCookieAuth: [] }]);
+    expect(apiKeyList?.security).toEqual([{ accessCookieAuth: [] }]);
+    expect(apiKeyCreate?.security).toEqual([{ accessCookieAuth: [] }]);
+    expect(profileEmailVerification?.security).toEqual([{ accessCookieAuth: [] }]);
+    expect(profileEmailVerificationConfirm?.security).toEqual([{ accessCookieAuth: [] }]);
+    expect(profilePhoneVerification?.security).toEqual([{ accessCookieAuth: [] }]);
+    expect(profilePhoneVerificationConfirm?.security).toEqual([{ accessCookieAuth: [] }]);
+    expect(systemSettingsGet?.security).toEqual([{ accessCookieAuth: [] }]);
+
+    for (const operation of [
+      apiKeyList,
+      apiKeyCreate,
+      profileEmailVerification,
+      profileEmailVerificationConfirm,
+      profilePhoneVerification,
+      profilePhoneVerificationConfirm,
+      systemSettingsGet,
+      userList,
+      updateUser,
+    ]) {
+      expect(operation?.['x-api-key-disabled']).toBe(true);
+      expect(operation?.['x-api-key-deny-reason']).toBe('verified-session-required');
+    }
+
+    for (const [path, method] of currentUserApiKeyOperations) {
+      const operation = body.paths[path]?.[method];
+
+      expect(operation?.security, `${method.toUpperCase()} ${path}`).toEqual([
+        {
+          accessCookieAuth: [],
+        },
+        {
+          apiKeyAuth: [],
+        },
+      ]);
+      expect(operation?.['x-api-key-disabled'], `${method.toUpperCase()} ${path}`).toBeUndefined();
+      expect(operation?.['x-api-key-deny-reason'], `${method.toUpperCase()} ${path}`).toBeUndefined();
+    }
+
+    for (const [path, pathItem] of Object.entries(body.paths)) {
+      if (!path.startsWith('/api/admin/')) {
+        continue;
+      }
+
+      for (const method of openApiMethods) {
+        const operation = pathItem?.[method];
+
+        if (!operation) {
+          continue;
+        }
+
+        expect(operation.security, `${method.toUpperCase()} ${path}`).not.toContainEqual({ apiKeyAuth: [] });
+        expect(operation['x-api-key-disabled'], `${method.toUpperCase()} ${path}`).toBe(true);
+        expect(operation['x-api-key-deny-reason'], `${method.toUpperCase()} ${path}`).toBe('verified-session-required');
+      }
+    }
+
+    expect(verificationChallengeCreate?.properties?.purpose?.description).toContain(AuthVerificationPurpose.ManageSso);
+    expect(verificationChallengeCreate?.properties?.purpose?.description).toContain(
+      AuthVerificationPurpose.ManageApiKey,
+    );
 
     const setupEnvironment = body.components.schemas.SetupEnvironment;
     const setupDefaults = body.components.schemas.SetupDefaults;
@@ -459,6 +614,10 @@ describe('docs API', () => {
     );
     expect(body.components.schemas.AuthUser?.properties?.roles?.items?.enum).toEqual(systemRoleKeys);
     expect(body.components.schemas.AuthUser?.properties?.permissions?.items?.enum).toEqual(systemPermissionKeys);
+    expect(body.components.schemas.ApiKeyStatus?.enum).toEqual(apiKeyStatusValues);
+    expect(body.components.schemas.ApiKeyListResponse?.allOf?.[1]?.properties?.data?.properties?.limit?.const).toBe(
+      apiKeyActiveLimitPerUser,
+    );
     expect(body.components.schemas.MfaMethod?.enum).toEqual(authMfaMethodValues);
     expect(body.components.schemas.VerificationMethodName?.enum).toEqual(authVerificationMethodValues);
     expect(body.components.schemas.VerificationPurpose?.enum).toEqual(authVerificationPurposeValues);
@@ -561,16 +720,28 @@ const csrfProtectedOperations = [
   ['/api/auth/login', 'post'],
   ['/api/auth/refresh', 'post'],
   ['/api/auth/logout', 'post'],
-  ['/api/auth/avatar', 'post'],
-  ['/api/auth/avatar', 'delete'],
-  ['/api/auth/profile-banner', 'post'],
-  ['/api/auth/profile-banner', 'delete'],
-  ['/api/auth/profile-background', 'post'],
-  ['/api/auth/profile-background', 'delete'],
+  ['/api/users/me/avatar', 'post'],
+  ['/api/users/me/avatar', 'delete'],
+  ['/api/users/me/profile-banner', 'post'],
+  ['/api/users/me/profile-banner', 'delete'],
+  ['/api/users/me/profile-background', 'post'],
+  ['/api/users/me/profile-background', 'delete'],
   ['/api/auth/sso/session', 'post'],
   ['/api/auth/sso/account', 'post'],
   ['/api/auth/sso/bind', 'post'],
 ] as const satisfies ReadonlyArray<readonly [string, OpenApiMethod]>;
+
+const currentUserApiKeyOperations = [
+  ['/api/users/me', 'get'],
+  ['/api/users/me', 'patch'],
+  ['/api/users/me/avatar', 'post'],
+  ['/api/users/me/avatar', 'delete'],
+  ['/api/users/me/profile-banner', 'post'],
+  ['/api/users/me/profile-banner', 'delete'],
+  ['/api/users/me/profile-background', 'post'],
+  ['/api/users/me/profile-background', 'delete'],
+] as const satisfies ReadonlyArray<readonly [string, OpenApiMethod]>;
+
 const localeRequestParameterRefs = [
   {
     $ref: '#/components/parameters/LocaleHeader',
@@ -600,6 +771,16 @@ function expectResponseRefs(
 function expectSuccessSchemaRef(document: OpenApiDocument, path: string, method: OpenApiMethod, schema: string) {
   const operation = document.paths[path]?.[method];
   const successResponse = operation?.responses['200'] as OpenApiSchemaResponse | undefined;
+
+  expect(operation).toBeDefined();
+  expect(successResponse?.content['application/json'].schema).toEqual({
+    $ref: `#/components/schemas/${schema}`,
+  });
+}
+
+function expectCreatedSchemaRef(document: OpenApiDocument, path: string, method: OpenApiMethod, schema: string) {
+  const operation = document.paths[path]?.[method];
+  const successResponse = operation?.responses['201'] as OpenApiSchemaResponse | undefined;
 
   expect(operation).toBeDefined();
   expect(successResponse?.content['application/json'].schema).toEqual({

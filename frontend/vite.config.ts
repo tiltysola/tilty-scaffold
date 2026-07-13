@@ -8,6 +8,10 @@ import react from '@vitejs/plugin-react';
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(dirname, '..');
 const sharedSourceRoot = path.resolve(repositoryRoot, 'shared/src');
+export const devServerProxy = {
+  '^/api(?:/|$)': 'http://localhost:3000',
+  '^/uploads(?:/|$)': 'http://localhost:3000',
+};
 
 export default defineConfig({
   root: './',
@@ -17,6 +21,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(dirname, 'src'),
       '@tilty/shared/access-control': path.resolve(sharedSourceRoot, 'access-control.ts'),
+      '@tilty/shared/api-keys': path.resolve(sharedSourceRoot, 'api-keys.ts'),
       '@tilty/shared/auth': path.resolve(sharedSourceRoot, 'auth.ts'),
       '@tilty/shared/i18n': path.resolve(sharedSourceRoot, 'i18n.ts'),
       '@tilty/shared/paths': path.resolve(sharedSourceRoot, 'paths.ts'),
@@ -37,10 +42,7 @@ export default defineConfig({
     },
     host: '0.0.0.0',
     port: 8011,
-    proxy: {
-      '/api': 'http://localhost:3000',
-      '/uploads': 'http://localhost:3000',
-    },
+    proxy: devServerProxy,
     allowedHosts: ['dev.tiltysola.com'],
     strictPort: true,
   },

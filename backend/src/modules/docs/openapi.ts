@@ -1,11 +1,18 @@
 import { systemPermissionKeys, systemRoleKeys } from '@tilty/shared/access-control';
 import {
+  apiKeyActiveLimitPerUser,
+  apiKeyPlainKeyPatternSource,
+  apiKeyPrefix,
+  apiKeyStatusValues,
+} from '@tilty/shared/api-keys';
+import {
   authMfaMethodValues,
   authSelectableVerificationPurposeValues,
   authSessionDeviceTypeValues,
   authVerificationCodeMethodValues,
   authVerificationMethodValues,
   authVerificationPurposeValues,
+  type ProfileImageFieldName,
 } from '@tilty/shared/auth';
 import { localeRequestHeader, supportedLocales } from '@tilty/shared/i18n';
 import {
@@ -31,13 +38,33 @@ const localeRequestParameters = [
   },
 ] as const;
 
+const authenticatedApiSecurity = [
+  {
+    accessCookieAuth: [],
+  },
+  {
+    apiKeyAuth: [],
+  },
+] as const;
+
+const sessionSecurity = [
+  {
+    accessCookieAuth: [],
+  },
+] as const;
+
+const apiKeyDisabledVerifiedSessionRequired = {
+  'x-api-key-disabled': true,
+  'x-api-key-deny-reason': 'verified-session-required',
+} as const;
+
 export const openApiDocument = {
   openapi: '3.1.0',
   info: {
     title: 'Tilty Scaffold API',
     description:
       'Backend API contract for Tilty Scaffold. The public frontend landing page is available at /, the authenticated console starts at /dashboard, and Swagger UI is served from /api/docs.',
-    version: '0.1.11',
+    version: '0.1.12',
   },
   servers: [
     {
@@ -55,16 +82,16 @@ export const openApiDocument = {
       description: 'Authentication endpoints',
     },
     {
+      name: 'API Keys',
+      description: 'API Key self-management endpoints',
+    },
+    {
       name: 'Users',
-      description: 'User administration endpoints',
+      description: 'Current user profile and profile option endpoints',
     },
     {
-      name: 'System Settings',
-      description: 'System settings endpoints',
-    },
-    {
-      name: 'Profile Options',
-      description: 'Profile option lookup endpoints',
+      name: 'Admin',
+      description: 'Administrator user, system settings, and API Key oversight endpoints',
     },
     {
       name: 'Health',
@@ -546,17 +573,14 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/system-settings/': {
+    '/api/admin/system-settings/': {
       get: {
-        tags: ['System Settings'],
+        tags: ['Admin'],
         summary: 'Return system settings',
         description:
-          'Requires an authenticated ROOT user with a configured passkey or authenticator app and a verified system_settings sudo grant.',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+          'Requires a verified session with ROOT permission, a configured passkey or authenticator app, and a system_settings step-up grant.',
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         responses: {
           '200': {
             description: 'System settings',
@@ -589,15 +613,12 @@ export const openApiDocument = {
         },
       },
       put: {
-        tags: ['System Settings'],
+        tags: ['Admin'],
         summary: 'Update system settings',
         description:
-          'Requires an authenticated ROOT user with a configured passkey or authenticator app, a verified system_settings sudo grant, and an allowed unsafe request origin.',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+          'Requires a verified session with ROOT permission, a configured passkey or authenticator app, a system_settings step-up grant, and an allowed unsafe request origin.',
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         requestBody: {
           required: true,
           content: {
@@ -677,7 +698,7 @@ export const openApiDocument = {
         },
         responses: {
           '201': {
-            description: 'Authenticated browser session metadata; tokens are set in HttpOnly cookies',
+            description: 'Authenticated session metadata; tokens are set in HttpOnly cookies',
             content: {
               'application/json': {
                 schema: {
@@ -784,15 +805,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/auth/me/email-verification': {
+    '/api/users/me/email-verification': {
       post: {
-        tags: ['Auth'],
+        tags: ['Users'],
         summary: "Send the authenticated user's email verification code",
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         responses: {
           '200': {
             description: 'Email verification send metadata',
@@ -822,15 +840,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/auth/me/email-verification/confirm': {
+    '/api/users/me/email-verification/confirm': {
       post: {
-        tags: ['Auth'],
+        tags: ['Users'],
         summary: "Confirm the authenticated user's email verification code",
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         requestBody: {
           required: true,
           content: {
@@ -882,15 +897,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/auth/me/phone-verification': {
+    '/api/users/me/phone-verification': {
       post: {
-        tags: ['Auth'],
+        tags: ['Users'],
         summary: "Send the authenticated user's phone verification code",
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         requestBody: {
           required: true,
           content: {
@@ -933,15 +945,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/auth/me/phone-verification/confirm': {
+    '/api/users/me/phone-verification/confirm': {
       post: {
-        tags: ['Auth'],
+        tags: ['Users'],
         summary: "Confirm the authenticated user's phone verification code",
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         requestBody: {
           required: true,
           content: {
@@ -1052,7 +1061,7 @@ export const openApiDocument = {
         },
         responses: {
           '200': {
-            description: 'Authenticated browser session metadata or a required verification challenge',
+            description: 'Authenticated session metadata or a required verification challenge',
             content: {
               'application/json': {
                 schema: {
@@ -1076,15 +1085,11 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/auth/me': {
+    '/api/users/me': {
       get: {
-        tags: ['Auth'],
+        tags: ['Users'],
         summary: 'Return the authenticated user',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: authenticatedApiSecurity,
         responses: {
           '200': {
             description: 'Authenticated user',
@@ -1114,13 +1119,9 @@ export const openApiDocument = {
         },
       },
       patch: {
-        tags: ['Auth'],
+        tags: ['Users'],
         summary: "Update the authenticated user's profile",
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: authenticatedApiSecurity,
         requestBody: {
           required: true,
           content: {
@@ -1169,7 +1170,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/auth/me/password': {
+    '/api/auth/password': {
       patch: {
         tags: ['Auth'],
         summary: "Change the authenticated user's password",
@@ -1225,7 +1226,7 @@ export const openApiDocument = {
         ],
         responses: {
           '200': {
-            description: 'Refreshed browser session metadata; tokens are rotated in HttpOnly cookies',
+            description: 'Refreshed session metadata; tokens are rotated in HttpOnly cookies',
             content: {
               'application/json': {
                 schema: {
@@ -1288,338 +1289,17 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/auth/avatar': {
-      post: {
-        tags: ['Auth'],
-        summary: "Upload the authenticated user's avatar",
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            'multipart/form-data': {
-              schema: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['avatar'],
-                properties: {
-                  avatar: {
-                    type: 'string',
-                    format: 'binary',
-                    description: 'JPEG, PNG, WebP, or GIF image.',
-                  },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Updated authenticated user',
-            content: {
-              'application/json': {
-                schema: {
-                  allOf: [
-                    {
-                      $ref: '#/components/schemas/ApiSuccess',
-                    },
-                    {
-                      type: 'object',
-                      properties: {
-                        data: {
-                          $ref: '#/components/schemas/AuthUser',
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-          '400': {
-            $ref: '#/components/responses/ValidationError',
-          },
-          '401': {
-            $ref: '#/components/responses/AuthRequired',
-          },
-          '403': {
-            $ref: '#/components/responses/CsrfForbidden',
-          },
-          '413': {
-            description: 'Uploaded file is too large',
-          },
-          '429': {
-            $ref: '#/components/responses/RateLimited',
-          },
-        },
-      },
-      delete: {
-        tags: ['Auth'],
-        summary: "Remove the authenticated user's avatar",
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
-        responses: {
-          '200': {
-            description: 'Updated authenticated user',
-            content: {
-              'application/json': {
-                schema: {
-                  allOf: [
-                    {
-                      $ref: '#/components/schemas/ApiSuccess',
-                    },
-                    {
-                      type: 'object',
-                      properties: {
-                        data: {
-                          $ref: '#/components/schemas/AuthUser',
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-          '401': {
-            $ref: '#/components/responses/AuthRequired',
-          },
-          '403': {
-            $ref: '#/components/responses/CsrfForbidden',
-          },
-          '429': {
-            $ref: '#/components/responses/RateLimited',
-          },
-        },
-      },
+    '/api/users/me/avatar': {
+      post: createCurrentUserImageOperation("Upload the authenticated user's avatar", 'avatar'),
+      delete: createCurrentUserImageDeleteOperation("Remove the authenticated user's avatar"),
     },
-    '/api/auth/profile-banner': {
-      post: {
-        tags: ['Auth'],
-        summary: "Upload the authenticated user's profile banner",
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            'multipart/form-data': {
-              schema: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['profileBanner'],
-                properties: {
-                  profileBanner: {
-                    type: 'string',
-                    format: 'binary',
-                    description: 'JPEG, PNG, WebP, or GIF image.',
-                  },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Updated authenticated user',
-            content: {
-              'application/json': {
-                schema: {
-                  allOf: [
-                    {
-                      $ref: '#/components/schemas/ApiSuccess',
-                    },
-                    {
-                      type: 'object',
-                      properties: {
-                        data: {
-                          $ref: '#/components/schemas/AuthUser',
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-          '400': {
-            $ref: '#/components/responses/ValidationError',
-          },
-          '401': {
-            $ref: '#/components/responses/AuthRequired',
-          },
-          '403': {
-            $ref: '#/components/responses/CsrfForbidden',
-          },
-          '413': {
-            description: 'Uploaded file is too large',
-          },
-          '429': {
-            $ref: '#/components/responses/RateLimited',
-          },
-        },
-      },
-      delete: {
-        tags: ['Auth'],
-        summary: "Remove the authenticated user's profile banner",
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
-        responses: {
-          '200': {
-            description: 'Updated authenticated user',
-            content: {
-              'application/json': {
-                schema: {
-                  allOf: [
-                    {
-                      $ref: '#/components/schemas/ApiSuccess',
-                    },
-                    {
-                      type: 'object',
-                      properties: {
-                        data: {
-                          $ref: '#/components/schemas/AuthUser',
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-          '401': {
-            $ref: '#/components/responses/AuthRequired',
-          },
-          '403': {
-            $ref: '#/components/responses/CsrfForbidden',
-          },
-          '429': {
-            $ref: '#/components/responses/RateLimited',
-          },
-        },
-      },
+    '/api/users/me/profile-banner': {
+      post: createCurrentUserImageOperation("Upload the authenticated user's profile banner", 'profileBanner'),
+      delete: createCurrentUserImageDeleteOperation("Remove the authenticated user's profile banner"),
     },
-    '/api/auth/profile-background': {
-      post: {
-        tags: ['Auth'],
-        summary: "Upload the authenticated user's profile background",
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            'multipart/form-data': {
-              schema: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['profileBackground'],
-                properties: {
-                  profileBackground: {
-                    type: 'string',
-                    format: 'binary',
-                    description: 'JPEG, PNG, WebP, or GIF image.',
-                  },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Updated authenticated user',
-            content: {
-              'application/json': {
-                schema: {
-                  allOf: [
-                    {
-                      $ref: '#/components/schemas/ApiSuccess',
-                    },
-                    {
-                      type: 'object',
-                      properties: {
-                        data: {
-                          $ref: '#/components/schemas/AuthUser',
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-          '400': {
-            $ref: '#/components/responses/ValidationError',
-          },
-          '401': {
-            $ref: '#/components/responses/AuthRequired',
-          },
-          '403': {
-            $ref: '#/components/responses/CsrfForbidden',
-          },
-          '413': {
-            description: 'Uploaded file is too large',
-          },
-          '429': {
-            $ref: '#/components/responses/RateLimited',
-          },
-        },
-      },
-      delete: {
-        tags: ['Auth'],
-        summary: "Remove the authenticated user's profile background",
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
-        responses: {
-          '200': {
-            description: 'Updated authenticated user',
-            content: {
-              'application/json': {
-                schema: {
-                  allOf: [
-                    {
-                      $ref: '#/components/schemas/ApiSuccess',
-                    },
-                    {
-                      type: 'object',
-                      properties: {
-                        data: {
-                          $ref: '#/components/schemas/AuthUser',
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-          '401': {
-            $ref: '#/components/responses/AuthRequired',
-          },
-          '403': {
-            $ref: '#/components/responses/CsrfForbidden',
-          },
-          '429': {
-            $ref: '#/components/responses/RateLimited',
-          },
-        },
-      },
+    '/api/users/me/profile-background': {
+      post: createCurrentUserImageOperation("Upload the authenticated user's profile background", 'profileBackground'),
+      delete: createCurrentUserImageDeleteOperation("Remove the authenticated user's profile background"),
     },
     '/api/auth/totp': {
       get: {
@@ -2476,7 +2156,7 @@ export const openApiDocument = {
         },
         responses: {
           '200': {
-            description: 'Authenticated browser session metadata',
+            description: 'Authenticated session metadata',
             content: {
               'application/json': {
                 schema: {
@@ -2516,7 +2196,7 @@ export const openApiDocument = {
         },
         responses: {
           '201': {
-            description: 'Authenticated browser session metadata; tokens are set in HttpOnly cookies',
+            description: 'Authenticated session metadata; tokens are set in HttpOnly cookies',
             content: {
               'application/json': {
                 schema: {
@@ -2562,7 +2242,7 @@ export const openApiDocument = {
         },
         responses: {
           '200': {
-            description: 'Authenticated browser session metadata or a required verification challenge',
+            description: 'Authenticated session metadata or a required verification challenge',
             content: {
               'application/json': {
                 schema: {
@@ -2592,17 +2272,33 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/users/': {
+    '/api/api-keys': {
+      get: createApiKeyListOperation('List current user API Keys'),
+      post: createApiKeyCreateOperation('Create an API Key for the current user'),
+    },
+    '/api/api-keys/{id}/disable': {
+      post: createApiKeySummaryOperation('Disable an API Key'),
+    },
+    '/api/api-keys/{id}/enable': {
+      post: createApiKeySummaryOperation('Enable an API Key'),
+    },
+    '/api/api-keys/{id}/revoke': {
+      post: createApiKeySummaryOperation('Revoke an API Key'),
+    },
+    '/api/admin/api-keys': {
+      get: createApiKeyListOperation('List all API Keys', { admin: true }),
+    },
+    '/api/admin/api-keys/{id}/revoke': {
+      post: createApiKeySummaryOperation('Revoke any API Key', { admin: true }),
+    },
+    '/api/admin/users/': {
       get: {
-        tags: ['Users'],
+        tags: ['Admin'],
         summary: 'List users and available roles',
         description:
-          'Requires USER_LIST or ROOT permission, a configured passkey or authenticator app, and verified user_management access.',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+          'Requires a verified session with USER_LIST or ROOT permission, a configured passkey or authenticator app, and verified user_management access.',
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         parameters: [
           {
             name: 'page',
@@ -2644,17 +2340,14 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/users/{id}': {
+    '/api/admin/users/{id}': {
       put: {
-        tags: ['Users'],
+        tags: ['Admin'],
         summary: 'Update a managed user',
         description:
-          'Requires USER_ADMIN or ROOT permission, a configured passkey or authenticator app, verified user_management access, and an allowed unsafe request origin.',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+          'Requires a verified session with USER_ADMIN or ROOT permission, a configured passkey or authenticator app, verified user_management access, and an allowed unsafe request origin.',
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         parameters: [
           {
             name: 'id',
@@ -2731,17 +2424,14 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/users/{id}/roles': {
+    '/api/admin/users/{id}/roles': {
       put: {
-        tags: ['Users'],
+        tags: ['Admin'],
         summary: 'Replace a user role assignment set',
         description:
-          'Requires USER_ADMIN or ROOT permission, a configured passkey or authenticator app, verified user_management access, and an allowed unsafe request origin.',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+          'Requires a verified session with USER_ADMIN or ROOT permission, a configured passkey or authenticator app, verified user_management access, and an allowed unsafe request origin.',
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         parameters: [
           {
             name: 'id',
@@ -2818,15 +2508,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/users/{id}/details': {
+    '/api/admin/users/{id}/details': {
       get: {
-        tags: ['Users'],
+        tags: ['Admin'],
         summary: 'Return managed user details for administrator editing',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         parameters: [
           {
             name: 'id',
@@ -2861,15 +2548,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/users/{id}/mfa': {
+    '/api/admin/users/{id}/mfa': {
       patch: {
-        tags: ['Users'],
+        tags: ['Admin'],
         summary: 'Update managed user MFA settings',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         parameters: [
           {
             name: 'id',
@@ -2920,15 +2604,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/users/{id}/totp/disable': {
+    '/api/admin/users/{id}/totp/disable': {
       post: {
-        tags: ['Users'],
+        tags: ['Admin'],
         summary: 'Remove the managed user authenticator app',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         parameters: [
           {
             name: 'id',
@@ -2966,15 +2647,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/users/{id}/passkeys/{passkeyId}': {
+    '/api/admin/users/{id}/passkeys/{passkeyId}': {
       delete: {
-        tags: ['Users'],
+        tags: ['Admin'],
         summary: 'Remove a managed user passkey',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         parameters: [
           {
             name: 'id',
@@ -3018,15 +2696,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/users/{id}/devices': {
+    '/api/admin/users/{id}/devices': {
       get: {
-        tags: ['Users'],
+        tags: ['Admin'],
         summary: 'List managed user login devices',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         parameters: [
           {
             name: 'id',
@@ -3061,13 +2736,10 @@ export const openApiDocument = {
         },
       },
       delete: {
-        tags: ['Users'],
+        tags: ['Admin'],
         summary: 'Revoke managed user login device sessions',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         parameters: [
           {
             name: 'id',
@@ -3102,15 +2774,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/users/{id}/devices/{sessionId}': {
+    '/api/admin/users/{id}/devices/{sessionId}': {
       delete: {
-        tags: ['Users'],
+        tags: ['Admin'],
         summary: 'Revoke a managed user login device session',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         parameters: [
           {
             name: 'id',
@@ -3154,15 +2823,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/users/{id}/sso-identities': {
+    '/api/admin/users/{id}/sso-identities': {
       get: {
-        tags: ['Users'],
+        tags: ['Admin'],
         summary: 'List managed user SSO bindings',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         parameters: [
           {
             name: 'id',
@@ -3197,15 +2863,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/users/{id}/sso-identities/{providerId}': {
+    '/api/admin/users/{id}/sso-identities/{providerId}': {
       delete: {
-        tags: ['Users'],
+        tags: ['Admin'],
         summary: 'Remove a managed user SSO binding',
-        security: [
-          {
-            accessCookieAuth: [],
-          },
-        ],
+        security: sessionSecurity,
+        ...apiKeyDisabledVerifiedSessionRequired,
         parameters: [
           {
             name: 'id',
@@ -3250,19 +2913,19 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/users/{id}/avatar': {
+    '/api/admin/users/{id}/avatar': {
       post: createManagedUserImageOperation('Upload a managed user avatar', 'avatar'),
       delete: createManagedUserImageDeleteOperation('Remove a managed user avatar'),
     },
-    '/api/users/{id}/profile-banner': {
+    '/api/admin/users/{id}/profile-banner': {
       post: createManagedUserImageOperation('Upload a managed user profile banner', 'profileBanner'),
       delete: createManagedUserImageDeleteOperation('Remove a managed user profile banner'),
     },
-    '/api/users/{id}/profile-background': {
+    '/api/admin/users/{id}/profile-background': {
       post: createManagedUserImageOperation('Upload a managed user profile background', 'profileBackground'),
       delete: createManagedUserImageDeleteOperation('Remove a managed user profile background'),
     },
-    '/api/profile-options/genders': {
+    '/api/users/profile-options/genders': {
       get: createProfileOptionsOperation(
         'Return gender profile options',
         [
@@ -3274,7 +2937,7 @@ export const openApiDocument = {
         { authenticated: true },
       ),
     },
-    '/api/profile-options/locations/countries': {
+    '/api/users/profile-options/locations/countries': {
       get: createProfileOptionsOperation('Return country location options', [
         {
           name: 'q',
@@ -3282,7 +2945,7 @@ export const openApiDocument = {
         },
       ]),
     },
-    '/api/profile-options/locations/regions': {
+    '/api/users/profile-options/locations/regions': {
       get: createProfileOptionsOperation('Return region location options', [
         {
           name: 'country',
@@ -3295,7 +2958,7 @@ export const openApiDocument = {
         },
       ]),
     },
-    '/api/profile-options/locations/cities': {
+    '/api/users/profile-options/locations/cities': {
       get: createProfileOptionsOperation('Return city location options', [
         {
           name: 'country',
@@ -3426,6 +3089,12 @@ export const openApiDocument = {
         type: 'apiKey',
         in: 'cookie',
         name: 'tilty_scaffold_access_token',
+      },
+      apiKeyAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'API Key',
+        description: `Use Authorization: Bearer ${apiKeyPrefix}_{keyId}_{secret}_{checksum}.`,
       },
       refreshCookieAuth: {
         type: 'apiKey',
@@ -3792,6 +3461,48 @@ export const openApiDocument = {
           },
         },
       },
+      ApiKeyManagementAccessRequired: {
+        description: 'A verified session with manage_api_key access is required',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
+      CsrfOrApiKeyManagementAccessRequired: {
+        description:
+          'The unsafe request origin is missing or not allowed, or API Key management access requirements are not satisfied',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
+      AdminApiKeyManagementAccessRequired: {
+        description: 'USER_ADMIN or ROOT permission and verified manage_api_key access are required',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
+      CsrfOrAdminApiKeyManagementAccessRequired: {
+        description:
+          'The unsafe request origin is missing or not allowed, or admin API Key management access requirements are not satisfied',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
       AccountIdentifierConflict: {
         description: 'Email address or username already exists',
         content: {
@@ -4001,6 +3712,179 @@ export const openApiDocument = {
             type: 'null',
           },
           data: {},
+        },
+      },
+      ApiKeyStatus: {
+        type: 'string',
+        enum: apiKeyStatusValues,
+      },
+      ApiKeySummary: {
+        type: 'object',
+        required: [
+          'id',
+          'userId',
+          'name',
+          'keyPrefix',
+          'keySuffix',
+          'fingerprint',
+          'status',
+          'requestCount',
+          'createdAt',
+          'updatedAt',
+        ],
+        properties: {
+          id: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 32,
+          },
+          userId: {
+            type: 'string',
+            format: 'uuid',
+          },
+          name: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 128,
+          },
+          description: {
+            type: 'string',
+            maxLength: 512,
+          },
+          keyPrefix: {
+            type: 'string',
+          },
+          keySuffix: {
+            type: 'string',
+          },
+          fingerprint: {
+            type: 'string',
+          },
+          status: {
+            $ref: '#/components/schemas/ApiKeyStatus',
+          },
+          expiresAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+          lastUsedAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+          lastUsedIp: {
+            type: 'string',
+          },
+          requestCount: {
+            type: 'integer',
+            minimum: 0,
+          },
+          createdAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+          updatedAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+          revokedAt: {
+            type: 'string',
+            format: 'date-time',
+          },
+        },
+      },
+      ApiKeyReveal: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiKeySummary',
+          },
+          {
+            type: 'object',
+            required: ['plainKey'],
+            properties: {
+              plainKey: {
+                type: 'string',
+                pattern: apiKeyPlainKeyPatternSource,
+              },
+            },
+          },
+        ],
+      },
+      ApiKeyListResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                required: ['keys', 'limit'],
+                properties: {
+                  keys: {
+                    type: 'array',
+                    items: {
+                      $ref: '#/components/schemas/ApiKeySummary',
+                    },
+                  },
+                  limit: {
+                    type: 'integer',
+                    const: apiKeyActiveLimitPerUser,
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      ApiKeySummaryResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                $ref: '#/components/schemas/ApiKeySummary',
+              },
+            },
+          },
+        ],
+      },
+      ApiKeyRevealResponse: {
+        allOf: [
+          {
+            $ref: '#/components/schemas/ApiSuccess',
+          },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                $ref: '#/components/schemas/ApiKeyReveal',
+              },
+            },
+          },
+        ],
+      },
+      ApiKeyCreateRequest: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name'],
+        properties: {
+          name: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 128,
+          },
+          description: {
+            type: 'string',
+            maxLength: 512,
+          },
+          expiresAt: {
+            type: 'string',
+            format: 'date-time',
+          },
         },
       },
       ProfileOption: {
@@ -4442,7 +4326,7 @@ export const openApiDocument = {
       VerificationPurpose: {
         type: 'string',
         description:
-          'Verification challenge purpose. Use manage_sso before profile SSO binding. system_settings and user_management require a configured passkey or authenticator app.',
+          'Verification challenge purpose. Use manage_api_key before API Key management and manage_sso before profile SSO binding. system_settings and user_management require a configured passkey or authenticator app for sessions.',
         enum: authVerificationPurposeValues,
       },
       VerificationMethod: {
@@ -4536,7 +4420,7 @@ export const openApiDocument = {
           purpose: {
             type: 'string',
             description:
-              'Use manage_sso before profile SSO binding, system_settings before reading or updating system settings, and user_management before opening user administration. Only passkey and authenticator app verification are accepted for system_settings and user_management.',
+              'Use manage_api_key before API Key management, manage_sso before profile SSO binding, system_settings before reading or updating system settings, and user_management before opening user administration. Only passkey and authenticator app verification are accepted for system_settings and user_management sessions.',
             enum: authSelectableVerificationPurposeValues,
           },
         },
@@ -6075,21 +5959,156 @@ export const openApiDocument = {
   },
 } as const;
 
+function createApiKeyListOperation(summary: string, options: { admin?: boolean } = {}) {
+  return {
+    tags: options.admin ? ['Admin'] : ['API Keys'],
+    summary,
+    description: options.admin
+      ? 'Requires USER_ADMIN or ROOT permission and verified manage_api_key access. API Key authentication is not accepted for API Key management.'
+      : 'Requires verified manage_api_key access. API Key authentication is not accepted for API Key management.',
+    security: sessionSecurity,
+    ...apiKeyDisabledVerifiedSessionRequired,
+    responses: {
+      '200': {
+        description: 'API Key list',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiKeyListResponse',
+            },
+          },
+        },
+      },
+      ...createApiKeyManagementErrorResponses(options.admin ? { admin: true } : {}),
+    },
+  };
+}
+
+function createApiKeyCreateOperation(summary: string) {
+  return {
+    tags: ['API Keys'],
+    summary,
+    description:
+      'Creates an API Key for the current account. The plain key is returned only once. API Key authentication is not accepted for API Key management.',
+    security: sessionSecurity,
+    ...apiKeyDisabledVerifiedSessionRequired,
+    requestBody: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            $ref: '#/components/schemas/ApiKeyCreateRequest',
+          },
+        },
+      },
+    },
+    responses: {
+      '201': {
+        description: 'Created API Key',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiKeyRevealResponse',
+            },
+          },
+        },
+      },
+      '400': {
+        $ref: '#/components/responses/ValidationError',
+      },
+      ...createApiKeyManagementErrorResponses({ unsafe: true }),
+      '409': {
+        $ref: '#/components/responses/Conflict',
+      },
+    },
+  };
+}
+
+function createApiKeySummaryOperation(summary: string, options: { admin?: boolean } = {}) {
+  return {
+    tags: options.admin ? ['Admin'] : ['API Keys'],
+    summary,
+    description: options.admin
+      ? 'Requires USER_ADMIN or ROOT permission and verified manage_api_key access. API Key authentication is not accepted for API Key management.'
+      : 'Requires verified manage_api_key access. API Key authentication is not accepted for API Key management.',
+    security: sessionSecurity,
+    ...apiKeyDisabledVerifiedSessionRequired,
+    parameters: createApiKeyPathParameters(),
+    responses: {
+      '200': {
+        description: 'API Key',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiKeySummaryResponse',
+            },
+          },
+        },
+      },
+      '400': {
+        $ref: '#/components/responses/ValidationError',
+      },
+      ...createApiKeyManagementErrorResponses({
+        ...(options.admin ? { admin: true } : {}),
+        notFound: true,
+        unsafe: true,
+      }),
+    },
+  };
+}
+
+function createApiKeyPathParameters() {
+  return [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      schema: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 32,
+      },
+    },
+  ];
+}
+
+function createApiKeyManagementErrorResponses(options: { admin?: boolean; notFound?: boolean; unsafe?: boolean } = {}) {
+  const forbiddenResponse = options.admin
+    ? options.unsafe
+      ? 'CsrfOrAdminApiKeyManagementAccessRequired'
+      : 'AdminApiKeyManagementAccessRequired'
+    : options.unsafe
+      ? 'CsrfOrApiKeyManagementAccessRequired'
+      : 'ApiKeyManagementAccessRequired';
+
+  return {
+    '401': {
+      $ref: '#/components/responses/AuthRequired',
+    },
+    '403': {
+      $ref: `#/components/responses/${forbiddenResponse}`,
+    },
+    ...(options.notFound
+      ? {
+          '404': {
+            $ref: '#/components/responses/NotFound',
+          },
+        }
+      : {}),
+  };
+}
+
 function createProfileOptionsOperation(
   summary: string,
   parameters: Array<{ description: string; name: string; required?: boolean }>,
   options: { authenticated?: boolean } = {},
 ) {
   return {
-    tags: ['Profile Options'],
+    tags: ['Users'],
     summary,
     ...(options.authenticated
       ? {
-          security: [
-            {
-              accessCookieAuth: [],
-            },
-          ],
+          security: authenticatedApiSecurity,
         }
       : {}),
     parameters: parameters.map((parameter) => ({
@@ -6123,15 +6142,101 @@ function createProfileOptionsOperation(
   };
 }
 
-function createManagedUserImageOperation(summary: string, fieldName: string) {
+function createCurrentUserImageOperation(summary: string, fieldName: ProfileImageFieldName) {
   return {
     tags: ['Users'],
     summary,
-    security: [
-      {
-        accessCookieAuth: [],
+    security: authenticatedApiSecurity,
+    requestBody: createProfileImageUploadRequestBody(fieldName),
+    responses: {
+      '200': {
+        description: 'Updated authenticated user',
+        content: {
+          'application/json': {
+            schema: {
+              allOf: [
+                {
+                  $ref: '#/components/schemas/ApiSuccess',
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    data: {
+                      $ref: '#/components/schemas/AuthUser',
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
       },
-    ],
+      '400': {
+        $ref: '#/components/responses/ValidationError',
+      },
+      '401': {
+        $ref: '#/components/responses/AuthRequired',
+      },
+      '403': {
+        $ref: '#/components/responses/CsrfForbidden',
+      },
+      '413': {
+        description: 'Uploaded file is too large',
+      },
+      '429': {
+        $ref: '#/components/responses/RateLimited',
+      },
+    },
+  };
+}
+
+function createCurrentUserImageDeleteOperation(summary: string) {
+  return {
+    tags: ['Users'],
+    summary,
+    security: authenticatedApiSecurity,
+    responses: {
+      '200': {
+        description: 'Updated authenticated user',
+        content: {
+          'application/json': {
+            schema: {
+              allOf: [
+                {
+                  $ref: '#/components/schemas/ApiSuccess',
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    data: {
+                      $ref: '#/components/schemas/AuthUser',
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+      '401': {
+        $ref: '#/components/responses/AuthRequired',
+      },
+      '403': {
+        $ref: '#/components/responses/CsrfForbidden',
+      },
+      '429': {
+        $ref: '#/components/responses/RateLimited',
+      },
+    },
+  };
+}
+
+function createManagedUserImageOperation(summary: string, fieldName: ProfileImageFieldName) {
+  return {
+    tags: ['Admin'],
+    summary,
+    security: sessionSecurity,
+    ...apiKeyDisabledVerifiedSessionRequired,
     parameters: [
       {
         name: 'id',
@@ -6143,23 +6248,7 @@ function createManagedUserImageOperation(summary: string, fieldName: string) {
         },
       },
     ],
-    requestBody: {
-      required: true,
-      content: {
-        'multipart/form-data': {
-          schema: {
-            type: 'object',
-            required: [fieldName],
-            properties: {
-              [fieldName]: {
-                type: 'string',
-                format: 'binary',
-              },
-            },
-          },
-        },
-      },
-    },
+    requestBody: createProfileImageUploadRequestBody(fieldName),
     responses: {
       '200': {
         description: 'Managed user details',
@@ -6184,7 +6273,29 @@ function createManagedUserImageOperation(summary: string, fieldName: string) {
         $ref: '#/components/responses/NotFound',
       },
       '413': {
-        $ref: '#/components/responses/ValidationError',
+        description: 'Uploaded file is too large',
+      },
+    },
+  };
+}
+
+function createProfileImageUploadRequestBody(fieldName: ProfileImageFieldName) {
+  return {
+    required: true,
+    content: {
+      'multipart/form-data': {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: [fieldName],
+          properties: {
+            [fieldName]: {
+              type: 'string',
+              format: 'binary',
+              description: 'JPEG, PNG, WebP, or GIF image.',
+            },
+          },
+        },
       },
     },
   };
@@ -6192,13 +6303,10 @@ function createManagedUserImageOperation(summary: string, fieldName: string) {
 
 function createManagedUserImageDeleteOperation(summary: string) {
   return {
-    tags: ['Users'],
+    tags: ['Admin'],
     summary,
-    security: [
-      {
-        accessCookieAuth: [],
-      },
-    ],
+    security: sessionSecurity,
+    ...apiKeyDisabledVerifiedSessionRequired,
     parameters: [
       {
         name: 'id',

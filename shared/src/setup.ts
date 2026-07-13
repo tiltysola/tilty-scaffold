@@ -31,20 +31,6 @@ export const setupDatabaseDialectValues = [
 
 export type SetupDatabaseDialectValue = (typeof setupDatabaseDialectValues)[number];
 
-export const SetupDatabaseSync = {
-  Off: 'off',
-  Alter: 'alter',
-  Force: 'force',
-} as const;
-
-export const setupDatabaseSyncValues = [
-  SetupDatabaseSync.Off,
-  SetupDatabaseSync.Alter,
-  SetupDatabaseSync.Force,
-] as const;
-
-export type SetupDatabaseSyncValue = (typeof setupDatabaseSyncValues)[number];
-
 export const SetupCacheStore = {
   Memory: 'memory',
   Redis: 'redis',
@@ -62,6 +48,8 @@ export const SetupFileStorageDriver = {
 export const setupFileStorageDriverValues = [SetupFileStorageDriver.Local, SetupFileStorageDriver.Oss] as const;
 
 export type SetupFileStorageDriverValue = (typeof setupFileStorageDriverValues)[number];
+
+export const defaultFileUploadMaxBytes = 2 * 1024 * 1024;
 
 export const SetupLogTarget = {
   Console: 'console',

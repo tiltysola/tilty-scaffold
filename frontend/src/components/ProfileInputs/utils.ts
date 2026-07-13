@@ -11,6 +11,7 @@ export function getProfileOptionsWithValueFallback(options: ProfileOption[], val
 
   return [
     {
+      id: `custom:${encodeURIComponent(normalizedValue)}`,
       label: normalizedValue,
       value: normalizedValue,
     },

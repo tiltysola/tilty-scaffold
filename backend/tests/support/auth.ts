@@ -1,3 +1,5 @@
+import { AuthVerificationPurpose } from '@tilty/shared/auth';
+
 import { type createServices } from '../../src/composition/services';
 import { type AuthService, defaultAuthSessionRequestContext } from '../../src/modules/auth/auth.service';
 import { createTotpCode } from './totp';
@@ -42,7 +44,7 @@ export async function registerUserWithUserManagementAccess(
 
   const challenge = await services.auth.createVerificationChallenge(
     session.accessToken,
-    'user_management',
+    AuthVerificationPurpose.UserManagement,
     defaultAuthSessionRequestContext,
   );
 

@@ -1,7 +1,7 @@
 import { apiRequest } from './api';
 
 export interface ProfileOption {
-  id?: string;
+  id: string;
   label: string;
   value: string;
   description?: string;
@@ -21,26 +21,26 @@ interface ProfileLocationCitiesRequest extends ProfileLocationRegionsRequest {
 }
 
 export function fetchProfileGenderOptions(query = '') {
-  return fetchProfileOptions('/api/profile-options/genders', {
+  return fetchProfileOptions('/api/users/profile-options/genders', {
     q: query,
   });
 }
 
 export function fetchProfileLocationCountries(query = '') {
-  return fetchProfileOptions('/api/profile-options/locations/countries', {
+  return fetchProfileOptions('/api/users/profile-options/locations/countries', {
     q: query,
   });
 }
 
 export function fetchProfileLocationRegions({ country, query = '' }: ProfileLocationRegionsRequest) {
-  return fetchProfileOptions('/api/profile-options/locations/regions', {
+  return fetchProfileOptions('/api/users/profile-options/locations/regions', {
     country,
     q: query,
   });
 }
 
 export function fetchProfileLocationCities({ country, query = '', region }: ProfileLocationCitiesRequest) {
-  return fetchProfileOptions('/api/profile-options/locations/cities', {
+  return fetchProfileOptions('/api/users/profile-options/locations/cities', {
     country,
     q: query,
     region,

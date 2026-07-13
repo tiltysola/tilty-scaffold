@@ -397,18 +397,6 @@ describe('setup service', () => {
       service.testDatabase({
         environment: {
           ...baseEnvironment,
-          NODE_ENV: 'production',
-          DATABASE_SYNC: 'alter',
-        },
-      }),
-    ).rejects.toMatchObject({
-      code: 'SETUP_ENV_INVALID',
-      status: 400,
-    });
-    await expect(
-      service.testDatabase({
-        environment: {
-          ...baseEnvironment,
           SERVER_MULTI_INSTANCE_ENABLED: 'true',
         },
       }),

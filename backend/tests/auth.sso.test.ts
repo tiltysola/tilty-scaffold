@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AuthVerificationPurpose } from '@tilty/shared/auth';
+
 import { initModels } from '../src/composition/models';
 import { createServices } from '../src/composition/services';
 import { createSequelize } from '../src/infra/database';
@@ -910,7 +912,7 @@ describe('OIDC SSO service', () => {
     expect(result).toMatchObject({
       requiresVerification: true,
       defaultMethod: 'totp',
-      purpose: 'sso',
+      purpose: AuthVerificationPurpose.Sso,
     });
 
     if (!('requiresVerification' in result)) {

@@ -351,6 +351,179 @@ export const up: MigrationFn<QueryInterface> = async ({ context: queryInterface 
     name: 'auth_sessions_expires_at',
   });
 
+  await queryInterface.createTable('api_keys', {
+    id: {
+      type: DataTypes.STRING(32),
+      primaryKey: true,
+      allowNull: false,
+    },
+    userId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      references: {
+        model: 'users',
+        key: 'id',
+      },
+      onDelete: 'CASCADE',
+      onUpdate: 'CASCADE',
+    },
+    name: {
+      type: DataTypes.STRING(128),
+      allowNull: false,
+    },
+    description: {
+      type: DataTypes.STRING(512),
+      allowNull: true,
+    },
+    keyPrefix: {
+      type: DataTypes.STRING(64),
+      allowNull: false,
+    },
+    keySuffix: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+    },
+    keyHash: {
+      type: DataTypes.STRING(128),
+      allowNull: false,
+    },
+    hashSecretVersion: {
+      type: DataTypes.STRING(32),
+      allowNull: false,
+    },
+    fingerprint: {
+      type: DataTypes.STRING(128),
+      allowNull: false,
+    },
+    status: {
+      type: DataTypes.ENUM('active', 'disabled', 'revoked', 'expired'),
+      allowNull: false,
+      defaultValue: 'active',
+    },
+    expiresAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    lastUsedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    lastUsedIp: {
+      type: DataTypes.STRING(64),
+      allowNull: true,
+    },
+    lastUsedUserAgentHash: {
+      type: DataTypes.STRING(128),
+      allowNull: true,
+    },
+    requestCount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    createdByUserId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      references: {
+        model: 'users',
+        key: 'id',
+      },
+      onDelete: 'CASCADE',
+      onUpdate: 'CASCADE',
+    },
+    revokedByUserId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'users',
+        key: 'id',
+      },
+      onDelete: 'SET NULL',
+      onUpdate: 'CASCADE',
+    },
+    revokedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    createdAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+    updatedAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+  });
+
+  await queryInterface.addIndex('api_keys', ['userId', 'status', 'expiresAt'], {
+    name: 'api_keys_user_status_expires',
+  });
+  await queryInterface.addIndex('api_keys', ['fingerprint'], {
+    name: 'api_keys_fingerprint',
+    unique: true,
+  });
+  await queryInterface.addIndex('api_keys', {
+    fields: [
+      {
+        name: 'createdAt',
+        order: 'DESC',
+      },
+    ],
+    name: 'api_keys_created_at',
+  });
+
+  await queryInterface.createTable('api_key_audit_events', {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+      allowNull: false,
+    },
+    keyId: {
+      type: DataTypes.STRING(32),
+      allowNull: false,
+      references: {
+        model: 'api_keys',
+        key: 'id',
+      },
+      onDelete: 'CASCADE',
+      onUpdate: 'CASCADE',
+    },
+    actorUserId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      references: {
+        model: 'users',
+        key: 'id',
+      },
+      onDelete: 'CASCADE',
+      onUpdate: 'CASCADE',
+    },
+    eventType: {
+      type: DataTypes.STRING(64),
+      allowNull: false,
+    },
+    sourceIp: {
+      type: DataTypes.STRING(64),
+      allowNull: true,
+    },
+    createdAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+    updatedAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+  });
+
+  await queryInterface.addIndex('api_key_audit_events', ['keyId', 'createdAt'], {
+    name: 'api_key_audit_events_key_created',
+  });
+  await queryInterface.addIndex('api_key_audit_events', ['actorUserId', 'createdAt'], {
+    name: 'api_key_audit_events_actor_created',
+  });
+
   await queryInterface.createTable('permissions', {
     key: {
       type: DataTypes.STRING(64),
@@ -512,6 +685,8 @@ export const down: MigrationFn<QueryInterface> = async ({ context: queryInterfac
   await queryInterface.dropTable('role_permissions');
   await queryInterface.dropTable('roles');
   await queryInterface.dropTable('permissions');
+  await queryInterface.dropTable('api_key_audit_events');
+  await queryInterface.dropTable('api_keys');
   await queryInterface.dropTable('auth_sessions');
   await queryInterface.dropTable('auth_passkeys');
   await queryInterface.dropTable('user_sso_identities');

@@ -67,7 +67,7 @@ describe('rate limit middleware', () => {
         createTestContext(undefined, {}, undefined, {
           ip: '192.0.2.10',
           method: 'GET',
-          path: '/api/users/',
+          path: '/api/admin/users/',
         }),
       ),
     ).rejects.toMatchObject({
@@ -87,7 +87,7 @@ describe('rate limit middleware', () => {
     for (const request of [
       { method: 'GET', path: '/api/health' },
       { method: 'GET', path: '/api/health/ready' },
-      { method: 'OPTIONS', path: '/api/users/' },
+      { method: 'OPTIONS', path: '/api/admin/users/' },
     ]) {
       await runMiddleware(
         rateLimit,
@@ -113,7 +113,7 @@ describe('rate limit middleware', () => {
         createTestContext(undefined, {}, undefined, {
           ip: '192.0.2.11',
           method: 'GET',
-          path: '/api/users/',
+          path: '/api/admin/users/',
         }),
       ),
     ).rejects.toMatchObject({

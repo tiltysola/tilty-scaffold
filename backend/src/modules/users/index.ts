@@ -1,45 +1,43 @@
-import { SystemPermission } from '@tilty/shared/access-control';
+import { type Middleware } from 'koa';
+
+import { defaultFileUploadMaxBytes } from '@tilty/shared/setup';
 
 import { type BackendModule } from '../../core/module';
-import { type AccessControlService } from '../access-control/access-control.service';
+import { type ApiKeyService } from '../api-keys/api-key.service';
 import { type AuthCookieConfig } from '../auth/auth.http';
-import { requireStrongVerifiedPermission } from '../auth/auth.middleware';
+import { requireAuthenticated, requireCookieAuthenticated } from '../auth/auth.middleware';
 import { type AuthService } from '../auth/auth.service';
-import { type SsoService } from '../auth/auth.sso';
-import { UserController } from './user.controller';
+import { CurrentUserController } from './current-user.controller';
 import { type UserService } from './user.service';
+import { UserProfileOptionsController } from './user-profile-options.controller';
 
 interface UsersModuleOptions {
-  avatarUploadMaxBytes?: number;
+  apiKeyService?: ApiKeyService | undefined;
   cookies: AuthCookieConfig;
-  ssoService: SsoService;
+  fileUploadMaxBytes?: number;
+  rateLimit?: Middleware;
 }
 
 export function createUsersModule(
   userService: UserService,
-  accessControl: AccessControlService,
   authService: AuthService,
   options: UsersModuleOptions,
 ): BackendModule {
-  const controller = new UserController(
-    userService,
-    accessControl,
+  const currentUserController = new CurrentUserController(
     authService,
-    options.ssoService,
-    options.avatarUploadMaxBytes ?? 2 * 1024 * 1024,
+    options.fileUploadMaxBytes ?? defaultFileUploadMaxBytes,
   );
-  const requireVerifiedUserList = requireStrongVerifiedPermission(
-    authService,
-    options.cookies,
-    SystemPermission.UserList,
-    'user_management',
-  );
-  const requireVerifiedUserAdmin = requireStrongVerifiedPermission(
-    authService,
-    options.cookies,
-    SystemPermission.UserAdmin,
-    'user_management',
-  );
+  const profileOptionsController = new UserProfileOptionsController(userService);
+  const requireUsersAuthenticated = requireAuthenticated(authService, options.cookies, options.apiKeyService);
+  const requireUsersSession = requireCookieAuthenticated(authService, options.cookies);
+  const currentUserHandlers = (handler: Middleware, optionsOverride: { rateLimited?: boolean } = {}) =>
+    options.rateLimit && optionsOverride.rateLimited
+      ? [requireUsersAuthenticated, options.rateLimit, handler]
+      : [requireUsersAuthenticated, handler];
+  const currentUserSessionHandlers = (handler: Middleware, optionsOverride: { rateLimited?: boolean } = {}) =>
+    options.rateLimit && optionsOverride.rateLimited
+      ? [requireUsersSession, options.rateLimit, handler]
+      : [requireUsersSession, handler];
 
   return {
     name: 'users',
@@ -47,93 +45,83 @@ export function createUsersModule(
     routes: [
       {
         method: 'get',
-        path: '/',
-        handlers: [...requireVerifiedUserList, controller.list],
-      },
-      {
-        method: 'get',
-        path: '/:id/details',
-        handlers: [...requireVerifiedUserAdmin, controller.details],
+        path: '/me',
+        handlers: currentUserHandlers(currentUserController.me),
       },
       {
         method: 'patch',
-        path: '/:id/mfa',
-        handlers: [...requireVerifiedUserAdmin, controller.updateMfa],
+        path: '/me',
+        handlers: currentUserHandlers(currentUserController.updateMe, { rateLimited: true }),
       },
       {
         method: 'post',
-        path: '/:id/totp/disable',
-        handlers: [...requireVerifiedUserAdmin, controller.disableTotp],
+        path: '/me/email-verification',
+        handlers: currentUserSessionHandlers(currentUserController.sendEmailVerification, { rateLimited: true }),
+      },
+      {
+        method: 'post',
+        path: '/me/email-verification/confirm',
+        handlers: currentUserSessionHandlers(currentUserController.verifyEmail, { rateLimited: true }),
+      },
+      {
+        method: 'post',
+        path: '/me/phone-verification',
+        handlers: currentUserSessionHandlers(currentUserController.sendPhoneVerification, { rateLimited: true }),
+      },
+      {
+        method: 'post',
+        path: '/me/phone-verification/confirm',
+        handlers: currentUserSessionHandlers(currentUserController.verifyPhone, { rateLimited: true }),
+      },
+      {
+        method: 'post',
+        path: '/me/avatar',
+        handlers: currentUserHandlers(currentUserController.uploadAvatar, { rateLimited: true }),
       },
       {
         method: 'delete',
-        path: '/:id/passkeys/:passkeyId',
-        handlers: [...requireVerifiedUserAdmin, controller.deletePasskey],
+        path: '/me/avatar',
+        handlers: currentUserHandlers(currentUserController.deleteAvatar, { rateLimited: true }),
+      },
+      {
+        method: 'post',
+        path: '/me/profile-banner',
+        handlers: currentUserHandlers(currentUserController.uploadProfileBanner, { rateLimited: true }),
+      },
+      {
+        method: 'delete',
+        path: '/me/profile-banner',
+        handlers: currentUserHandlers(currentUserController.deleteProfileBanner, { rateLimited: true }),
+      },
+      {
+        method: 'post',
+        path: '/me/profile-background',
+        handlers: currentUserHandlers(currentUserController.uploadProfileBackground, { rateLimited: true }),
+      },
+      {
+        method: 'delete',
+        path: '/me/profile-background',
+        handlers: currentUserHandlers(currentUserController.deleteProfileBackground, { rateLimited: true }),
       },
       {
         method: 'get',
-        path: '/:id/devices',
-        handlers: [...requireVerifiedUserAdmin, controller.devices],
-      },
-      {
-        method: 'delete',
-        path: '/:id/devices',
-        handlers: [...requireVerifiedUserAdmin, controller.revokeDevices],
-      },
-      {
-        method: 'delete',
-        path: '/:id/devices/:sessionId',
-        handlers: [...requireVerifiedUserAdmin, controller.revokeDevice],
+        path: '/profile-options/genders',
+        handlers: [requireUsersAuthenticated, profileOptionsController.genders],
       },
       {
         method: 'get',
-        path: '/:id/sso-identities',
-        handlers: [...requireVerifiedUserAdmin, controller.ssoIdentities],
+        path: '/profile-options/locations/countries',
+        handlers: [profileOptionsController.locationCountries],
       },
       {
-        method: 'delete',
-        path: '/:id/sso-identities/:providerId',
-        handlers: [...requireVerifiedUserAdmin, controller.deleteSsoIdentity],
+        method: 'get',
+        path: '/profile-options/locations/regions',
+        handlers: [profileOptionsController.locationRegions],
       },
       {
-        method: 'post',
-        path: '/:id/avatar',
-        handlers: [...requireVerifiedUserAdmin, controller.avatar],
-      },
-      {
-        method: 'delete',
-        path: '/:id/avatar',
-        handlers: [...requireVerifiedUserAdmin, controller.deleteAvatar],
-      },
-      {
-        method: 'post',
-        path: '/:id/profile-banner',
-        handlers: [...requireVerifiedUserAdmin, controller.profileBanner],
-      },
-      {
-        method: 'delete',
-        path: '/:id/profile-banner',
-        handlers: [...requireVerifiedUserAdmin, controller.deleteProfileBanner],
-      },
-      {
-        method: 'post',
-        path: '/:id/profile-background',
-        handlers: [...requireVerifiedUserAdmin, controller.profileBackground],
-      },
-      {
-        method: 'delete',
-        path: '/:id/profile-background',
-        handlers: [...requireVerifiedUserAdmin, controller.deleteProfileBackground],
-      },
-      {
-        method: 'put',
-        path: '/:id',
-        handlers: [...requireVerifiedUserAdmin, controller.update],
-      },
-      {
-        method: 'put',
-        path: '/:id/roles',
-        handlers: [...requireVerifiedUserAdmin, controller.updateRoles],
+        method: 'get',
+        path: '/profile-options/locations/cities',
+        handlers: [profileOptionsController.locationCities],
       },
     ],
   };

@@ -11,7 +11,7 @@ SETUP_LOCKED = true
 
 # Runtime mode.
 # Options: development, test, production.
-# Production enables stricter validation for secrets, CORS, cookies, and database sync.
+# Production enables stricter validation for secrets, CORS, and cookies.
 NODE_ENV = "development"
 
 # HTTP server bind host.
@@ -82,13 +82,6 @@ DATABASE_POOL_ACQUIRE_MS = "30000"
 # Maximum idle time before a pooled database connection is released, in milliseconds.
 DATABASE_POOL_IDLE_MS = "10000"
 
-# Sequelize model sync behavior at startup.
-# Options: off, alter, force.
-# off uses migrations and is required in production.
-# alter is intended only for local prototype workflows.
-# force drops and recreates synced tables and deletes data.
-DATABASE_SYNC = "off"
-
 # Cache
 
 # Cache backend for cross-request transient state.
@@ -115,7 +108,7 @@ CACHE_REDIS_REQUEST_TIMEOUT_MS = "10000"
 # Use oss for multi-instance deployments.
 FILE_STORAGE_DRIVER = "local"
 
-# Maximum accepted avatar upload size in bytes.
+# Maximum accepted profile image upload size in bytes.
 # Uploads are buffered in the backend process; keep this value conservative.
 FILE_UPLOAD_MAX_BYTES = "2097152"
 

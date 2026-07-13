@@ -43,6 +43,7 @@ import {
   ItemTitle,
 } from '@/shadcn/components/ui/item';
 import { Label } from '@/shadcn/components/ui/label';
+import { AuthVerificationPurpose } from '@tilty/shared/auth';
 import { changePasswordSchema } from '@tilty/shared/validation';
 
 import { AppDialog } from '@/components/AppDialog';
@@ -162,7 +163,7 @@ const Index = () => {
   };
 
   const openSetup = async () => {
-    await startVerifiedAction('manage_totp', createTotpSetupAfterVerification);
+    await startVerifiedAction(AuthVerificationPurpose.ManageTotp, createTotpSetupAfterVerification);
   };
 
   const createTotpSetupAfterVerification = async () => {
@@ -246,7 +247,7 @@ const Index = () => {
     input: Parameters<typeof updateMfaSettings>[0],
     fallbackError: string,
   ) => {
-    await startVerifiedAction('manage_mfa', async () => {
+    await startVerifiedAction(AuthVerificationPurpose.ManageMfa, async () => {
       try {
         const nextStatus = await updateMfaSettings(input);
 
@@ -280,7 +281,7 @@ const Index = () => {
   };
 
   const handleRegisterPasskey = async () => {
-    await startVerifiedAction('manage_passkey', preparePasskeyRegistrationAfterVerification);
+    await startVerifiedAction(AuthVerificationPurpose.ManagePasskey, preparePasskeyRegistrationAfterVerification);
   };
 
   const preparePasskeyRegistrationAfterVerification = async () => {
@@ -327,7 +328,7 @@ const Index = () => {
   };
 
   const handleDeletePasskey = async (passkeyId: string) => {
-    await startVerifiedAction('manage_passkey', async () => {
+    await startVerifiedAction(AuthVerificationPurpose.ManagePasskey, async () => {
       const deleted = await action.run(
         () => deletePasskey(passkeyId),
         intl.formatMessage({ id: 'security.passkey.remove.failed' }),
@@ -428,7 +429,9 @@ const Index = () => {
 
   const handleOpenChangePassword = async () => {
     if (mfaSettings.availableMethods.length > 0) {
-      await startVerifiedAction('change_password', async () => handleChangePasswordOpenChange(true));
+      await startVerifiedAction(AuthVerificationPurpose.ChangePassword, async () =>
+        handleChangePasswordOpenChange(true),
+      );
       return;
     }
 
@@ -502,9 +505,11 @@ const Index = () => {
           actionPending={action.pending}
           mfaSettings={mfaSettings}
           onDeletePasskey={handleDeletePasskey}
-          onDisableTotp={() => startVerifiedAction('manage_totp', disableTotpAfterVerification)}
+          onDisableTotp={() => startVerifiedAction(AuthVerificationPurpose.ManageTotp, disableTotpAfterVerification)}
           onEnableTotp={openSetup}
-          onOpenRecoveryCodes={() => startVerifiedAction('manage_totp', async () => setDialogMode('regenerate'))}
+          onOpenRecoveryCodes={() =>
+            startVerifiedAction(AuthVerificationPurpose.ManageTotp, async () => setDialogMode('regenerate'))
+          }
           onRegisterPasskey={handleRegisterPasskey}
           onSsoRequirementChange={handleSsoRequirementChange}
           onTwoStepEnabledChange={handleTwoStepEnabledChange}

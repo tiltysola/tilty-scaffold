@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { AuthVerificationPurpose } from '@tilty/shared/auth';
+import { defaultFileUploadMaxBytes } from '@tilty/shared/setup';
+
 import {
   authStore,
   changePassword,
@@ -37,7 +40,7 @@ describe('auth API client', () => {
       'fetch',
       vi.fn(async () => {
         return createApiSuccessResponse({
-          fileUploadMaxBytes: 2 * 1024 * 1024,
+          fileUploadMaxBytes: defaultFileUploadMaxBytes,
           passwordRecoveryEnabled: true,
           phoneCountryCodes: ['+86'],
           profileEmailVerificationEnabled: true,
@@ -47,7 +50,7 @@ describe('auth API client', () => {
     );
 
     await expect(fetchAuthConfig()).resolves.toEqual({
-      fileUploadMaxBytes: 2 * 1024 * 1024,
+      fileUploadMaxBytes: defaultFileUploadMaxBytes,
       passwordRecoveryEnabled: true,
       phoneCountryCodes: ['+86'],
       profileEmailVerificationEnabled: true,
@@ -114,7 +117,7 @@ describe('auth API client', () => {
       expiresInSeconds: 600,
     });
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me/email-verification');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/me/email-verification');
   });
 
   it('requests profile phone verification codes', async () => {
@@ -147,7 +150,7 @@ describe('auth API client', () => {
       expiresInSeconds: 600,
     });
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me/phone-verification');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/me/phone-verification');
   });
 
   it('registers accounts and stores the returned session', async () => {
@@ -273,7 +276,7 @@ describe('auth API client', () => {
         phoneNumber: '+8613800138000',
       }),
     ).resolves.toEqual(updatedUser);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/me');
     expect(getCurrentAuthSession()).toEqual({
       ...session,
       user: updatedUser,
@@ -311,7 +314,7 @@ describe('auth API client', () => {
     ).resolves.toEqual({
       changed: true,
     });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me/password');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/password');
     expect(getCurrentAuthSession()).toEqual(session);
   });
 
@@ -321,7 +324,7 @@ describe('auth API client', () => {
     const challenge = {
       requiresVerification: true,
       verificationToken: '11111111-1111-4111-8111-111111111111',
-      purpose: 'change_password',
+      purpose: AuthVerificationPurpose.ChangePassword,
       defaultMethod: 'email',
       methods: [
         {
@@ -335,7 +338,7 @@ describe('auth API client', () => {
     const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
       expect(init?.body).toBe(
         JSON.stringify({
-          purpose: 'change_password',
+          purpose: AuthVerificationPurpose.ChangePassword,
         }),
       );
       expect(init?.method).toBe('POST');
@@ -347,7 +350,7 @@ describe('auth API client', () => {
     await seedAuthSession(session);
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createVerificationChallenge('change_password')).resolves.toEqual(challenge);
+    await expect(createVerificationChallenge(AuthVerificationPurpose.ChangePassword)).resolves.toEqual(challenge);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/verification/challenges');
   });
 
@@ -410,7 +413,7 @@ describe('auth API client', () => {
         emailVerificationCode: '123456',
       }),
     ).resolves.toEqual(updatedUser);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me/email-verification/confirm');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/me/email-verification/confirm');
     expect(getCurrentAuthSession()).toEqual({
       ...session,
       user: updatedUser,
@@ -447,7 +450,7 @@ describe('auth API client', () => {
         phoneVerificationCode: '123456',
       }),
     ).resolves.toEqual(updatedUser);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me/phone-verification/confirm');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/me/phone-verification/confirm');
     expect(getCurrentAuthSession()).toEqual({
       ...session,
       user: updatedUser,

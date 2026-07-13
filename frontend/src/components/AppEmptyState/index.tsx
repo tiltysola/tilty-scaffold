@@ -46,7 +46,7 @@ export function AppEmptyState({
           </EmptyMedia>
         ) : null}
         <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{description}</EmptyDescription>
+        <EmptyDescription className="max-w-sm">{description}</EmptyDescription>
       </EmptyHeader>
       {actions ? <EmptyContent className={actionsClassName}>{actions}</EmptyContent> : null}
     </Empty>

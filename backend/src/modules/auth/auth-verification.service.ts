@@ -634,7 +634,9 @@ export function isStrongSudoPurpose(purpose: AuthVerificationPurpose): purpose i
 
 function isSelectableSudoPurpose(purpose: AuthVerificationPurpose) {
   return (
-    purpose === AuthVerificationPurposeContract.ChangePassword || purpose === AuthVerificationPurposeContract.ManageSso
+    purpose === AuthVerificationPurposeContract.ChangePassword ||
+    purpose === AuthVerificationPurposeContract.ManageApiKey ||
+    purpose === AuthVerificationPurposeContract.ManageSso
   );
 }
 

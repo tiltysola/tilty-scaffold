@@ -1,5 +1,7 @@
 import { type Middleware } from 'koa';
 
+import { apiKeyPrefix } from '@tilty/shared/api-keys';
+
 import { AppError } from '../core/errors';
 
 export interface CsrfProtectionOptions {
@@ -7,10 +9,16 @@ export interface CsrfProtectionOptions {
 }
 
 const safeMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
+const apiKeyBearerAuthorizationPattern = new RegExp(`^Bearer\\s+${escapeRegExp(apiKeyPrefix)}_`, 'i');
 
 export function csrfProtectionMiddleware(options: CsrfProtectionOptions): Middleware {
   return async (ctx, next) => {
     if (safeMethods.has(ctx.method.toUpperCase())) {
+      await next();
+      return;
+    }
+
+    if (hasBearerAuthorization(ctx.get('authorization'))) {
       await next();
       return;
     }
@@ -23,6 +31,14 @@ export function csrfProtectionMiddleware(options: CsrfProtectionOptions): Middle
 
     await next();
   };
+}
+
+function hasBearerAuthorization(authorization: string) {
+  return apiKeyBearerAuthorizationPattern.test(authorization.trim());
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function getRequestOrigin(origin: string, referer: string) {

@@ -7,6 +7,7 @@ import {
   type RolePermissionModel,
   type UserRoleModel,
 } from '../modules/access-control/access-control.model';
+import { type ApiKeyAuditEventModel, type ApiKeyModel, initApiKeyModels } from '../modules/api-keys/api-key.model';
 import { type AuthPasskeyModel, initAuthPasskeyModel } from '../modules/auth/auth-passkey.model';
 import { type AuthSessionModel, initAuthSessionModel } from '../modules/auth/auth-session.model';
 import {
@@ -17,6 +18,8 @@ import {
 } from '../modules/users/user.model';
 
 export interface Models {
+  apiKey: typeof ApiKeyModel;
+  apiKeyAuditEvent: typeof ApiKeyAuditEventModel;
   authPasskey: typeof AuthPasskeyModel;
   authSession: typeof AuthSessionModel;
   permission: typeof PermissionModel;
@@ -32,8 +35,11 @@ export function initModels(sequelize: Sequelize): Models {
   const authPasskey = initAuthPasskeyModel(sequelize);
   const authSession = initAuthSessionModel(sequelize);
   const accessControlModels = initAccessControlModels(sequelize);
+  const apiKeyModels = initApiKeyModels(sequelize);
 
   return {
+    apiKey: apiKeyModels.apiKey,
+    apiKeyAuditEvent: apiKeyModels.apiKeyAuditEvent,
     authPasskey,
     authSession,
     permission: accessControlModels.permission,

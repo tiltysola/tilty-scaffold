@@ -7,11 +7,12 @@ import { Spinner } from '@/shadcn/components/ui/spinner';
 import { hasPermission, SystemPermission, type SystemPermissionKey } from '@tilty/shared/access-control';
 
 export type NavigationGroupId = 'admin' | 'applications' | 'profile';
-export type NavigationIcon = 'apiDocs' | 'dashboard' | 'profile' | 'security' | 'settings' | 'users';
+export type NavigationIcon = 'apiDocs' | 'apiKeys' | 'dashboard' | 'profile' | 'security' | 'settings' | 'users';
 type RouteId =
   | 'home'
   | 'dashboard'
   | 'profile'
+  | 'apiKeys'
   | 'security'
   | 'systemSettings'
   | 'users'
@@ -53,6 +54,7 @@ const RequirePermission = lazy(() => import('@/components/RequirePermission'));
 const HomePage = lazy(() => import('@/pages/Home'));
 const DashboardPage = lazy(() => import('@/pages/Dashboard'));
 const ProfilePage = lazy(() => import('@/pages/Profile'));
+const ApiKeysPage = lazy(() => import('@/pages/ApiKeys'));
 const SecurityPage = lazy(() => import('@/pages/Security'));
 const SystemSettingsPage = lazy(() => import('@/pages/SystemSettings'));
 const UsersPage = lazy(() => import('@/pages/Users'));
@@ -84,6 +86,13 @@ const pageRoutes: PageRoute[] = [
     path: '/profile',
     titleMessageId: 'route.profile',
     element: <ProfilePage />,
+    layout: 'app',
+  },
+  {
+    id: 'apiKeys',
+    path: '/api-keys',
+    titleMessageId: 'route.api.keys',
+    element: <ApiKeysPage />,
     layout: 'app',
   },
   {
@@ -180,6 +189,7 @@ const navigationItems: NavigationItem[] = [
     url: '/api/docs',
   },
   createNavigationRouteItem('profile', 'profile', 'profile'),
+  createNavigationRouteItem('apiKeys', 'profile', 'apiKeys'),
   createNavigationRouteItem('security', 'profile', 'security'),
   createNavigationRouteItem('users', 'admin', 'users', SystemPermission.UserList),
   createNavigationRouteItem('systemSettings', 'admin', 'settings', SystemPermission.Root),

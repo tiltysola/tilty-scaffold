@@ -12,6 +12,8 @@ import { getPhoneCountryCode, getPhoneLocalNumber } from '@/lib/phone';
 import { fetchUsers, type RoleSummary, updateUser, type UserListItem, type UserListPagination } from '@/lib/users';
 import { Button } from '@/shadcn/components/ui/button';
 import { hasPermission, SystemPermission } from '@tilty/shared/access-control';
+import { AuthVerificationPurpose } from '@tilty/shared/auth';
+import { defaultFileUploadMaxBytes } from '@tilty/shared/setup';
 
 import { AppEmptyState } from '@/components/AppEmptyState';
 import { IdentityVerificationDialog } from '@/components/IdentityVerification';
@@ -28,8 +30,6 @@ import {
   userPageSize,
 } from './utils';
 
-const defaultProfileImageMaxBytes = 2 * 1024 * 1024;
-
 const Index = () => {
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [roles, setRoles] = useState<RoleSummary[]>([]);
@@ -39,7 +39,7 @@ const Index = () => {
   const [editingForm, setEditingForm] = useState<EditUserForm>(defaultEditUserForm);
   const [editingRoleKeys, setEditingRoleKeys] = useState<string[]>([]);
   const [phoneCountryCodes, setPhoneCountryCodes] = useState<PhoneCountryCode[]>([]);
-  const [profileImageMaxBytes, setProfileImageMaxBytes] = useState(defaultProfileImageMaxBytes);
+  const [profileImageMaxBytes, setProfileImageMaxBytes] = useState(defaultFileUploadMaxBytes);
   const [profileEmailVerificationEnabled, setProfileEmailVerificationEnabled] = useState(false);
   const [authConfigLoaded, setAuthConfigLoaded] = useState(false);
   const [accessVerified, setAccessVerified] = useState(false);
@@ -71,7 +71,7 @@ const Index = () => {
     requestChallenge,
     requestPending,
     submitPending,
-  } = useVerificationGate({ purpose: 'user_management' });
+  } = useVerificationGate({ purpose: AuthVerificationPurpose.UserManagement });
   const displayTotalPages = Math.max(pagination.totalPages, 1);
   const phoneBindingEnabled = phoneCountryCodes.length > 0;
 

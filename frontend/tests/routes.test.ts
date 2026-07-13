@@ -10,6 +10,7 @@ describe('frontend routes', () => {
     expect(getPageTitleMessageId(routePath('home'))).toBe('route.home');
     expect(getPageTitleMessageId(routePath('dashboard'))).toBe('route.dashboard');
     expect(getPageTitleMessageId(routePath('profile'))).toBe('route.profile');
+    expect(getPageTitleMessageId(routePath('apiKeys'))).toBe('route.api.keys');
     expect(getPageTitleMessageId(routePath('security'))).toBe('route.security');
     expect(getPageTitleMessageId(routePath('ssoCallback'))).toBe('route.sso.callback');
     expect(getPageTitleMessageId(routePath('systemSettings'))).toBe('route.system.settings');
@@ -24,12 +25,14 @@ describe('frontend routes', () => {
       routePath('dashboard'),
       '/api/docs',
       routePath('profile'),
+      routePath('apiKeys'),
       routePath('security'),
     ]);
     expect(getMainNavigationItems([SystemPermission.UserList]).map((route) => route.url)).toEqual([
       routePath('dashboard'),
       '/api/docs',
       routePath('profile'),
+      routePath('apiKeys'),
       routePath('security'),
       routePath('users'),
     ]);
@@ -37,6 +40,7 @@ describe('frontend routes', () => {
       routePath('dashboard'),
       '/api/docs',
       routePath('profile'),
+      routePath('apiKeys'),
       routePath('security'),
       routePath('users'),
       routePath('systemSettings'),
@@ -56,7 +60,7 @@ describe('frontend routes', () => {
       },
       {
         labelMessageId: 'nav.group.profile',
-        urls: [routePath('profile'), routePath('security')],
+        urls: [routePath('profile'), routePath('apiKeys'), routePath('security')],
       },
     ]);
 
@@ -72,7 +76,7 @@ describe('frontend routes', () => {
       },
       {
         labelMessageId: 'nav.group.profile',
-        urls: [routePath('profile'), routePath('security')],
+        urls: [routePath('profile'), routePath('apiKeys'), routePath('security')],
       },
       {
         labelMessageId: 'nav.group.admin',
@@ -92,7 +96,7 @@ describe('frontend routes', () => {
       },
       {
         labelMessageId: 'nav.group.profile',
-        urls: [routePath('profile'), routePath('security')],
+        urls: [routePath('profile'), routePath('apiKeys'), routePath('security')],
       },
       {
         labelMessageId: 'nav.group.admin',

@@ -8,39 +8,39 @@ import { ItemSeparator } from '@/shadcn/components/ui/item';
 import { ImagePreviewMedia, ImagePreviewTrigger } from '@/components/ImagePreviewDialog';
 import { ProfileItem, ProfileSection } from '@/components/ProfileCardList';
 
-export type ProfilePreviewTarget = 'avatar' | 'profileBackground' | 'profileBanner' | null;
+export type ProfilePreviewTarget = 'avatar' | 'profileBanner' | 'profileBackground' | null;
 
 interface ProfilePersonalizationSectionProps {
   avatarBusy: boolean;
   avatarUrl?: string;
-  backgroundBusy: boolean;
   fallback: string;
   imageUploadEnabled: boolean;
   onChangeAvatar: () => void;
-  onChangeBackground: () => void;
   onChangeBanner: () => void;
+  onChangeBackground: () => void;
   onPreviewTargetChange: (target: ProfilePreviewTarget) => void;
   previewTarget: ProfilePreviewTarget;
-  profileBackgroundUrl?: string;
-  profileBannerUrl?: string;
   profileBannerBusy: boolean;
+  profileBannerUrl?: string;
+  profileBackgroundBusy: boolean;
+  profileBackgroundUrl?: string;
   userDisplayName: string;
 }
 
 export function ProfilePersonalizationSection({
   avatarBusy,
   avatarUrl,
-  backgroundBusy,
   fallback,
   imageUploadEnabled,
   onChangeAvatar,
-  onChangeBackground,
   onChangeBanner,
+  onChangeBackground,
   onPreviewTargetChange,
   previewTarget,
-  profileBackgroundUrl,
   profileBannerBusy,
   profileBannerUrl,
+  profileBackgroundBusy,
+  profileBackgroundUrl,
   userDisplayName,
 }: ProfilePersonalizationSectionProps) {
   const intl = useIntl();
@@ -106,7 +106,7 @@ export function ProfilePersonalizationSection({
       <ItemSeparator className="!my-0" />
 
       <ProfileItem
-        actionDisabled={backgroundBusy}
+        actionDisabled={profileBackgroundBusy}
         actionIcon={<ImageUpIcon />}
         actionLabel={imageUploadEnabled ? intl.formatMessage({ id: 'common.change' }) : undefined}
         description={intl.formatMessage({ id: 'profile.personalization.background.description' })}

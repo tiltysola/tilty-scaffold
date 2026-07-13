@@ -16,6 +16,7 @@ import {
   AuthVerificationMethod,
   type AuthVerificationMethodValue,
   type AuthVerificationPurposeValue,
+  type ProfileImageFieldName,
 } from '@tilty/shared/auth';
 import { isSafeRelativePath } from '@tilty/shared/paths';
 import { type SetupSmsPhoneCountryCodeValue, type SetupSsoProtocolValue } from '@tilty/shared/setup';
@@ -64,6 +65,10 @@ export interface AuthSnapshot {
 }
 
 export type PhoneCountryCode = SetupSmsPhoneCountryCodeValue;
+type CurrentUserImagePath =
+  | '/api/users/me/avatar'
+  | '/api/users/me/profile-banner'
+  | '/api/users/me/profile-background';
 
 export interface AuthPublicConfig {
   fileUploadMaxBytes: number;
@@ -360,7 +365,7 @@ export function resetPassword(input: ResetPasswordInput) {
 }
 
 export function changePassword(input: ChangePasswordInput) {
-  return authenticatedApiRequest<{ changed: true }>('/api/auth/me/password', {
+  return authenticatedApiRequest<{ changed: true }>('/api/auth/password', {
     body: input,
     method: 'PATCH',
   });
@@ -387,7 +392,7 @@ export async function authenticatedApiRequest<T>(path: string, options?: ApiRequ
 }
 
 export function fetchCurrentUser() {
-  return authenticatedApiRequest<AuthUser>('/api/auth/me', {
+  return authenticatedApiRequest<AuthUser>('/api/users/me', {
     method: 'GET',
   });
 }
@@ -401,43 +406,43 @@ export async function refreshCurrentUser() {
 }
 
 export function updateCurrentUser(input: UpdateCurrentUserInput) {
-  return authenticatedUserRequest('/api/auth/me', {
+  return authenticatedUserRequest('/api/users/me', {
     body: input,
     method: 'PATCH',
   });
 }
 
 export function uploadAvatar(file: File) {
-  return uploadCurrentUserImage('/api/auth/avatar', 'avatar', file);
+  return uploadCurrentUserImage('/api/users/me/avatar', 'avatar', file);
 }
 
 export function deleteAvatar() {
-  return authenticatedUserRequest('/api/auth/avatar', {
+  return authenticatedUserRequest('/api/users/me/avatar', {
     method: 'DELETE',
   });
 }
 
 export function uploadProfileBanner(file: File) {
-  return uploadCurrentUserImage('/api/auth/profile-banner', 'profileBanner', file);
+  return uploadCurrentUserImage('/api/users/me/profile-banner', 'profileBanner', file);
 }
 
 export function deleteProfileBanner() {
-  return authenticatedUserRequest('/api/auth/profile-banner', {
+  return authenticatedUserRequest('/api/users/me/profile-banner', {
     method: 'DELETE',
   });
 }
 
 export function uploadProfileBackground(file: File) {
-  return uploadCurrentUserImage('/api/auth/profile-background', 'profileBackground', file);
+  return uploadCurrentUserImage('/api/users/me/profile-background', 'profileBackground', file);
 }
 
 export function deleteProfileBackground() {
-  return authenticatedUserRequest('/api/auth/profile-background', {
+  return authenticatedUserRequest('/api/users/me/profile-background', {
     method: 'DELETE',
   });
 }
 
-function uploadCurrentUserImage(path: string, fieldName: string, file: File) {
+function uploadCurrentUserImage(path: CurrentUserImagePath, fieldName: ProfileImageFieldName, file: File) {
   const form = new FormData();
 
   form.append(fieldName, file);
@@ -449,27 +454,27 @@ function uploadCurrentUserImage(path: string, fieldName: string, file: File) {
 }
 
 export function sendProfileEmailVerification() {
-  return authenticatedApiRequest<VerificationCodeSendResult>('/api/auth/me/email-verification', {
+  return authenticatedApiRequest<VerificationCodeSendResult>('/api/users/me/email-verification', {
     method: 'POST',
   });
 }
 
 export function verifyProfileEmail(input: VerifyProfileEmailInput) {
-  return authenticatedUserRequest('/api/auth/me/email-verification/confirm', {
+  return authenticatedUserRequest('/api/users/me/email-verification/confirm', {
     body: input,
     method: 'POST',
   });
 }
 
 export function sendProfilePhoneVerification(input: SendProfilePhoneVerificationInput) {
-  return authenticatedApiRequest<VerificationCodeSendResult>('/api/auth/me/phone-verification', {
+  return authenticatedApiRequest<VerificationCodeSendResult>('/api/users/me/phone-verification', {
     body: input,
     method: 'POST',
   });
 }
 
 export function verifyProfilePhone(input: VerifyProfilePhoneInput) {
-  return authenticatedUserRequest('/api/auth/me/phone-verification/confirm', {
+  return authenticatedUserRequest('/api/users/me/phone-verification/confirm', {
     body: input,
     method: 'POST',
   });
@@ -904,7 +909,7 @@ async function restoreAuthSessionOnce() {
 
   if (metadata && !shouldRefreshAccessToken(metadata)) {
     try {
-      const user = await apiRequest<AuthUser>('/api/auth/me', {
+      const user = await apiRequest<AuthUser>('/api/users/me', {
         method: 'GET',
       });
       const session = {

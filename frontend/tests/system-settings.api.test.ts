@@ -10,7 +10,7 @@ describe('system settings API client', () => {
 
   it('calls system settings endpoint', async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
-      expect(String(input)).toBe('/api/system-settings/');
+      expect(String(input)).toBe('/api/admin/system-settings/');
 
       return createApiSuccessResponse({
         environment: { NODE_ENV: 'development' },
@@ -47,7 +47,7 @@ describe('system settings API client', () => {
 
     const [url, init] = fetchMock.mock.calls[0]!;
 
-    expect(String(url)).toBe('/api/system-settings/');
+    expect(String(url)).toBe('/api/admin/system-settings/');
     expect(init?.method).toBe('PUT');
     expect(init?.body).toBe(JSON.stringify({ environment }));
   });

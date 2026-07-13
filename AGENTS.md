@@ -21,7 +21,10 @@ documentation, not in this file.
 - Prefer small, self-contained changes; split refactors from behavior changes
   when practical.
 - Preserve user changes unless explicitly instructed otherwise.
-- Ask for explicit user confirmation before running any Git command.
+- Read-only Git commands may be run without confirmation.
+- Ask for explicit user confirmation before running any Git command that
+  modifies repository state, including changes to the worktree, index, commits,
+  tags, branches, refs, remotes, or stashes.
 - Before modifying code, review the existing implementation and pending changes
   to avoid compounding incorrect or low-quality code.
 - Before committing, review the existing implementation and pending changes to

@@ -10,8 +10,8 @@ import { createSequelize } from '../src/infra/database';
 import { createMigrator } from '../src/infra/migrator';
 import { errorMiddleware } from '../src/middleware/error';
 import { localeMiddleware } from '../src/middleware/locale';
+import { createAdminModule } from '../src/modules/admin';
 import { defaultAuthCookieConfig } from '../src/modules/auth/auth.http';
-import { createUsersModule } from '../src/modules/users';
 import {
   registerRootWithUserManagementAccess,
   registerTestUser,
@@ -53,7 +53,8 @@ describe('access control', () => {
     await createMigrator(sequelize).up();
     await services.accessControl.syncSystemAccessControl();
 
-    routes = createUsersModule(services.user, services.accessControl, services.auth, {
+    routes = createAdminModule(services.user, services.accessControl, services.auth, {
+      apiKeyService: services.apiKey,
       cookies: defaultAuthCookieConfig,
       ssoService: services.sso,
     }).routes;
@@ -80,7 +81,7 @@ describe('access control', () => {
   it('enforces user list permissions on the server', async () => {
     const rootSession = await registerRootWithUserManagementAccess(services, 'Root User', 'root-list@example.com');
     const regularSession = await registerTestUser(services.auth, 'Regular User', 'regular-list@example.com');
-    const listRoute = getTestRoute(routes, 'get', '/');
+    const listRoute = getTestRoute(routes, 'get', '/users/');
 
     const forbiddenContext = await runMiddlewares(
       [errorMiddleware(), ...listRoute.handlers],
@@ -146,8 +147,8 @@ describe('access control', () => {
     );
     const regularUser = await services.user.findByUsername('regular_user');
     const rootUser = await services.user.findByUsername('root_user');
-    const updateRolesRoute = getTestRoute(routes, 'put', '/:id/roles');
-    const listRoute = getTestRoute(routes, 'get', '/');
+    const updateRolesRoute = getTestRoute(routes, 'put', '/users/:id/roles');
+    const listRoute = getTestRoute(routes, 'get', '/users/');
 
     expect(regularUser).not.toBeNull();
     expect(rootUser).not.toBeNull();

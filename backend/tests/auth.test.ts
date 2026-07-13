@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AuthVerificationPurpose } from '@tilty/shared/auth';
+import { defaultFileUploadMaxBytes } from '@tilty/shared/setup';
+
 import { initModels } from '../src/composition/models';
 import { createServices } from '../src/composition/services';
 import { type RouteDefinition } from '../src/core/module';
@@ -19,6 +22,7 @@ import {
 import { type SmsSender, SmsVerificationService } from '../src/modules/auth/auth.sms';
 import { TotpService } from '../src/modules/auth/auth.totp';
 import { AuthVerificationService } from '../src/modules/auth/auth-verification.service';
+import { createUsersModule } from '../src/modules/users';
 import { UserService } from '../src/modules/users/user.service';
 import { createTestContext, getTestRoute, getTestRouteHandler, runMiddleware, runMiddlewares } from './support/http';
 import { createTotpCode } from './support/totp';
@@ -116,6 +120,7 @@ describe('auth API', () => {
   let routes: RouteDefinition[];
   let sequelize: ReturnType<typeof createSequelize>;
   let services: ReturnType<typeof createServices>;
+  let userRoutes: RouteDefinition[];
   let fileStorage: CapturingFileStorage;
 
   beforeEach(async () => {
@@ -131,6 +136,7 @@ describe('auth API', () => {
       cookies: defaultAuthCookieConfig,
       ssoService: services.sso,
     }).routes;
+    userRoutes = createCurrentUserRoutes();
   });
 
   afterEach(async () => {
@@ -164,6 +170,25 @@ describe('auth API', () => {
       ),
       smsVerification,
     );
+  }
+
+  function createCurrentUserRoutes(
+    authService: AuthService = services.auth,
+    rateLimit?: RouteDefinition['handlers'][number],
+  ) {
+    return createUsersModule(services.user, authService, {
+      cookies: defaultAuthCookieConfig,
+      ...(rateLimit ? { rateLimit } : {}),
+    }).routes;
+  }
+
+  function runRoute(
+    routeSource: RouteDefinition[],
+    method: RouteDefinition['method'],
+    path: string,
+    context: Parameters<typeof runMiddlewares>[1],
+  ) {
+    return runMiddlewares(getTestRoute(routeSource, method, path).handlers, context);
   }
 
   it('registers, logs in, and returns the current user', async () => {
@@ -214,8 +239,10 @@ describe('auth API', () => {
     expect(loginContext.responseHeaders['cache-control']).toBe('no-store');
     expect(authCookie).toEqual(expect.any(String));
 
-    const meContext = await runMiddleware(
-      getTestRouteHandler(routes, 'get', '/me'),
+    const meContext = await runRoute(
+      userRoutes,
+      'get',
+      '/me',
       createTestContext(undefined, {}, undefined, {
         cookies: {
           tilty_scaffold_access_token: authCookie,
@@ -587,8 +614,10 @@ describe('auth API', () => {
       password: 'password123',
       confirmPassword: 'password123',
     });
-    const context = await runMiddleware(
-      getTestRouteHandler(routes, 'patch', '/me'),
+    const context = await runRoute(
+      userRoutes,
+      'patch',
+      '/me',
       createTestContext(
         {
           displayName: 'Updated Profile User',
@@ -643,7 +672,7 @@ describe('auth API', () => {
       password: credentials.password,
     });
     const context = await runMiddleware(
-      getTestRouteHandler(routes, 'patch', '/me/password'),
+      getTestRouteHandler(routes, 'patch', '/password'),
       createTestContext(
         {
           currentPassword: 'password123',
@@ -729,10 +758,11 @@ describe('auth API', () => {
       cookies: defaultAuthCookieConfig,
       ssoService: services.sso,
     }).routes;
+    userRoutes = createCurrentUserRoutes(authService);
 
     await expect(
       runMiddleware(
-        getTestRouteHandler(routes, 'patch', '/me/password'),
+        getTestRouteHandler(routes, 'patch', '/password'),
         createTestContext(
           {
             currentPassword: 'password123',
@@ -757,7 +787,7 @@ describe('auth API', () => {
       getTestRouteHandler(routes, 'post', '/verification/challenges'),
       createTestContext(
         {
-          purpose: 'change_password',
+          purpose: AuthVerificationPurpose.ChangePassword,
         },
         {},
         undefined,
@@ -773,7 +803,7 @@ describe('auth API', () => {
     expect(challengeBody.data).toMatchObject({
       requiresVerification: true,
       defaultMethod: 'email',
-      purpose: 'change_password',
+      purpose: AuthVerificationPurpose.ChangePassword,
     });
     expect(challengeBody.data.methods.map((method) => method.method)).toEqual(['email']);
 
@@ -797,7 +827,7 @@ describe('auth API', () => {
     );
 
     const changeContext = await runMiddleware(
-      getTestRouteHandler(routes, 'patch', '/me/password'),
+      getTestRouteHandler(routes, 'patch', '/password'),
       createTestContext(
         {
           currentPassword: 'password123',
@@ -844,7 +874,7 @@ describe('auth API', () => {
 
     await expect(
       runMiddleware(
-        getTestRouteHandler(routes, 'patch', '/me/password'),
+        getTestRouteHandler(routes, 'patch', '/password'),
         createTestContext(
           {
             currentPassword: 'wrongpassword',
@@ -887,7 +917,7 @@ describe('auth API', () => {
 
     await expect(
       runMiddleware(
-        getTestRouteHandler(routes, 'patch', '/me/password'),
+        getTestRouteHandler(routes, 'patch', '/password'),
         createTestContext(
           {
             currentPassword: 'password123',
@@ -917,8 +947,10 @@ describe('auth API', () => {
       confirmPassword: 'password123',
     });
     await expect(
-      runMiddleware(
-        getTestRouteHandler(routes, 'patch', '/me'),
+      runRoute(
+        userRoutes,
+        'patch',
+        '/me',
         createTestContext(
           {
             displayName: 'Phone User',
@@ -965,91 +997,77 @@ describe('auth API', () => {
     const rateLimit = vi.fn(async (_ctx, next) => {
       await next();
     });
-    const avatarRoute = createAuthModule(services.auth, {
-      cookies: defaultAuthCookieConfig,
-      rateLimit,
-      ssoService: services.sso,
-    }).routes.find((route) => route.method === 'post' && route.path === '/avatar');
+    const avatarRoute = createCurrentUserRoutes(services.auth, rateLimit).find(
+      (route) => route.method === 'post' && route.path === '/me/avatar',
+    );
 
-    expect(avatarRoute?.handlers[0]).toBe(rateLimit);
+    expect(avatarRoute?.handlers[1]).toBe(rateLimit);
   });
 
   it('applies rate limiting middleware to avatar deletion', () => {
     const rateLimit = vi.fn(async (_ctx, next) => {
       await next();
     });
-    const avatarRoute = createAuthModule(services.auth, {
-      cookies: defaultAuthCookieConfig,
-      rateLimit,
-      ssoService: services.sso,
-    }).routes.find((route) => route.method === 'delete' && route.path === '/avatar');
+    const avatarRoute = createCurrentUserRoutes(services.auth, rateLimit).find(
+      (route) => route.method === 'delete' && route.path === '/me/avatar',
+    );
 
-    expect(avatarRoute?.handlers[0]).toBe(rateLimit);
+    expect(avatarRoute?.handlers[1]).toBe(rateLimit);
   });
 
   it('applies rate limiting middleware to profile banner uploads', () => {
     const rateLimit = vi.fn(async (_ctx, next) => {
       await next();
     });
-    const profileBannerRoute = createAuthModule(services.auth, {
-      cookies: defaultAuthCookieConfig,
-      rateLimit,
-      ssoService: services.sso,
-    }).routes.find((route) => route.method === 'post' && route.path === '/profile-banner');
+    const profileBannerRoute = createCurrentUserRoutes(services.auth, rateLimit).find(
+      (route) => route.method === 'post' && route.path === '/me/profile-banner',
+    );
 
-    expect(profileBannerRoute?.handlers[0]).toBe(rateLimit);
+    expect(profileBannerRoute?.handlers[1]).toBe(rateLimit);
   });
 
   it('applies rate limiting middleware to profile banner deletion', () => {
     const rateLimit = vi.fn(async (_ctx, next) => {
       await next();
     });
-    const profileBannerRoute = createAuthModule(services.auth, {
-      cookies: defaultAuthCookieConfig,
-      rateLimit,
-      ssoService: services.sso,
-    }).routes.find((route) => route.method === 'delete' && route.path === '/profile-banner');
+    const profileBannerRoute = createCurrentUserRoutes(services.auth, rateLimit).find(
+      (route) => route.method === 'delete' && route.path === '/me/profile-banner',
+    );
 
-    expect(profileBannerRoute?.handlers[0]).toBe(rateLimit);
+    expect(profileBannerRoute?.handlers[1]).toBe(rateLimit);
   });
 
   it('applies rate limiting middleware to profile background uploads', () => {
     const rateLimit = vi.fn(async (_ctx, next) => {
       await next();
     });
-    const profileBackgroundRoute = createAuthModule(services.auth, {
-      cookies: defaultAuthCookieConfig,
-      rateLimit,
-      ssoService: services.sso,
-    }).routes.find((route) => route.method === 'post' && route.path === '/profile-background');
+    const profileBackgroundRoute = createCurrentUserRoutes(services.auth, rateLimit).find(
+      (route) => route.method === 'post' && route.path === '/me/profile-background',
+    );
 
-    expect(profileBackgroundRoute?.handlers[0]).toBe(rateLimit);
+    expect(profileBackgroundRoute?.handlers[1]).toBe(rateLimit);
   });
 
   it('applies rate limiting middleware to profile background deletion', () => {
     const rateLimit = vi.fn(async (_ctx, next) => {
       await next();
     });
-    const profileBackgroundRoute = createAuthModule(services.auth, {
-      cookies: defaultAuthCookieConfig,
-      rateLimit,
-      ssoService: services.sso,
-    }).routes.find((route) => route.method === 'delete' && route.path === '/profile-background');
+    const profileBackgroundRoute = createCurrentUserRoutes(services.auth, rateLimit).find(
+      (route) => route.method === 'delete' && route.path === '/me/profile-background',
+    );
 
-    expect(profileBackgroundRoute?.handlers[0]).toBe(rateLimit);
+    expect(profileBackgroundRoute?.handlers[1]).toBe(rateLimit);
   });
 
   it('applies rate limiting middleware to profile updates', () => {
     const rateLimit = vi.fn(async (_ctx, next) => {
       await next();
     });
-    const profileRoute = createAuthModule(services.auth, {
-      cookies: defaultAuthCookieConfig,
-      rateLimit,
-      ssoService: services.sso,
-    }).routes.find((route) => route.method === 'patch' && route.path === '/me');
+    const profileRoute = createCurrentUserRoutes(services.auth, rateLimit).find(
+      (route) => route.method === 'patch' && route.path === '/me',
+    );
 
-    expect(profileRoute?.handlers[0]).toBe(rateLimit);
+    expect(profileRoute?.handlers[1]).toBe(rateLimit);
   });
 
   it('applies rate limiting middleware to password changes', () => {
@@ -1060,7 +1078,7 @@ describe('auth API', () => {
       cookies: defaultAuthCookieConfig,
       rateLimit,
       ssoService: services.sso,
-    }).routes.find((route) => route.method === 'patch' && route.path === '/me/password');
+    }).routes.find((route) => route.method === 'patch' && route.path === '/password');
 
     expect(passwordRoute?.handlers[0]).toBe(rateLimit);
   });
@@ -1137,7 +1155,7 @@ describe('auth API', () => {
       code: 200,
       error: null,
       data: {
-        fileUploadMaxBytes: 2 * 1024 * 1024,
+        fileUploadMaxBytes: defaultFileUploadMaxBytes,
         passwordRecoveryEnabled: false,
         phoneCountryCodes: [],
         profileEmailVerificationEnabled: false,
@@ -1176,7 +1194,7 @@ describe('auth API', () => {
 
   it('returns the configured upload limit in auth public configuration', async () => {
     routes = createAuthModule(services.auth, {
-      avatarUploadMaxBytes: 1_048_576,
+      fileUploadMaxBytes: 1_048_576,
       cookies: defaultAuthCookieConfig,
       ssoService: services.sso,
     }).routes;
@@ -1242,7 +1260,7 @@ describe('auth API', () => {
       code: 200,
       error: null,
       data: {
-        fileUploadMaxBytes: 2 * 1024 * 1024,
+        fileUploadMaxBytes: defaultFileUploadMaxBytes,
         passwordRecoveryEnabled: true,
         phoneCountryCodes: [],
         profileEmailVerificationEnabled: true,
@@ -1318,12 +1336,13 @@ describe('auth API', () => {
       cookies: defaultAuthCookieConfig,
       ssoService: services.sso,
     }).routes;
+    userRoutes = createCurrentUserRoutes(authService);
 
     const challengeContext = await runMiddleware(
       getTestRouteHandler(routes, 'post', '/verification/challenges'),
       createTestContext(
         {
-          purpose: 'update_contact',
+          purpose: AuthVerificationPurpose.UpdateContact,
         },
         {},
         undefined,
@@ -1339,7 +1358,7 @@ describe('auth API', () => {
     expect(challengeBody.data).toMatchObject({
       requiresVerification: true,
       defaultMethod: 'password',
-      purpose: 'update_contact',
+      purpose: AuthVerificationPurpose.UpdateContact,
     });
 
     await runMiddleware(
@@ -1351,8 +1370,10 @@ describe('auth API', () => {
       }),
     );
 
-    const sendContext = await runMiddleware(
-      getTestRouteHandler(routes, 'post', '/me/email-verification'),
+    const sendContext = await runRoute(
+      userRoutes,
+      'post',
+      '/me/email-verification',
       createTestContext(undefined, {}, undefined, {
         cookies: {
           tilty_scaffold_access_token: session.accessToken,
@@ -1370,8 +1391,10 @@ describe('auth API', () => {
     });
     expect(sentCode).toMatch(/^\d{6}$/);
 
-    const verifyContext = await runMiddleware(
-      getTestRouteHandler(routes, 'post', '/me/email-verification/confirm'),
+    const verifyContext = await runRoute(
+      userRoutes,
+      'post',
+      '/me/email-verification/confirm',
       createTestContext(
         {
           emailVerificationCode: sentCode,
@@ -1429,12 +1452,13 @@ describe('auth API', () => {
       cookies: defaultAuthCookieConfig,
       ssoService: services.sso,
     }).routes;
+    userRoutes = createCurrentUserRoutes(authService);
 
     const challengeContext = await runMiddleware(
       getTestRouteHandler(routes, 'post', '/verification/challenges'),
       createTestContext(
         {
-          purpose: 'update_contact',
+          purpose: AuthVerificationPurpose.UpdateContact,
         },
         {},
         undefined,
@@ -1456,8 +1480,10 @@ describe('auth API', () => {
       }),
     );
 
-    const sendContext = await runMiddleware(
-      getTestRouteHandler(routes, 'post', '/me/phone-verification'),
+    const sendContext = await runRoute(
+      userRoutes,
+      'post',
+      '/me/phone-verification',
       createTestContext(
         {
           phoneNumber: '+8613800138000',
@@ -1482,8 +1508,10 @@ describe('auth API', () => {
     });
     expect(sentCode).toMatch(/^\d{6}$/);
 
-    const verifyContext = await runMiddleware(
-      getTestRouteHandler(routes, 'post', '/me/phone-verification/confirm'),
+    const verifyContext = await runRoute(
+      userRoutes,
+      'post',
+      '/me/phone-verification/confirm',
       createTestContext(
         {
           phoneNumber: '+8613800138000',
@@ -1631,13 +1659,13 @@ describe('auth API', () => {
     expect(blockedContext.body).toMatchObject({
       error: 'AUTH_VERIFICATION_REQUIRED',
       details: {
-        purpose: 'manage_sso',
+        purpose: AuthVerificationPurpose.ManageSso,
       },
     });
 
     const challenge = await services.auth.createVerificationChallenge(
       session.accessToken,
-      'manage_sso',
+      AuthVerificationPurpose.ManageSso,
       defaultAuthSessionRequestContext,
     );
 
@@ -1710,7 +1738,7 @@ describe('auth API', () => {
     expect(loginBody.data).toMatchObject({
       requiresVerification: true,
       defaultMethod: 'totp',
-      purpose: 'login',
+      purpose: AuthVerificationPurpose.Login,
       remainingAttempts: 5,
     });
     expect(loginBody.data.verificationToken).toEqual(expect.any(String));
@@ -1882,7 +1910,7 @@ describe('auth API', () => {
       getTestRouteHandler(routes, 'post', '/verification/challenges'),
       createTestContext(
         {
-          purpose: 'manage_mfa',
+          purpose: AuthVerificationPurpose.ManageMfa,
         },
         {},
         undefined,
@@ -1936,7 +1964,7 @@ describe('auth API', () => {
 
     await expect(
       runMiddleware(
-        getTestRouteHandler(routes, 'patch', '/me/password'),
+        getTestRouteHandler(routes, 'patch', '/password'),
         createTestContext(
           {
             currentPassword: 'password123',
@@ -1961,7 +1989,7 @@ describe('auth API', () => {
       getTestRouteHandler(routes, 'post', '/verification/challenges'),
       createTestContext(
         {
-          purpose: 'change_password',
+          purpose: AuthVerificationPurpose.ChangePassword,
         },
         {},
         undefined,
@@ -2140,7 +2168,7 @@ describe('auth API', () => {
       getTestRouteHandler(routes, 'post', '/verification/challenges'),
       createTestContext(
         {
-          purpose: 'manage_mfa',
+          purpose: AuthVerificationPurpose.ManageMfa,
         },
         {},
         undefined,
@@ -2264,7 +2292,7 @@ describe('auth API', () => {
 
     await expect(
       runMiddleware(
-        getTestRouteHandler(routes, 'patch', '/me/password'),
+        getTestRouteHandler(routes, 'patch', '/password'),
         createTestContext(
           {
             currentPassword: 'password123',
@@ -2289,7 +2317,7 @@ describe('auth API', () => {
       getTestRouteHandler(routes, 'post', '/verification/challenges'),
       createTestContext(
         {
-          purpose: 'change_password',
+          purpose: AuthVerificationPurpose.ChangePassword,
         },
         {},
         undefined,
@@ -2411,7 +2439,7 @@ describe('auth API', () => {
       getTestRouteHandler(routes, 'post', '/verification/challenges'),
       createTestContext(
         {
-          purpose: 'manage_totp',
+          purpose: AuthVerificationPurpose.ManageTotp,
         },
         {},
         undefined,
@@ -2427,7 +2455,7 @@ describe('auth API', () => {
     expect(challengeBody.data).toMatchObject({
       requiresVerification: true,
       defaultMethod: 'password',
-      purpose: 'manage_totp',
+      purpose: AuthVerificationPurpose.ManageTotp,
     });
     expect(challengeBody.data.methods.map((method) => method.method)).toEqual(['password']);
 

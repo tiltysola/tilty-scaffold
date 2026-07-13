@@ -48,7 +48,7 @@ describe('auth image client', () => {
 
     await expect(uploadAvatar(new File(['avatar'], 'avatar.png', { type: 'image/png' }))).resolves.toEqual(updatedUser);
     expect(getCurrentAuthSession()?.user.avatarUrl).toBe('/uploads/avatars/avatar.png');
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/avatar');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/me/avatar');
   });
 
   it('keeps refreshed session metadata when avatar uploads refresh authentication', async () => {
@@ -98,9 +98,9 @@ describe('auth image client', () => {
 
     await expect(uploadAvatar(new File(['avatar'], 'avatar.png', { type: 'image/png' }))).resolves.toEqual(updatedUser);
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      '/api/auth/avatar',
+      '/api/users/me/avatar',
       '/api/auth/refresh',
-      '/api/auth/avatar',
+      '/api/users/me/avatar',
     ]);
     expect(getCurrentAuthSession()).toEqual({
       ...refreshedSession,
@@ -137,7 +137,7 @@ describe('auth image client', () => {
       updatedUser,
     );
     expect(getCurrentAuthSession()?.user.profileBannerUrl).toBe('/uploads/profile-banners/banner.png');
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/profile-banner');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/me/profile-banner');
   });
 
   it('deletes profile banners and stores the updated user', async () => {
@@ -170,7 +170,7 @@ describe('auth image client', () => {
 
     await expect(deleteProfileBanner()).resolves.toEqual(updatedUser);
     expect(getCurrentAuthSession()?.user.profileBannerUrl).toBeUndefined();
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/profile-banner');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/me/profile-banner');
   });
 
   it('uploads profile backgrounds and stores the updated user', async () => {
@@ -202,7 +202,7 @@ describe('auth image client', () => {
       uploadProfileBackground(new File(['background'], 'background.png', { type: 'image/png' })),
     ).resolves.toEqual(updatedUser);
     expect(getCurrentAuthSession()?.user.profileBackgroundUrl).toBe('/uploads/profile-backgrounds/background.png');
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/profile-background');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/me/profile-background');
   });
 
   it('deletes profile backgrounds and stores the updated user', async () => {
@@ -235,7 +235,7 @@ describe('auth image client', () => {
 
     await expect(deleteProfileBackground()).resolves.toEqual(updatedUser);
     expect(getCurrentAuthSession()?.user.profileBackgroundUrl).toBeUndefined();
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/profile-background');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/me/profile-background');
   });
 
   it('resolves backend-relative asset URLs', () => {

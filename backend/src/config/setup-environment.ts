@@ -1,4 +1,4 @@
-﻿import { randomBytes, randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { constants } from 'fs';
 import { access, rename, stat, unlink, writeFile } from 'fs/promises';
 import { z } from 'zod';
@@ -10,7 +10,6 @@ import {
   setupCacheStoreValues,
   SetupDatabaseDialect,
   setupDatabaseDialectValues,
-  SetupDatabaseSync,
   SetupEmailVerificationService,
   SetupEnvironmentStep,
   type SetupEnvironmentStepValue,
@@ -68,7 +67,6 @@ export const setupEnvSchema = z
     DATABASE_POOL_MIN: z.string().trim().max(16),
     DATABASE_POOL_ACQUIRE_MS: z.string().trim().max(16),
     DATABASE_POOL_IDLE_MS: z.string().trim().max(16),
-    DATABASE_SYNC: z.string().trim().max(16),
     CACHE_STORE: z.string().trim().max(16),
     CACHE_REDIS_URL: z.string().trim().max(1024),
     CACHE_REDIS_REQUEST_TIMEOUT_MS: z.string().trim().max(16),
@@ -184,7 +182,6 @@ const databaseEnvironmentKeys = [
   'DATABASE_POOL_MIN',
   'DATABASE_POOL_ACQUIRE_MS',
   'DATABASE_POOL_IDLE_MS',
-  'DATABASE_SYNC',
 ] as const satisfies Array<keyof SetupEnvironment>;
 const securityEnvironmentKeys = [
   'AUTH_TOKEN_SECRET',
@@ -272,7 +269,6 @@ const envGroups = [
       'DATABASE_POOL_MIN',
       'DATABASE_POOL_ACQUIRE_MS',
       'DATABASE_POOL_IDLE_MS',
-      'DATABASE_SYNC',
     ],
   },
   {
@@ -386,12 +382,11 @@ const setupConfigComments: Partial<Record<keyof SetupEnvironment, string[]>> = {
   DATABASE_POOL_MIN: ['Minimum database connection pool size per backend instance.'],
   DATABASE_POOL_ACQUIRE_MS: ['Maximum time to acquire a database connection from the pool, in milliseconds.'],
   DATABASE_POOL_IDLE_MS: ['Maximum idle time before a pooled database connection is released, in milliseconds.'],
-  DATABASE_SYNC: ['Sequelize model sync behavior at startup. Production requires off. Options: off, alter, force.'],
   CACHE_STORE: ['Cache backend for transient state. Options: memory, redis. Use redis for multi-instance deployments.'],
   CACHE_REDIS_URL: ['Redis connection URL for cache storage. Required only when CACHE_STORE is redis.'],
   CACHE_REDIS_REQUEST_TIMEOUT_MS: ['Redis connection and command timeout in milliseconds.'],
   FILE_STORAGE_DRIVER: ['Uploaded file storage backend. Options: local, oss. Use oss for multi-instance deployments.'],
-  FILE_UPLOAD_MAX_BYTES: ['Maximum accepted avatar upload size in bytes.'],
+  FILE_UPLOAD_MAX_BYTES: ['Maximum accepted profile image upload size in bytes.'],
   FILE_PUBLIC_BASE_URL: ['Public URL base returned for local uploaded files. May be a backend-relative path or URL.'],
   FILE_LOCAL_ROOT: ['Local uploaded file storage directory. Relative paths resolve from the project root.'],
   FILE_OSS_ACCESS_KEY_ID: ['Aliyun OSS access key ID. Required only when FILE_STORAGE_DRIVER is oss.'],
@@ -556,7 +551,7 @@ export function assertValidDatabaseEnvironment(environment: SetupEnvironment) {
   const dialect = setupDatabaseDialectSchema.parse(environment.DATABASE_DIALECT.trim());
   const requiredFields: Array<keyof SetupEnvironment> =
     dialect === SetupDatabaseDialect.Sqlite
-      ? ['DATABASE_DIALECT', 'DATABASE_STORAGE', 'DATABASE_SYNC']
+      ? ['DATABASE_DIALECT', 'DATABASE_STORAGE']
       : [
           'DATABASE_DIALECT',
           'DATABASE_URL',
@@ -566,17 +561,9 @@ export function assertValidDatabaseEnvironment(environment: SetupEnvironment) {
           'DATABASE_POOL_MIN',
           'DATABASE_POOL_ACQUIRE_MS',
           'DATABASE_POOL_IDLE_MS',
-          'DATABASE_SYNC',
         ];
 
   assertValidEnvironmentFields(environment, databaseEnvironmentKeys, requiredFields);
-
-  if (
-    environment.NODE_ENV.trim() === SetupNodeEnv.Production &&
-    environment.DATABASE_SYNC.trim() !== SetupDatabaseSync.Off
-  ) {
-    throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400);
-  }
 
   if (
     environment.SERVER_MULTI_INSTANCE_ENABLED.trim() === SetupBoolean.True &&
@@ -840,7 +827,6 @@ function assertRequiredEnvironment(environment: SetupEnvironment, options: Envir
     'SERVER_TRUST_PROXY',
     'SERVER_MULTI_INSTANCE_ENABLED',
     'DATABASE_DIALECT',
-    'DATABASE_SYNC',
     'CACHE_STORE',
     'FILE_STORAGE_DRIVER',
     'FILE_UPLOAD_MAX_BYTES',

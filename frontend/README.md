@@ -28,8 +28,8 @@ compiled backend when running `npm start` from the repository root.
 
 ## Environment
 
-The frontend uses relative API paths. During development, Vite proxies `/api`
-and `/uploads` to `http://localhost:3000`.
+The frontend uses relative API paths. During development, Vite proxies the
+`/api` and `/uploads` route prefixes to `http://localhost:3000`.
 
 ## Theme Modes
 
@@ -69,7 +69,7 @@ that domain.
 
 Access and refresh tokens are stored by the backend in HttpOnly cookies and are
 not stored from API response bodies. localStorage keeps only token-expiration
-metadata. User state is refreshed from `/api/auth/me`, and stored session
+metadata. User state is refreshed from `/api/users/me`, and stored session
 metadata is cleared when the frontend cannot validate it with the backend.
 
 Authenticated user metadata includes role and permission keys. The dashboard
@@ -78,13 +78,14 @@ protected routes use role and permission keys for navigation and page access;
 the backend remains the source of truth for API authorization.
 
 The profile page updates the current user's profile fields through
-`PATCH /api/auth/me`. Gender and location editing use server-provided options
+`PATCH /api/users/me`. Gender and location editing use server-provided options
 while allowing custom text. Avatar, profile banner, and profile background
-uploads use `/api/auth/avatar`, `/api/auth/profile-banner`, and
-`/api/auth/profile-background`. Unverified email status uses
-`/api/auth/me/email-verification` and `/api/auth/me/email-verification/confirm`.
-Phone binding uses `/api/auth/me/phone-verification` and
-`/api/auth/me/phone-verification/confirm` when SMS verification is configured.
+uploads use `/api/users/me/avatar`, `/api/users/me/profile-banner`, and
+`/api/users/me/profile-background`. Unverified email status uses
+`/api/users/me/email-verification` and
+`/api/users/me/email-verification/confirm`. Phone binding uses
+`/api/users/me/phone-verification` and
+`/api/users/me/phone-verification/confirm` when SMS verification is configured.
 
 The registration page reads `/api/auth/config` and shows email verification
 only when the backend requires it. The login page reads `/api/auth/sso/config`
@@ -97,7 +98,7 @@ The password recovery page reads `/api/auth/config`; when SMTP-backed email is
 not enabled, it instructs the user to contact the site administrator.
 
 The security page changes the current user's password through
-`PATCH /api/auth/me/password`. When the account has an available email, SMS,
+`PATCH /api/auth/password`. When the account has an available email, SMS,
 authenticator app, or passkey verifier, the page completes a `change_password`
 step-up challenge before opening the password form. Successful password changes
 revoke the user's other active sessions.
@@ -107,20 +108,21 @@ on the SSO callback page. The profile page reads `/api/auth/sso/identities` and
 starts profile provider binding through `/api/auth/sso/bind/start` only after a
 verified `manage_sso` step-up challenge.
 
-The users page calls `/api/users/` and is available only when the current user
-has `USER_LIST` or `ROOT`, has a passkey or authenticator app configured, and
-has completed a `user_management` step-up challenge. Users with `USER_ADMIN` or
-`ROOT` can update managed user profile fields, password, account status, and
-role assignments through `/api/users/:id` after the same `user_management`
-verification. The user edit dialog lists managed login devices and can revoke
-one device session or all revocable device sessions through `/api/users/:id/devices`.
+The users page calls `/api/admin/users/` and is available only when the current
+user has `USER_LIST` or `ROOT`, has a passkey or authenticator app configured,
+and has completed a `user_management` step-up challenge. Users with
+`USER_ADMIN` or `ROOT` can update managed user profile fields, password,
+account status, and role assignments through `/api/admin/users/:id` after the
+same `user_management` verification. The user edit page lists managed login
+devices and can revoke one device session or all revocable device sessions
+through `/api/admin/users/:id/devices`.
 
-The system settings page calls `/api/system-settings/` and is available only
-when the current user has `ROOT`. Before loading settings, the page creates a
-`system_settings` step-up verification challenge. The backend requires the root
-user to have a passkey or authenticator app configured, and settings remain
-hidden until that challenge is verified. Saving settings requires a backend
-restart before the updated configuration is used.
+The system settings page calls `/api/admin/system-settings/` and is available
+only when the current user has `ROOT`. Before loading settings, the page
+creates a `system_settings` step-up verification challenge. The backend requires
+the root user to have a passkey or authenticator app configured, and settings
+remain hidden until that challenge is verified. Saving settings requires a
+backend restart before the updated configuration is used.
 
 ## Routes
 

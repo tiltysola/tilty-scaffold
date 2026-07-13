@@ -1,6 +1,7 @@
 import { type CacheStore, MemoryCacheStore } from '../infra/cache';
 import { type FileStorage } from '../infra/file-storage';
 import { AccessControlService } from '../modules/access-control/access-control.service';
+import { ApiKeyService } from '../modules/api-keys/api-key.service';
 import { EmailVerificationService, type SmtpEmailSenderConfig, SmtpEmailSenderPool } from '../modules/auth/auth.email';
 import { AuthService, type AuthTokenConfig, defaultAuthTokenConfig } from '../modules/auth/auth.service';
 import { type AliyunSmsProfileConfig, AliyunSmsSenderPool, SmsVerificationService } from '../modules/auth/auth.sms';
@@ -49,6 +50,7 @@ interface SmsServiceConfig {
 
 export interface Services {
   accessControl: AccessControlService;
+  apiKey: ApiKeyService;
   auth: AuthService;
   authPasskey: PasskeyService;
   authSession: AuthSessionService;
@@ -84,6 +86,7 @@ export function createServices(models: Models, config: ServiceConfig): Services 
 
   return {
     accessControl,
+    apiKey: new ApiKeyService(models.apiKey, models.apiKeyAuditEvent, user, accessControl, config.authTokenSecret),
     auth: new AuthService(
       user,
       accessControl,

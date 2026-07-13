@@ -17,52 +17,52 @@ export function ProfileHeader({
   avatarAlt,
   avatarBusy,
   avatarUrl,
-  backgroundBusy,
-  bannerBusy,
-  bannerUrl,
   descriptionClassName,
   fallback,
   onChangeAvatar,
-  onChangeBackground,
   onChangeBanner,
+  onChangeBackground,
   onEditProfileDetails,
+  profileBannerBusy,
+  profileBannerUrl,
+  profileBackgroundBusy,
   sectionRef,
   textRef,
   title,
   titleClassName,
   uploadingAvatar,
-  uploadingBackground,
-  uploadingBanner,
+  uploadingProfileBanner,
+  uploadingProfileBackground,
   userHandle,
 }: {
   actionClassName?: string;
   avatarAlt: string;
   avatarBusy: boolean;
   avatarUrl: string | undefined;
-  backgroundBusy: boolean;
-  bannerBusy: boolean;
-  bannerUrl: string | undefined;
   descriptionClassName?: string;
   fallback: string;
   onChangeAvatar?: () => void;
-  onChangeBackground?: () => void;
   onChangeBanner?: () => void;
+  onChangeBackground?: () => void;
   onEditProfileDetails: () => void;
+  profileBannerBusy: boolean;
+  profileBannerUrl: string | undefined;
+  profileBackgroundBusy: boolean;
   sectionRef: Ref<HTMLElement>;
   textRef: Ref<HTMLDivElement>;
   title: string;
   titleClassName?: string;
   uploadingAvatar: boolean;
-  uploadingBackground: boolean;
-  uploadingBanner: boolean;
+  uploadingProfileBanner: boolean;
+  uploadingProfileBackground: boolean;
   userHandle: string;
 }) {
   const intl = useIntl();
 
   return (
     <section ref={sectionRef} className="relative min-h-32 overflow-hidden rounded-lg bg-muted/40 p-4">
-      {bannerUrl ? (
-        <img alt="" aria-hidden="true" className="absolute inset-0 size-full object-cover" src={bannerUrl} />
+      {profileBannerUrl ? (
+        <img alt="" aria-hidden="true" className="absolute inset-0 size-full object-cover" src={profileBannerUrl} />
       ) : (
         <div
           aria-hidden="true"
@@ -101,17 +101,17 @@ export function ProfileHeader({
               </DropdownMenuItem>
             ) : null}
             {onChangeBanner ? (
-              <DropdownMenuItem disabled={bannerBusy} onSelect={onChangeBanner}>
+              <DropdownMenuItem disabled={profileBannerBusy} onSelect={onChangeBanner}>
                 <ImageIcon />
-                {uploadingBanner
+                {uploadingProfileBanner
                   ? intl.formatMessage({ id: 'common.uploading' })
                   : intl.formatMessage({ id: 'profile.action.change.banner' })}
               </DropdownMenuItem>
             ) : null}
             {onChangeBackground ? (
-              <DropdownMenuItem disabled={backgroundBusy} onSelect={onChangeBackground}>
+              <DropdownMenuItem disabled={profileBackgroundBusy} onSelect={onChangeBackground}>
                 <ImageIcon />
-                {uploadingBackground
+                {uploadingProfileBackground
                   ? intl.formatMessage({ id: 'common.uploading' })
                   : intl.formatMessage({ id: 'profile.action.change.background' })}
               </DropdownMenuItem>

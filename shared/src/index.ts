@@ -62,6 +62,19 @@ export {
   systemRoleKeys,
 } from './access-control.js';
 export {
+  apiKeyActiveLimitPerUser,
+  apiKeyChecksumLength,
+  apiKeyChecksumPatternSource,
+  apiKeyIdLength,
+  apiKeyIdPatternSource,
+  apiKeyPlainKeyPatternSource,
+  apiKeyPrefix,
+  apiKeySecretLength,
+  apiKeySecretPatternSource,
+  apiKeyStatusValues,
+  apiKeyTokenPatternSource,
+} from './api-keys.js';
+export {
   defaultLocale,
   getLocaleDirection,
   isSupportedLocale,
@@ -73,6 +86,7 @@ export {
   supportedLocales,
 } from './i18n.js';
 export {
+  defaultFileUploadMaxBytes,
   SetupAuthCookieSameSite,
   setupAuthCookieSameSiteValues,
   SetupAuthCookieSecure,
@@ -83,8 +97,6 @@ export {
   setupCacheStoreValues,
   SetupDatabaseDialect,
   setupDatabaseDialectValues,
-  SetupDatabaseSync,
-  setupDatabaseSyncValues,
   SetupEmailVerificationService,
   setupEmailVerificationServiceValues,
   SetupEnvironmentStep,
@@ -110,14 +122,15 @@ export type {
   AuthVerificationCodeMethodValue,
   AuthVerificationMethodValue,
   AuthVerificationPurposeValue,
+  ProfileImageFieldName,
 } from './auth.js';
+export type { ApiKeyCreateInput, ApiKeyListResponse, ApiKeyReveal, ApiKeyStatus, ApiKeySummary } from './api-keys.js';
 export type {
   SetupAuthCookieSameSiteValue,
   SetupAuthCookieSecureValue,
   SetupBooleanValue,
   SetupCacheStoreValue,
   SetupDatabaseDialectValue,
-  SetupDatabaseSyncValue,
   SetupEmailVerificationServiceValue,
   SetupEnvironmentStepValue,
   SetupFileStorageDriverValue,

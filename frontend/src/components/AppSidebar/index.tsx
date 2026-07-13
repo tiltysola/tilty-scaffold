@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   BracesIcon,
   CommandIcon,
+  KeyRoundIcon,
   LayoutDashboardIcon,
   type LucideIcon,
   SettingsIcon,
@@ -47,6 +48,7 @@ const sidebarStyle = {
 
 const navIcons: Record<NavigationIcon, LucideIcon> = {
   apiDocs: BracesIcon,
+  apiKeys: KeyRoundIcon,
   dashboard: LayoutDashboardIcon,
   profile: UserCircleIcon,
   security: ShieldIcon,

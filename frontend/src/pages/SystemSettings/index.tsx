@@ -13,6 +13,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/shadcn/components/ui/aler
 import { Button } from '@/shadcn/components/ui/button';
 import { Spinner } from '@/shadcn/components/ui/spinner';
 import { Tabs, TabsContent } from '@/shadcn/components/ui/tabs';
+import { AuthVerificationPurpose } from '@tilty/shared/auth';
 
 import { AppEmptyState } from '@/components/AppEmptyState';
 import { ConfirmActionDialog } from '@/components/ConfirmActionDialog';
@@ -49,7 +50,7 @@ const Index = () => {
     sendCode,
     sendPending,
     submitPending,
-  } = useVerificationGate({ purpose: 'system_settings' });
+  } = useVerificationGate({ purpose: AuthVerificationPurpose.SystemSettings });
 
   useEffect(() => {
     let isActive = true;

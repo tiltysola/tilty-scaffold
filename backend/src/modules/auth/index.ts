@@ -1,26 +1,51 @@
 import { type Middleware } from 'koa';
 
+import { defaultFileUploadMaxBytes } from '@tilty/shared/setup';
+
 import { type BackendModule } from '../../core/module';
-import { AuthController } from './auth.controller';
 import { type AuthCookieConfig } from './auth.http';
+import { rejectApiKeyAuthorization } from './auth.middleware';
 import { type AuthService } from './auth.service';
 import { type SsoService } from './auth.sso';
+import { AuthAccountController } from './auth-account.controller';
+import { AuthDeviceController } from './auth-device.controller';
+import { AuthMfaController } from './auth-mfa.controller';
+import { AuthPasskeyController } from './auth-passkey.controller';
+import { AuthPasswordController } from './auth-password.controller';
+import { AuthSessionController } from './auth-session.controller';
+import { AuthSsoController } from './auth-sso.controller';
+import { AuthTotpController } from './auth-totp.controller';
+import { AuthVerificationController } from './auth-verification.controller';
 
 interface AuthModuleOptions {
-  avatarUploadMaxBytes?: number;
   cookies: AuthCookieConfig;
+  fileUploadMaxBytes?: number;
   rateLimit?: Middleware;
   ssoService: SsoService;
 }
 
 export function createAuthModule(authService: AuthService, options: AuthModuleOptions): BackendModule {
-  const controller = new AuthController(
+  const accountController = new AuthAccountController(
     authService,
-    options.ssoService,
-    options.avatarUploadMaxBytes ?? 2 * 1024 * 1024,
+    options.fileUploadMaxBytes ?? defaultFileUploadMaxBytes,
     options.cookies,
   );
-  const rateLimitedHandlers = (handler: Middleware) => (options.rateLimit ? [options.rateLimit, handler] : [handler]);
+  const deviceController = new AuthDeviceController(authService, options.cookies);
+  const mfaController = new AuthMfaController(authService, options.cookies);
+  const passkeyController = new AuthPasskeyController(authService, options.cookies);
+  const passwordController = new AuthPasswordController(authService, options.cookies);
+  const sessionController = new AuthSessionController(authService, options.cookies);
+  const ssoController = new AuthSsoController(authService, options.ssoService, options.cookies);
+  const totpController = new AuthTotpController(authService, options.cookies);
+  const verificationController = new AuthVerificationController(authService, options.cookies);
+  const rejectApiKey = rejectApiKeyAuthorization(options.cookies);
+  const withApiKeyRejection = (handler: Middleware) =>
+    (async (ctx, next) => {
+      await rejectApiKey(ctx, () => handler(ctx, next));
+    }) satisfies Middleware;
+  const sessionHandlers = (handler: Middleware) => [withApiKeyRejection(handler)];
+  const rateLimitedSessionHandlers = (handler: Middleware) =>
+    options.rateLimit ? [options.rateLimit, withApiKeyRejection(handler)] : sessionHandlers(handler);
 
   return {
     name: 'auth',
@@ -29,237 +54,177 @@ export function createAuthModule(authService: AuthService, options: AuthModuleOp
       {
         method: 'get',
         path: '/config',
-        handlers: [controller.config],
+        handlers: [accountController.config],
       },
       {
         method: 'post',
         path: '/register',
-        handlers: rateLimitedHandlers(controller.register),
+        handlers: rateLimitedSessionHandlers(accountController.register),
       },
       {
         method: 'post',
         path: '/register/email-verification',
-        handlers: rateLimitedHandlers(controller.sendRegistrationEmailVerification),
+        handlers: rateLimitedSessionHandlers(accountController.sendRegistrationEmailVerification),
       },
       {
         method: 'post',
         path: '/password-reset/email-verification',
-        handlers: rateLimitedHandlers(controller.sendPasswordResetEmailVerification),
-      },
-      {
-        method: 'post',
-        path: '/me/email-verification',
-        handlers: rateLimitedHandlers(controller.sendProfileEmailVerification),
-      },
-      {
-        method: 'post',
-        path: '/me/phone-verification',
-        handlers: rateLimitedHandlers(controller.sendProfilePhoneVerification),
+        handlers: rateLimitedSessionHandlers(accountController.sendPasswordResetEmailVerification),
       },
       {
         method: 'post',
         path: '/login',
-        handlers: rateLimitedHandlers(controller.login),
+        handlers: rateLimitedSessionHandlers(sessionController.login),
       },
       {
         method: 'post',
         path: '/password-reset',
-        handlers: rateLimitedHandlers(controller.resetPassword),
-      },
-      {
-        method: 'post',
-        path: '/me/email-verification/confirm',
-        handlers: rateLimitedHandlers(controller.verifyProfileEmail),
-      },
-      {
-        method: 'post',
-        path: '/me/phone-verification/confirm',
-        handlers: rateLimitedHandlers(controller.verifyProfilePhone),
-      },
-      {
-        method: 'get',
-        path: '/me',
-        handlers: [controller.me],
+        handlers: rateLimitedSessionHandlers(accountController.resetPassword),
       },
       {
         method: 'patch',
-        path: '/me',
-        handlers: rateLimitedHandlers(controller.updateMe),
-      },
-      {
-        method: 'patch',
-        path: '/me/password',
-        handlers: rateLimitedHandlers(controller.changePassword),
-      },
-      {
-        method: 'post',
-        path: '/avatar',
-        handlers: rateLimitedHandlers(controller.avatar),
-      },
-      {
-        method: 'delete',
-        path: '/avatar',
-        handlers: rateLimitedHandlers(controller.deleteAvatar),
-      },
-      {
-        method: 'post',
-        path: '/profile-banner',
-        handlers: rateLimitedHandlers(controller.profileBanner),
-      },
-      {
-        method: 'delete',
-        path: '/profile-banner',
-        handlers: rateLimitedHandlers(controller.deleteProfileBanner),
-      },
-      {
-        method: 'post',
-        path: '/profile-background',
-        handlers: rateLimitedHandlers(controller.profileBackground),
-      },
-      {
-        method: 'delete',
-        path: '/profile-background',
-        handlers: rateLimitedHandlers(controller.deleteProfileBackground),
+        path: '/password',
+        handlers: rateLimitedSessionHandlers(passwordController.changePassword),
       },
       {
         method: 'post',
         path: '/refresh',
-        handlers: [controller.refresh],
+        handlers: sessionHandlers(sessionController.refresh),
       },
       {
         method: 'post',
         path: '/logout',
-        handlers: [controller.logout],
+        handlers: sessionHandlers(sessionController.logout),
       },
       {
         method: 'get',
         path: '/totp',
-        handlers: [controller.totpStatus],
+        handlers: sessionHandlers(totpController.status),
       },
       {
         method: 'post',
         path: '/totp/setup',
-        handlers: rateLimitedHandlers(controller.totpSetup),
+        handlers: rateLimitedSessionHandlers(totpController.setup),
       },
       {
         method: 'post',
         path: '/totp/enable',
-        handlers: rateLimitedHandlers(controller.totpEnable),
+        handlers: rateLimitedSessionHandlers(totpController.enable),
       },
       {
         method: 'post',
         path: '/verification/challenges',
-        handlers: rateLimitedHandlers(controller.createVerificationChallenge),
+        handlers: rateLimitedSessionHandlers(verificationController.createChallenge),
       },
       {
         method: 'post',
         path: '/verification/code',
-        handlers: rateLimitedHandlers(controller.sendVerificationCode),
+        handlers: rateLimitedSessionHandlers(verificationController.sendCode),
       },
       {
         method: 'post',
         path: '/verification/passkey/options',
-        handlers: rateLimitedHandlers(controller.verificationPasskeyOptions),
+        handlers: rateLimitedSessionHandlers(verificationController.createPasskeyOptions),
       },
       {
         method: 'post',
         path: '/verification/confirm',
-        handlers: rateLimitedHandlers(controller.verifyAuthenticationChallenge),
+        handlers: rateLimitedSessionHandlers(verificationController.verifyChallenge),
       },
       {
         method: 'post',
         path: '/totp/disable',
-        handlers: rateLimitedHandlers(controller.totpDisable),
+        handlers: rateLimitedSessionHandlers(totpController.disable),
       },
       {
         method: 'post',
         path: '/totp/recovery-codes',
-        handlers: rateLimitedHandlers(controller.totpRegenerateRecoveryCodes),
+        handlers: rateLimitedSessionHandlers(totpController.regenerateRecoveryCodes),
       },
       {
         method: 'get',
         path: '/mfa',
-        handlers: [controller.mfaSettings],
+        handlers: sessionHandlers(mfaController.getSettings),
       },
       {
         method: 'patch',
         path: '/mfa',
-        handlers: rateLimitedHandlers(controller.updateMfaSettings),
+        handlers: rateLimitedSessionHandlers(mfaController.updateSettings),
       },
       {
         method: 'get',
         path: '/passkeys',
-        handlers: [controller.passkeys],
+        handlers: sessionHandlers(passkeyController.list),
       },
       {
         method: 'post',
         path: '/passkeys/registration-options',
-        handlers: rateLimitedHandlers(controller.passkeyRegistrationOptions),
+        handlers: rateLimitedSessionHandlers(passkeyController.createRegistrationOptions),
       },
       {
         method: 'post',
         path: '/passkeys',
-        handlers: rateLimitedHandlers(controller.passkeyRegistrationVerify),
+        handlers: rateLimitedSessionHandlers(passkeyController.verifyRegistration),
       },
       {
         method: 'delete',
         path: '/passkeys/:passkeyId',
-        handlers: rateLimitedHandlers(controller.deletePasskey),
+        handlers: rateLimitedSessionHandlers(passkeyController.delete),
       },
       {
         method: 'get',
         path: '/devices',
-        handlers: [controller.deviceSessions],
+        handlers: sessionHandlers(deviceController.list),
       },
       {
         method: 'delete',
         path: '/devices/others',
-        handlers: rateLimitedHandlers(controller.revokeOtherDeviceSessions),
+        handlers: rateLimitedSessionHandlers(deviceController.revokeOthers),
       },
       {
         method: 'delete',
         path: '/devices/:sessionId',
-        handlers: rateLimitedHandlers(controller.revokeDeviceSession),
+        handlers: rateLimitedSessionHandlers(deviceController.revoke),
       },
       {
         method: 'get',
         path: '/sso/config',
-        handlers: [controller.ssoConfig],
+        handlers: [ssoController.config],
       },
       {
         method: 'get',
         path: '/sso/start',
-        handlers: [controller.ssoStart],
+        handlers: [ssoController.start],
       },
       {
         method: 'get',
         path: '/sso/bind/start',
-        handlers: [controller.ssoBindStart],
+        handlers: sessionHandlers(ssoController.bindStart),
       },
       {
         method: 'get',
         path: '/sso/callback',
-        handlers: [controller.ssoCallback],
+        handlers: [ssoController.callback],
       },
       {
         method: 'post',
         path: '/sso/session',
-        handlers: [controller.ssoSession],
+        handlers: sessionHandlers(ssoController.session),
       },
       {
         method: 'post',
         path: '/sso/account',
-        handlers: rateLimitedHandlers(controller.ssoCreateAccount),
+        handlers: rateLimitedSessionHandlers(ssoController.createAccount),
       },
       {
         method: 'post',
         path: '/sso/bind',
-        handlers: rateLimitedHandlers(controller.ssoBindAccount),
+        handlers: rateLimitedSessionHandlers(ssoController.bindAccount),
       },
       {
         method: 'get',
         path: '/sso/identities',
-        handlers: [controller.ssoIdentities],
+        handlers: sessionHandlers(ssoController.identities),
       },
     ],
   };

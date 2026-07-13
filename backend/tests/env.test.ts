@@ -3,6 +3,8 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 
+import { defaultFileUploadMaxBytes } from '@tilty/shared/setup';
+
 import { getEnvValidationMessage, loadEnv } from '../src/config/env';
 
 const authTokenSecret = 'test-auth-token-secret-minimum-32-characters';
@@ -66,7 +68,7 @@ describe('environment configuration', () => {
       root: './data/uploads',
     });
     expect(env.fileUpload).toEqual({
-      maxBytes: 2 * 1024 * 1024,
+      maxBytes: defaultFileUploadMaxBytes,
     });
     expect(env.passkey).toEqual({
       rpName: 'Tilty Scaffold',
@@ -141,23 +143,11 @@ describe('environment configuration', () => {
     expect(message).toContain('DATABASE_POOL_MIN');
   });
 
-  it('rejects sync modes other than off in production', () => {
-    const message = getEnvValidationMessage({
-      AUTH_TOKEN_SECRET: authTokenSecret,
-      DATABASE_DIALECT: 'sqlite',
-      DATABASE_SYNC: 'alter',
-      NODE_ENV: 'production',
-    } as NodeJS.ProcessEnv);
-
-    expect(message).toContain('DATABASE_SYNC');
-  });
-
   it('rejects wildcard CORS origins in production', () => {
     const message = getEnvValidationMessage({
       AUTH_TOKEN_SECRET: authTokenSecret,
       APP_CORS_ORIGINS: '*',
       DATABASE_DIALECT: 'sqlite',
-      DATABASE_SYNC: 'off',
       NODE_ENV: 'production',
     } as NodeJS.ProcessEnv);
 
@@ -187,7 +177,6 @@ describe('environment configuration', () => {
         AUTH_TOKEN_SECRET: authTokenSecret,
         APP_CORS_ORIGINS: 'https://app.example.com',
         DATABASE_DIALECT: 'sqlite',
-        DATABASE_SYNC: 'off',
         NODE_ENV: 'production',
       };
 
@@ -321,7 +310,7 @@ describe('environment configuration', () => {
     const temporaryRoot = await mkdtemp(join(tmpdir(), 'tilty-env-'));
 
     try {
-      const example = await readFile(join(originalCwd, 'config.toml.example'), 'utf8');
+      const example = await readFile(join(originalCwd, '..', 'config.toml.example'), 'utf8');
 
       process.chdir(temporaryRoot);
       process.env = {};
@@ -419,7 +408,6 @@ describe('environment configuration', () => {
       AUTH_TOKEN_SECRET: authTokenSecret,
       APP_CORS_ORIGINS: 'https://app.example.com',
       DATABASE_DIALECT: 'sqlite',
-      DATABASE_SYNC: 'off',
       NODE_ENV: 'production',
     } as NodeJS.ProcessEnv);
 
@@ -623,7 +611,6 @@ describe('environment configuration', () => {
     const message = getEnvValidationMessage({
       AUTH_TOKEN_SECRET: authTokenSecret,
       DATABASE_DIALECT: 'sqlite',
-      DATABASE_SYNC: 'off',
       FILE_PUBLIC_BASE_URL: 'http://assets.example.com/uploads',
       NODE_ENV: 'production',
     } as NodeJS.ProcessEnv);
@@ -778,7 +765,6 @@ describe('environment configuration', () => {
     const message = getEnvValidationMessage({
       AUTH_TOKEN_SECRET: authTokenSecret,
       DATABASE_DIALECT: 'sqlite',
-      DATABASE_SYNC: 'off',
       EMAIL_VERIFICATION_SERVICE: 'smtp',
       NODE_ENV: 'production',
       EMAIL_SMTP_PROFILES: JSON.stringify([
@@ -812,7 +798,6 @@ describe('environment configuration', () => {
       AUTH_TOKEN_SECRET: authTokenSecret,
       APP_CORS_ORIGINS: 'https://app.example.com',
       DATABASE_DIALECT: 'sqlite',
-      DATABASE_SYNC: 'off',
       NODE_ENV: 'production',
       SSO_ENABLED: 'true',
       SSO_PROFILES: JSON.stringify([

@@ -88,6 +88,21 @@ interface ImageUploadInput {
   filename?: string;
 }
 
+type ProfileImageDirectory = 'avatars' | 'profile-banners' | 'profile-backgrounds';
+type ProfileImageErrorCode = 'AVATAR_FILE_INVALID' | 'PROFILE_BANNER_FILE_INVALID' | 'PROFILE_BACKGROUND_FILE_INVALID';
+
+interface ManagedProfileImageUploadOptions {
+  directory: ProfileImageDirectory;
+  errorCode: ProfileImageErrorCode;
+  getPreviousStorageKey(user: UserModel): string | null;
+  update(user: UserModel, url: string, storageKey: string): Promise<UserModel>;
+}
+
+interface ManagedProfileImageDeleteOptions {
+  clear(user: UserModel): Promise<UserModel>;
+  getPreviousStorageKey(user: UserModel): string | null;
+}
+
 interface UpdateCurrentUserInput {
   displayName: string;
   gender?: string | null | undefined;
@@ -96,6 +111,10 @@ interface UpdateCurrentUserInput {
   location?: string | null | undefined;
   websiteUrl?: string | null | undefined;
   phoneNumber?: string | null | undefined;
+}
+
+interface AuthenticatedUserOptions {
+  sessionId?: string | undefined;
 }
 
 export interface AuthTokenConfig {
@@ -169,7 +188,15 @@ export class AuthService {
   async sendProfilePhoneVerification(token: string, input: SendProfilePhoneVerificationInput) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.UpdateContact);
+    return this.sendAuthenticatedProfilePhoneVerification(user, input, { sessionId });
+  }
+
+  async sendAuthenticatedProfilePhoneVerification(
+    user: UserModel,
+    input: SendProfilePhoneVerificationInput,
+    options: AuthenticatedUserOptions = {},
+  ) {
+    await this.requireSessionSudoGrant(user, options.sessionId, AuthVerificationPurposeContract.UpdateContact);
 
     if (user.phoneNumber === input.phoneNumber && user.phoneVerified) {
       throw new AppError('PHONE_ALREADY_VERIFIED', 'error.PHONE_ALREADY_VERIFIED', 409);
@@ -181,7 +208,15 @@ export class AuthService {
   async sendProfileEmailVerification(token: string, locale: SupportedLocale = defaultLocale) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.UpdateContact);
+    return this.sendAuthenticatedProfileEmailVerification(user, locale, { sessionId });
+  }
+
+  async sendAuthenticatedProfileEmailVerification(
+    user: UserModel,
+    locale: SupportedLocale = defaultLocale,
+    options: AuthenticatedUserOptions = {},
+  ) {
+    await this.requireSessionSudoGrant(user, options.sessionId, AuthVerificationPurposeContract.UpdateContact);
 
     if (user.emailVerified) {
       throw new AppError('EMAIL_ALREADY_VERIFIED', 'error.EMAIL_ALREADY_VERIFIED', 409);
@@ -364,29 +399,45 @@ export class AuthService {
   async verifyProfileEmail(token: string, input: VerifyProfileEmailInput) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.UpdateContact);
+    return this.verifyAuthenticatedProfileEmail(user, input, { sessionId });
+  }
+
+  async verifyAuthenticatedProfileEmail(
+    user: UserModel,
+    input: VerifyProfileEmailInput,
+    options: AuthenticatedUserOptions = {},
+  ) {
+    await this.requireSessionSudoGrant(user, options.sessionId, AuthVerificationPurposeContract.UpdateContact);
 
     if (user.emailVerified) {
-      return toAuthUser(user, await this.accessControl.getUserAccess(user.id));
+      return this.toAuthUser(user);
     }
 
     await this.emailVerification.verifyProfileEmailVerificationCode(user.email, input.emailVerificationCode);
 
     const updatedUser = await this.userService.verifyEmail(user);
 
-    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+    return this.toAuthUser(updatedUser);
   }
 
   async verifyProfilePhone(token: string, input: VerifyProfilePhoneInput) {
     const { sessionId, user } = await this.authenticate(token);
 
-    await this.verificationService.requireSudoGrant(sessionId, user.id, AuthVerificationPurposeContract.UpdateContact);
+    return this.verifyAuthenticatedProfilePhone(user, input, { sessionId });
+  }
+
+  async verifyAuthenticatedProfilePhone(
+    user: UserModel,
+    input: VerifyProfilePhoneInput,
+    options: AuthenticatedUserOptions = {},
+  ) {
+    await this.requireSessionSudoGrant(user, options.sessionId, AuthVerificationPurposeContract.UpdateContact);
 
     await this.smsVerification.verifyProfilePhoneVerificationCode(input.phoneNumber, input.phoneVerificationCode);
 
     const updatedUser = await this.userService.verifyPhoneNumber(user, input.phoneNumber);
 
-    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+    return this.toAuthUser(updatedUser);
   }
 
   async authenticate(token: string) {
@@ -415,159 +466,152 @@ export class AuthService {
     return (await this.authenticate(token)).authUser;
   }
 
+  async getCurrentAuthenticatedUser(user: UserModel) {
+    return this.toAuthUser(user);
+  }
+
   async updateCurrentUser(token: string, input: UpdateCurrentUserInput) {
     const { sessionId, user } = await this.authenticate(token);
 
+    return this.updateAuthenticatedCurrentUser(user, input, { sessionId });
+  }
+
+  async updateAuthenticatedCurrentUser(
+    user: UserModel,
+    input: UpdateCurrentUserInput,
+    options: AuthenticatedUserOptions = {},
+  ) {
     if (input.phoneNumber) {
       throw new AppError('PHONE_VERIFICATION_REQUIRED', 'error.PHONE_VERIFICATION_REQUIRED', 400);
     }
 
     if (input.phoneNumber === null && user.phoneNumber) {
-      await this.verificationService.requireSudoGrant(
-        sessionId,
-        user.id,
-        AuthVerificationPurposeContract.UpdateContact,
-      );
+      await this.requireSessionSudoGrant(user, options.sessionId, AuthVerificationPurposeContract.UpdateContact);
     }
 
     const updatedUser = await this.userService.updateProfile(user, input);
 
-    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+    return this.toAuthUser(updatedUser);
   }
 
   async uploadAvatar(token: string, input: ImageUploadInput) {
     const { user } = await this.authenticate(token);
-    const updatedUser = await this.uploadManagedAvatar(user, input);
 
-    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+    return this.uploadAuthenticatedAvatar(user, input);
   }
 
   async deleteAvatar(token: string) {
     const { user } = await this.authenticate(token);
-    const updatedUser = await this.deleteManagedAvatar(user);
 
-    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+    return this.deleteAuthenticatedAvatar(user);
   }
 
   async uploadProfileBanner(token: string, input: ImageUploadInput) {
     const { user } = await this.authenticate(token);
-    const updatedUser = await this.uploadManagedProfileBanner(user, input);
 
-    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+    return this.uploadAuthenticatedProfileBanner(user, input);
   }
 
   async deleteProfileBanner(token: string) {
     const { user } = await this.authenticate(token);
-    const updatedUser = await this.deleteManagedProfileBanner(user);
 
-    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+    return this.deleteAuthenticatedProfileBanner(user);
   }
 
   async uploadProfileBackground(token: string, input: ImageUploadInput) {
     const { user } = await this.authenticate(token);
-    const updatedUser = await this.uploadManagedProfileBackground(user, input);
 
-    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+    return this.uploadAuthenticatedProfileBackground(user, input);
   }
 
   async deleteProfileBackground(token: string) {
     const { user } = await this.authenticate(token);
+
+    return this.deleteAuthenticatedProfileBackground(user);
+  }
+
+  async uploadAuthenticatedAvatar(user: UserModel, input: ImageUploadInput) {
+    const updatedUser = await this.uploadManagedAvatar(user, input);
+
+    return this.toAuthUser(updatedUser);
+  }
+
+  async deleteAuthenticatedAvatar(user: UserModel) {
+    const updatedUser = await this.deleteManagedAvatar(user);
+
+    return this.toAuthUser(updatedUser);
+  }
+
+  async uploadAuthenticatedProfileBanner(user: UserModel, input: ImageUploadInput) {
+    const updatedUser = await this.uploadManagedProfileBanner(user, input);
+
+    return this.toAuthUser(updatedUser);
+  }
+
+  async deleteAuthenticatedProfileBanner(user: UserModel) {
+    const updatedUser = await this.deleteManagedProfileBanner(user);
+
+    return this.toAuthUser(updatedUser);
+  }
+
+  async uploadAuthenticatedProfileBackground(user: UserModel, input: ImageUploadInput) {
+    const updatedUser = await this.uploadManagedProfileBackground(user, input);
+
+    return this.toAuthUser(updatedUser);
+  }
+
+  async deleteAuthenticatedProfileBackground(user: UserModel) {
     const updatedUser = await this.deleteManagedProfileBackground(user);
 
-    return toAuthUser(updatedUser, await this.accessControl.getUserAccess(updatedUser.id));
+    return this.toAuthUser(updatedUser);
   }
 
   async uploadManagedAvatar(user: UserModel, input: ImageUploadInput) {
-    const image = validateProfileImage(input, 'AVATAR_FILE_INVALID');
-    const savedFile = await this.saveProfileImage(input, image, 'avatars');
-    const previousAvatarStorageKey = user.avatarStorageKey;
-    let updatedUser: UserModel;
-
-    try {
-      updatedUser = await this.userService.updateAvatar(user, savedFile.url, savedFile.key);
-    } catch (error) {
-      await this.deleteStoredFile(savedFile.key);
-      throw error;
-    }
-
-    if (previousAvatarStorageKey) {
-      await this.deleteStoredFile(previousAvatarStorageKey);
-    }
-
-    return updatedUser;
+    return this.uploadManagedProfileImage(user, input, {
+      directory: 'avatars',
+      errorCode: 'AVATAR_FILE_INVALID',
+      getPreviousStorageKey: (targetUser) => targetUser.avatarStorageKey,
+      update: (targetUser, url, storageKey) => this.userService.updateAvatar(targetUser, url, storageKey),
+    });
   }
 
   async deleteManagedAvatar(user: UserModel) {
-    const previousAvatarStorageKey = user.avatarStorageKey;
-    const updatedUser = await this.userService.clearAvatar(user);
-
-    if (previousAvatarStorageKey) {
-      await this.deleteStoredFile(previousAvatarStorageKey);
-    }
-
-    return updatedUser;
+    return this.deleteManagedProfileImage(user, {
+      clear: (targetUser) => this.userService.clearAvatar(targetUser),
+      getPreviousStorageKey: (targetUser) => targetUser.avatarStorageKey,
+    });
   }
 
   async uploadManagedProfileBanner(user: UserModel, input: ImageUploadInput) {
-    const image = validateProfileImage(input, 'PROFILE_BANNER_FILE_INVALID');
-    const savedFile = await this.saveProfileImage(input, image, 'profile-banners');
-    const previousProfileBannerStorageKey = user.profileBannerStorageKey;
-    let updatedUser: UserModel;
-
-    try {
-      updatedUser = await this.userService.updateProfileBanner(user, savedFile.url, savedFile.key);
-    } catch (error) {
-      await this.deleteStoredFile(savedFile.key);
-      throw error;
-    }
-
-    if (previousProfileBannerStorageKey) {
-      await this.deleteStoredFile(previousProfileBannerStorageKey);
-    }
-
-    return updatedUser;
+    return this.uploadManagedProfileImage(user, input, {
+      directory: 'profile-banners',
+      errorCode: 'PROFILE_BANNER_FILE_INVALID',
+      getPreviousStorageKey: (targetUser) => targetUser.profileBannerStorageKey,
+      update: (targetUser, url, storageKey) => this.userService.updateProfileBanner(targetUser, url, storageKey),
+    });
   }
 
   async deleteManagedProfileBanner(user: UserModel) {
-    const previousProfileBannerStorageKey = user.profileBannerStorageKey;
-    const updatedUser = await this.userService.clearProfileBanner(user);
-
-    if (previousProfileBannerStorageKey) {
-      await this.deleteStoredFile(previousProfileBannerStorageKey);
-    }
-
-    return updatedUser;
+    return this.deleteManagedProfileImage(user, {
+      clear: (targetUser) => this.userService.clearProfileBanner(targetUser),
+      getPreviousStorageKey: (targetUser) => targetUser.profileBannerStorageKey,
+    });
   }
 
   async uploadManagedProfileBackground(user: UserModel, input: ImageUploadInput) {
-    const image = validateProfileImage(input, 'PROFILE_BACKGROUND_FILE_INVALID');
-    const savedFile = await this.saveProfileImage(input, image, 'profile-backgrounds');
-    const previousProfileBackgroundStorageKey = user.profileBackgroundStorageKey;
-    let updatedUser: UserModel;
-
-    try {
-      updatedUser = await this.userService.updateProfileBackground(user, savedFile.url, savedFile.key);
-    } catch (error) {
-      await this.deleteStoredFile(savedFile.key);
-      throw error;
-    }
-
-    if (previousProfileBackgroundStorageKey) {
-      await this.deleteStoredFile(previousProfileBackgroundStorageKey);
-    }
-
-    return updatedUser;
+    return this.uploadManagedProfileImage(user, input, {
+      directory: 'profile-backgrounds',
+      errorCode: 'PROFILE_BACKGROUND_FILE_INVALID',
+      getPreviousStorageKey: (targetUser) => targetUser.profileBackgroundStorageKey,
+      update: (targetUser, url, storageKey) => this.userService.updateProfileBackground(targetUser, url, storageKey),
+    });
   }
 
   async deleteManagedProfileBackground(user: UserModel) {
-    const previousProfileBackgroundStorageKey = user.profileBackgroundStorageKey;
-    const updatedUser = await this.userService.clearProfileBackground(user);
-
-    if (previousProfileBackgroundStorageKey) {
-      await this.deleteStoredFile(previousProfileBackgroundStorageKey);
-    }
-
-    return updatedUser;
+    return this.deleteManagedProfileImage(user, {
+      clear: (targetUser) => this.userService.clearProfileBackground(targetUser),
+      getPreviousStorageKey: (targetUser) => targetUser.profileBackgroundStorageKey,
+    });
   }
 
   async getTotpStatus(token: string) {
@@ -659,6 +703,12 @@ export class AuthService {
     const { sessionId, user } = await this.authenticate(token);
 
     await this.assertStrongVerifier(user, purpose);
+    await this.verificationService.requireSudoGrant(sessionId, user.id, purpose);
+  }
+
+  async requireSudoAccess(token: string, purpose: AuthSelectableVerificationPurposeValue) {
+    const { sessionId, user } = await this.authenticate(token);
+
     await this.verificationService.requireSudoGrant(sessionId, user.id, purpose);
   }
 
@@ -837,12 +887,63 @@ export class AuthService {
     };
   }
 
+  private async requireSessionSudoGrant(
+    user: UserModel,
+    sessionId: string | undefined,
+    purpose: AuthSelectableVerificationPurposeValue,
+  ) {
+    if (!sessionId) {
+      throw new AppError('API_KEY_NOT_SUPPORTED', 'error.API_KEY_NOT_SUPPORTED', 403);
+    }
+
+    await this.verificationService.requireSudoGrant(sessionId, user.id, purpose);
+  }
+
   private async bootstrapRootRoleForFirstUser(user: UserModel) {
     if (await this.userService.hasMultipleAvailableUsers()) {
       return;
     }
 
     await this.accessControl.assignSystemRoleToUser(user.id, SystemRole.Root);
+  }
+
+  private async toAuthUser(user: UserModel) {
+    return toAuthUser(user, await this.accessControl.getUserAccess(user.id));
+  }
+
+  private async uploadManagedProfileImage(
+    user: UserModel,
+    input: ImageUploadInput,
+    options: ManagedProfileImageUploadOptions,
+  ) {
+    const image = validateProfileImage(input, options.errorCode);
+    const savedFile = await this.saveProfileImage(input, image, options.directory);
+    const previousStorageKey = options.getPreviousStorageKey(user);
+    let updatedUser: UserModel;
+
+    try {
+      updatedUser = await options.update(user, savedFile.url, savedFile.key);
+    } catch (error) {
+      await this.deleteStoredFile(savedFile.key);
+      throw error;
+    }
+
+    if (previousStorageKey) {
+      await this.deleteStoredFile(previousStorageKey);
+    }
+
+    return updatedUser;
+  }
+
+  private async deleteManagedProfileImage(user: UserModel, options: ManagedProfileImageDeleteOptions) {
+    const previousStorageKey = options.getPreviousStorageKey(user);
+    const updatedUser = await options.clear(user);
+
+    if (previousStorageKey) {
+      await this.deleteStoredFile(previousStorageKey);
+    }
+
+    return updatedUser;
   }
 
   private async saveProfileImage(

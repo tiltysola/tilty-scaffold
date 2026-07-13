@@ -9,19 +9,8 @@ import {
 import { type Middleware } from 'koa';
 
 import { ok } from '../../core/http';
-import { type BackendModule } from '../../core/module';
-import { type AuthCookieConfig, getAuthToken } from '../auth/auth.http';
 
-export interface ProfileOptionsAuthService {
-  authenticate: (token: string) => Promise<unknown>;
-}
-
-interface ProfileOptionsModuleOptions {
-  authService: ProfileOptionsAuthService;
-  cookies: AuthCookieConfig;
-}
-
-export interface ProfileOptionsUserService {
+export interface UserProfileOptionsService {
   listDistinctProfileGenders: () => Promise<string[]>;
 }
 
@@ -35,26 +24,19 @@ export interface ProfileOption {
 const defaultProfileGenderValues = ['Male', 'Female', 'Secret'] as const;
 const customProfileGenderOptionLimit = 30;
 
-export function createProfileOptionsModule(
-  userService: ProfileOptionsUserService,
-  options: ProfileOptionsModuleOptions,
-): BackendModule {
-  const requireAuthenticated: Middleware = async (ctx, next) => {
-    ctx.state.auth = await options.authService.authenticate(getAuthToken(ctx, options.cookies));
+export class UserProfileOptionsController {
+  constructor(private readonly userService: UserProfileOptionsService) {}
 
-    await next();
-  };
-
-  const getGenders: Middleware = async (ctx) => {
+  genders: Middleware = async (ctx) => {
     const query = getQueryText(ctx.query.q);
-    const customGenders = await userService.listDistinctProfileGenders();
+    const customGenders = await this.userService.listDistinctProfileGenders();
 
     ctx.body = ok({
       options: buildGenderOptions(customGenders, query),
     });
   };
 
-  const getLocationCountries: Middleware = async (ctx) => {
+  locationCountries: Middleware = async (ctx) => {
     const query = getQueryText(ctx.query.q);
 
     ctx.body = ok({
@@ -62,7 +44,7 @@ export function createProfileOptionsModule(
     });
   };
 
-  const getLocationRegions: Middleware = async (ctx) => {
+  locationRegions: Middleware = async (ctx) => {
     const country = await resolveCountry(getQueryText(ctx.query.country));
     const query = getQueryText(ctx.query.q);
 
@@ -71,7 +53,7 @@ export function createProfileOptionsModule(
     });
   };
 
-  const getLocationCities: Middleware = async (ctx) => {
+  locationCities: Middleware = async (ctx) => {
     const country = await resolveCountry(getQueryText(ctx.query.country));
     const region = country ? await resolveRegion(country, getQueryText(ctx.query.region)) : undefined;
     const query = getQueryText(ctx.query.q);
@@ -79,33 +61,6 @@ export function createProfileOptionsModule(
     ctx.body = ok({
       options: region ? await buildCityOptions(region, query) : [],
     });
-  };
-
-  return {
-    name: 'profile-options',
-    prefix: '/api/profile-options',
-    routes: [
-      {
-        method: 'get',
-        path: '/genders',
-        handlers: [requireAuthenticated, getGenders],
-      },
-      {
-        method: 'get',
-        path: '/locations/countries',
-        handlers: [getLocationCountries],
-      },
-      {
-        method: 'get',
-        path: '/locations/regions',
-        handlers: [getLocationRegions],
-      },
-      {
-        method: 'get',
-        path: '/locations/cities',
-        handlers: [getLocationCities],
-      },
-    ],
   };
 }
 

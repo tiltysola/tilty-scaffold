@@ -30,6 +30,7 @@ export type AuthVerificationCodeMethodValue = (typeof authVerificationCodeMethod
 export const AuthVerificationPurpose = {
   ChangePassword: 'change_password',
   Login: 'login',
+  ManageApiKey: 'manage_api_key',
   ManageMfa: 'manage_mfa',
   ManagePasskey: 'manage_passkey',
   ManageSso: 'manage_sso',
@@ -43,6 +44,7 @@ export const AuthVerificationPurpose = {
 export const authVerificationPurposeValues = [
   AuthVerificationPurpose.ChangePassword,
   AuthVerificationPurpose.Login,
+  AuthVerificationPurpose.ManageApiKey,
   AuthVerificationPurpose.ManageMfa,
   AuthVerificationPurpose.ManagePasskey,
   AuthVerificationPurpose.ManageSso,
@@ -57,6 +59,7 @@ export type AuthVerificationPurposeValue = (typeof authVerificationPurposeValues
 
 export const authSelectableVerificationPurposeValues = [
   AuthVerificationPurpose.ChangePassword,
+  AuthVerificationPurpose.ManageApiKey,
   AuthVerificationPurpose.ManageMfa,
   AuthVerificationPurpose.ManagePasskey,
   AuthVerificationPurpose.ManageSso,
@@ -81,3 +84,5 @@ export const authSessionDeviceTypeValues = [
 ] as const;
 
 export type AuthSessionDeviceTypeValue = (typeof authSessionDeviceTypeValues)[number];
+
+export type ProfileImageFieldName = 'avatar' | 'profileBanner' | 'profileBackground';

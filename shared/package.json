@@ -1,6 +1,6 @@
 {
   "name": "@tilty/shared",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "type": "commonjs",
   "exports": {
@@ -24,6 +24,13 @@
       "import": "./dist/esm/access-control.mjs",
       "require": "./dist/cjs/access-control.js",
       "default": "./dist/esm/access-control.mjs"
+    },
+    "./api-keys": {
+      "development": "./src/api-keys.ts",
+      "types": "./dist/esm/api-keys.d.ts",
+      "import": "./dist/esm/api-keys.mjs",
+      "require": "./dist/cjs/api-keys.js",
+      "default": "./dist/esm/api-keys.mjs"
     },
     "./auth": {
       "development": "./src/auth.ts",

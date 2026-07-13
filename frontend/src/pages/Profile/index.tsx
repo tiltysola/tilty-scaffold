@@ -33,6 +33,7 @@ import {
 } from '@/lib/auth';
 import { composePhoneNumber, getPhoneCountryCode, getPhoneLocalNumber, supportedPhoneCountryCodes } from '@/lib/phone';
 import { getVerificationCodeDelivery, maskEmailAddress, maskPhoneNumber } from '@/lib/verification';
+import { AuthVerificationPurpose } from '@tilty/shared/auth';
 import { phoneNumberSchema, verificationCodeSchema } from '@tilty/shared/validation';
 
 import { IdentityVerificationDialog, type IdentityVerificationSubmitInput } from '@/components/IdentityVerification';
@@ -368,7 +369,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     securityVerificationAction.clearError();
 
     const challenge = await securityVerificationAction.run(
-      () => createVerificationChallenge('update_contact'),
+      () => createVerificationChallenge(AuthVerificationPurpose.UpdateContact),
       intl.formatMessage({ id: 'identity.security.verification.start.failed' }),
     );
 
@@ -391,7 +392,7 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
     securityVerificationAction.clearError();
 
     const challenge = await securityVerificationAction.run(
-      () => createVerificationChallenge('manage_sso'),
+      () => createVerificationChallenge(AuthVerificationPurpose.ManageSso),
       intl.formatMessage({ id: 'identity.security.verification.start.failed' }),
     );
 
@@ -577,22 +578,22 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
           avatarAlt={user.displayName}
           avatarBusy={avatarBusy}
           avatarUrl={avatarUrl}
-          backgroundBusy={profileBackgroundBusy}
-          bannerBusy={profileBannerBusy}
-          bannerUrl={profileBannerUrl}
           descriptionClassName={profileHeaderDescriptionClassName}
           fallback={fallback}
           onChangeAvatar={profileImageUploadEnabled ? profileImages.avatar.openDialog : undefined}
-          onChangeBackground={profileImageUploadEnabled ? profileImages.profileBackground.openDialog : undefined}
           onChangeBanner={profileImageUploadEnabled ? profileImages.profileBanner.openDialog : undefined}
+          onChangeBackground={profileImageUploadEnabled ? profileImages.profileBackground.openDialog : undefined}
           onEditProfileDetails={handleEditProfileDetails}
+          profileBannerBusy={profileBannerBusy}
+          profileBannerUrl={profileBannerUrl}
+          profileBackgroundBusy={profileBackgroundBusy}
           sectionRef={profileHeaderRef}
           textRef={profileHeaderTextRef}
           title={user.displayName}
           titleClassName={profileHeaderTitleClassName}
           uploadingAvatar={uploadingAvatar}
-          uploadingBackground={uploadingProfileBackground}
-          uploadingBanner={uploadingProfileBanner}
+          uploadingProfileBanner={uploadingProfileBanner}
+          uploadingProfileBackground={uploadingProfileBackground}
           userHandle={userHandle}
         />
 
@@ -602,17 +603,17 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
           <ProfilePersonalizationSection
             avatarBusy={avatarBusy}
             avatarUrl={avatarUrl}
-            backgroundBusy={profileBackgroundBusy}
             fallback={fallback}
             imageUploadEnabled={profileImageUploadEnabled}
             onChangeAvatar={profileImages.avatar.openDialog}
-            onChangeBackground={profileImages.profileBackground.openDialog}
             onChangeBanner={profileImages.profileBanner.openDialog}
+            onChangeBackground={profileImages.profileBackground.openDialog}
             onPreviewTargetChange={setProfilePreviewTarget}
             previewTarget={profilePreviewTarget}
-            profileBackgroundUrl={profileBackgroundUrl}
             profileBannerBusy={profileBannerBusy}
             profileBannerUrl={profileBannerUrl}
+            profileBackgroundBusy={profileBackgroundBusy}
+            profileBackgroundUrl={profileBackgroundUrl}
             userDisplayName={user.displayName}
           />
 
@@ -644,32 +645,32 @@ const ProfileContent = ({ user }: { user: AuthUser }) => {
         avatarUploadError={profileImages.avatar.uploadError}
         avatarUrl={avatarUrl}
         deletingAvatar={deletingAvatar}
-        deletingProfileBackground={deletingProfileBackground}
         deletingProfileBanner={deletingProfileBanner}
+        deletingProfileBackground={deletingProfileBackground}
         maxFileBytes={profileImageMaxBytes}
         onAvatarImageSelect={profileImages.avatar.handleImageSelect}
         onAvatarOpenChange={profileImages.avatar.handleOpenChange}
         onAvatarRemove={profileImages.avatar.handleRemove}
         onAvatarSubmit={profileImages.avatar.handleSubmit}
-        onProfileBackgroundImageSelect={profileImages.profileBackground.handleImageSelect}
-        onProfileBackgroundOpenChange={profileImages.profileBackground.handleOpenChange}
-        onProfileBackgroundRemove={profileImages.profileBackground.handleRemove}
-        onProfileBackgroundSubmit={profileImages.profileBackground.handleSubmit}
         onProfileBannerImageSelect={profileImages.profileBanner.handleImageSelect}
         onProfileBannerOpenChange={profileImages.profileBanner.handleOpenChange}
         onProfileBannerRemove={profileImages.profileBanner.handleRemove}
         onProfileBannerSubmit={profileImages.profileBanner.handleSubmit}
-        profileBackgroundCropImageUrl={profileImages.profileBackground.cropImageUrl}
-        profileBackgroundOpen={profileImages.profileBackground.open}
-        profileBackgroundUploadError={profileImages.profileBackground.uploadError}
-        profileBackgroundUrl={profileBackgroundUrl}
+        onProfileBackgroundImageSelect={profileImages.profileBackground.handleImageSelect}
+        onProfileBackgroundOpenChange={profileImages.profileBackground.handleOpenChange}
+        onProfileBackgroundRemove={profileImages.profileBackground.handleRemove}
+        onProfileBackgroundSubmit={profileImages.profileBackground.handleSubmit}
         profileBannerCropImageUrl={profileImages.profileBanner.cropImageUrl}
         profileBannerOpen={profileImages.profileBanner.open}
         profileBannerUploadError={profileImages.profileBanner.uploadError}
         profileBannerUrl={profileBannerUrl}
+        profileBackgroundCropImageUrl={profileImages.profileBackground.cropImageUrl}
+        profileBackgroundOpen={profileImages.profileBackground.open}
+        profileBackgroundUploadError={profileImages.profileBackground.uploadError}
+        profileBackgroundUrl={profileBackgroundUrl}
         uploadingAvatar={uploadingAvatar}
-        uploadingProfileBackground={uploadingProfileBackground}
         uploadingProfileBanner={uploadingProfileBanner}
+        uploadingProfileBackground={uploadingProfileBackground}
       />
       {pendingVerification ? (
         <IdentityVerificationDialog

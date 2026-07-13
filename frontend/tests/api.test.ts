@@ -86,7 +86,7 @@ describe('apiRequest', () => {
     form.append('avatar', new Blob(['avatar'], { type: 'image/png' }), 'avatar.png');
     vi.stubGlobal('fetch', fetchMock);
 
-    await apiRequest<{ ok: boolean }>('/api/auth/avatar', {
+    await apiRequest<{ ok: boolean }>('/api/users/me/avatar', {
       body: form,
       method: 'POST',
     });
@@ -127,8 +127,8 @@ describe('apiRequest', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     for (const path of [
-      'https://api.example.com/api/auth/me',
-      '//api.example.com/api/auth/me',
+      'https://api.example.com/api/users/me',
+      '//api.example.com/api/users/me',
       '/uploads/avatar.png',
     ]) {
       await expect(apiRequest(path)).rejects.toMatchObject({
@@ -155,7 +155,7 @@ describe('apiRequest', () => {
       }),
     );
 
-    await expect(apiRequest('/api/auth/me')).rejects.toMatchObject({
+    await expect(apiRequest('/api/users/me')).rejects.toMatchObject({
       code: 'AUTH_REQUIRED',
       status: 401,
     });

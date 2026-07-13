@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fetchUsers, updateUser } from '../src/lib/users';
 import { clearAuthSession, createSession, createTestWindow, seedAuthSession } from './support/auth';
 
-describe('users API client', () => {
+describe('admin users API client', () => {
   afterEach(() => {
     clearAuthSession();
     vi.unstubAllGlobals();
@@ -45,7 +45,7 @@ describe('users API client', () => {
       roles: [],
       users: [],
     });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/?page=2&pageSize=20');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/admin/users/?page=2&pageSize=20');
   });
 
   it('updates a managed user with changed fields and roles', async () => {
@@ -96,7 +96,7 @@ describe('users API client', () => {
 
     const [url, init] = fetchMock.mock.calls[0]!;
 
-    expect(url).toBe('/api/users/user-id');
+    expect(url).toBe('/api/admin/users/user-id');
     expect(init?.method).toBe('PUT');
     expect(init?.body).toBe(
       JSON.stringify({

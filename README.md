@@ -29,9 +29,9 @@ output.
 
 Frontend runs on `http://localhost:8011`. The root route `/` serves the public
 landing page without authentication, and the authenticated console starts at
-`/dashboard`. Complete `/setup` to write `backend/config.toml`, apply
-migrations, and seed built-in access control. Backend defaults to
-`http://localhost:3000`; Swagger UI is available at `/api/docs`.
+`/dashboard`. Complete `/setup` to write `config.toml`, apply migrations, and
+seed built-in access control. Backend defaults to `http://localhost:3000`;
+Swagger UI is available at `/api/docs`.
 
 After setup, runtime configuration is managed from System Settings. That page
 is available only to `ROOT` users with a configured passkey or authenticator app
@@ -71,11 +71,11 @@ The backend stores access and refresh tokens in HttpOnly cookies and returns
 session metadata. The frontend discovers public authentication, SSO, and email
 verification settings from backend endpoints. Persistent browser storage keeps
 only token-expiration metadata; authenticated user state is refreshed from
-`/api/auth/me`.
+`/api/users/me`.
 
 Access control is shared across all workspaces. Built-in permission keys live in
 `shared/`; the backend synchronizes and enforces RBAC; the frontend uses the
-authenticated user's roles and permissions from `/api/auth/me` for navigation
+authenticated user's roles and permissions from `/api/users/me` for navigation
 and route access. Backend synchronization and schema details are documented in
 `backend/README.md`.
 

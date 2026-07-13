@@ -1,3 +1,5 @@
+import { type ProfileImageFieldName } from '@tilty/shared/auth';
+
 import {
   type AuthDeviceSession,
   authenticatedApiRequest,
@@ -71,6 +73,8 @@ interface FetchUsersOptions {
   pageSize?: number;
 }
 
+type UserImagePathSegment = 'avatar' | 'profile-banner' | 'profile-background';
+
 export interface UpdateUserInput {
   username?: string;
   displayName?: string;
@@ -101,36 +105,36 @@ export async function fetchUsers(options: FetchUsersOptions = {}) {
 
   const query = params.toString();
 
-  return authenticatedApiRequest<UserListResponse>(`/api/users/${query ? `?${query}` : ''}`);
+  return authenticatedApiRequest<UserListResponse>(`/api/admin/users/${query ? `?${query}` : ''}`);
 }
 
 export async function updateUser(userId: string, input: UpdateUserInput) {
-  return authenticatedApiRequest<UserListItem>(`/api/users/${userId}`, {
+  return authenticatedApiRequest<UserListItem>(`/api/admin/users/${userId}`, {
     body: input,
     method: 'PUT',
   });
 }
 
 export async function fetchUserDetails(userId: string) {
-  return authenticatedApiRequest<ManagedUserDetails>(`/api/users/${userId}/details`, {
+  return authenticatedApiRequest<ManagedUserDetails>(`/api/admin/users/${userId}/details`, {
     method: 'GET',
   });
 }
 
 export function revokeUserDeviceSession(userId: string, sessionId: string) {
-  return authenticatedApiRequest<{ revoked: true }>(`/api/users/${userId}/devices/${sessionId}`, {
+  return authenticatedApiRequest<{ revoked: true }>(`/api/admin/users/${userId}/devices/${sessionId}`, {
     method: 'DELETE',
   });
 }
 
 export function revokeUserDeviceSessions(userId: string) {
-  return authenticatedApiRequest<{ revoked: true }>(`/api/users/${userId}/devices`, {
+  return authenticatedApiRequest<{ revoked: true }>(`/api/admin/users/${userId}/devices`, {
     method: 'DELETE',
   });
 }
 
 export async function updateUserRoles(userId: string, roleKeys: string[]) {
-  return authenticatedApiRequest<UserListItem>(`/api/users/${userId}/roles`, {
+  return authenticatedApiRequest<UserListItem>(`/api/admin/users/${userId}/roles`, {
     body: {
       roleKeys,
     },
@@ -139,27 +143,27 @@ export async function updateUserRoles(userId: string, roleKeys: string[]) {
 }
 
 export async function updateUserMfaSettings(userId: string, input: { enabled?: boolean; requiredForSso?: boolean }) {
-  return authenticatedApiRequest<ManagedUserSecurity>(`/api/users/${userId}/mfa`, {
+  return authenticatedApiRequest<ManagedUserSecurity>(`/api/admin/users/${userId}/mfa`, {
     body: input,
     method: 'PATCH',
   });
 }
 
 export async function disableUserTotp(userId: string) {
-  return authenticatedApiRequest<ManagedUserSecurity>(`/api/users/${userId}/totp/disable`, {
+  return authenticatedApiRequest<ManagedUserSecurity>(`/api/admin/users/${userId}/totp/disable`, {
     method: 'POST',
   });
 }
 
 export async function deleteUserPasskey(userId: string, passkeyId: string) {
-  return authenticatedApiRequest<ManagedUserSecurity>(`/api/users/${userId}/passkeys/${passkeyId}`, {
+  return authenticatedApiRequest<ManagedUserSecurity>(`/api/admin/users/${userId}/passkeys/${passkeyId}`, {
     method: 'DELETE',
   });
 }
 
 export async function deleteUserSsoIdentity(userId: string, providerId: string) {
   return authenticatedApiRequest<{ identities: SsoIdentityPublic[] }>(
-    `/api/users/${userId}/sso-identities/${providerId}`,
+    `/api/admin/users/${userId}/sso-identities/${providerId}`,
     {
       method: 'DELETE',
     },
@@ -171,7 +175,7 @@ export function uploadUserAvatar(userId: string, file: File) {
 }
 
 export function deleteUserAvatar(userId: string) {
-  return authenticatedApiRequest<ManagedUserDetails>(`/api/users/${userId}/avatar`, {
+  return authenticatedApiRequest<ManagedUserDetails>(`/api/admin/users/${userId}/avatar`, {
     method: 'DELETE',
   });
 }
@@ -181,7 +185,7 @@ export function uploadUserProfileBanner(userId: string, file: File) {
 }
 
 export function deleteUserProfileBanner(userId: string) {
-  return authenticatedApiRequest<ManagedUserDetails>(`/api/users/${userId}/profile-banner`, {
+  return authenticatedApiRequest<ManagedUserDetails>(`/api/admin/users/${userId}/profile-banner`, {
     method: 'DELETE',
   });
 }
@@ -191,17 +195,17 @@ export function uploadUserProfileBackground(userId: string, file: File) {
 }
 
 export function deleteUserProfileBackground(userId: string) {
-  return authenticatedApiRequest<ManagedUserDetails>(`/api/users/${userId}/profile-background`, {
+  return authenticatedApiRequest<ManagedUserDetails>(`/api/admin/users/${userId}/profile-background`, {
     method: 'DELETE',
   });
 }
 
-function uploadUserImage(userId: string, segment: string, fieldName: string, file: File) {
+function uploadUserImage(userId: string, segment: UserImagePathSegment, fieldName: ProfileImageFieldName, file: File) {
   const form = new FormData();
 
   form.append(fieldName, file);
 
-  return authenticatedApiRequest<ManagedUserDetails>(`/api/users/${userId}/${segment}`, {
+  return authenticatedApiRequest<ManagedUserDetails>(`/api/admin/users/${userId}/${segment}`, {
     body: form,
     method: 'POST',
   });

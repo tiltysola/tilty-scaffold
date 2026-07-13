@@ -9,8 +9,8 @@ import { createSequelize } from '../src/infra/database';
 import { createMigrator } from '../src/infra/migrator';
 import { errorMiddleware } from '../src/middleware/error';
 import { localeMiddleware } from '../src/middleware/locale';
+import { createAdminModule } from '../src/modules/admin';
 import { defaultAuthCookieConfig } from '../src/modules/auth/auth.http';
-import { createUsersModule } from '../src/modules/users';
 import { registerRootWithUserManagementAccess, registerTestUser } from './support/auth';
 import { createTestContext, getTestRoute, runMiddlewares } from './support/http';
 import { createTotpCode } from './support/totp';
@@ -116,7 +116,7 @@ const ssoProfile = {
   usernameField: 'preferred_username',
 };
 
-describe('users API', () => {
+describe('admin users API', () => {
   let models: ReturnType<typeof initModels>;
   let routes: RouteDefinition[];
   let sequelize: ReturnType<typeof createSequelize>;
@@ -136,7 +136,8 @@ describe('users API', () => {
     await createMigrator(sequelize).up();
     await services.accessControl.syncSystemAccessControl();
 
-    routes = createUsersModule(services.user, services.accessControl, services.auth, {
+    routes = createAdminModule(services.user, services.accessControl, services.auth, {
+      apiKeyService: services.apiKey,
       cookies: defaultAuthCookieConfig,
       ssoService: services.sso,
     }).routes;
@@ -148,7 +149,7 @@ describe('users API', () => {
 
   it('rejects user list access without a passkey or authenticator app', async () => {
     const rootSession = await registerTestUser(services.auth, 'Root User', 'root-no-user-management-mfa@example.com');
-    const listRoute = getTestRoute(routes, 'get', '/');
+    const listRoute = getTestRoute(routes, 'get', '/users/');
     const context = await runMiddlewares(
       [errorMiddleware(), localeMiddleware(), ...listRoute.handlers],
       createTestContext(
@@ -176,7 +177,7 @@ describe('users API', () => {
     const rootSession = await registerRootWithUserManagementAccess(services, 'Root User', 'root-paged@example.com');
     await registerTestUser(services.auth, 'Alpha User', 'alpha-paged@example.com');
     await registerTestUser(services.auth, 'Beta User', 'beta-paged@example.com');
-    const listRoute = getTestRoute(routes, 'get', '/');
+    const listRoute = getTestRoute(routes, 'get', '/users/');
     const context = await runMiddlewares(
       [errorMiddleware(), ...listRoute.handlers],
       createTestContext(undefined, {}, undefined, {
@@ -211,7 +212,7 @@ describe('users API', () => {
       return;
     }
 
-    const updateRoute = getTestRoute(routes, 'put', '/:id');
+    const updateRoute = getTestRoute(routes, 'put', '/users/:id');
     const context = await runMiddlewares(
       [errorMiddleware(), ...updateRoute.handlers],
       createTestContext(
@@ -319,7 +320,7 @@ describe('users API', () => {
       providerSubject: 'mahoutsukai-target-details',
     });
 
-    const detailsRoute = getTestRoute(routes, 'get', '/:id/details');
+    const detailsRoute = getTestRoute(routes, 'get', '/users/:id/details');
     const context = await runMiddlewares(
       [errorMiddleware(), ...detailsRoute.handlers],
       createTestContext(
@@ -387,7 +388,7 @@ describe('users API', () => {
       throw new Error('Verification challenge was not expected for this account.');
     }
 
-    const devicesRoute = getTestRoute(routes, 'get', '/:id/devices');
+    const devicesRoute = getTestRoute(routes, 'get', '/users/:id/devices');
     const devicesContext = await runMiddlewares(
       [errorMiddleware(), ...devicesRoute.handlers],
       createTestContext(
@@ -413,7 +414,7 @@ describe('users API', () => {
       return;
     }
 
-    const revokeDeviceRoute = getTestRoute(routes, 'delete', '/:id/devices/:sessionId');
+    const revokeDeviceRoute = getTestRoute(routes, 'delete', '/users/:id/devices/:sessionId');
     const revokeDeviceContext = await runMiddlewares(
       [errorMiddleware(), ...revokeDeviceRoute.handlers],
       createTestContext(
@@ -446,7 +447,7 @@ describe('users API', () => {
       email: 'target-devices@example.com',
     });
 
-    const revokeDevicesRoute = getTestRoute(routes, 'delete', '/:id/devices');
+    const revokeDevicesRoute = getTestRoute(routes, 'delete', '/users/:id/devices');
     const revokeDevicesContext = await runMiddlewares(
       [errorMiddleware(), ...revokeDevicesRoute.handlers],
       createTestContext(
@@ -490,7 +491,7 @@ describe('users API', () => {
       return;
     }
 
-    const devicesRoute = getTestRoute(routes, 'get', '/:id/devices');
+    const devicesRoute = getTestRoute(routes, 'get', '/users/:id/devices');
     const devicesContext = await runMiddlewares(
       [errorMiddleware(), ...devicesRoute.handlers],
       createTestContext(
@@ -515,7 +516,7 @@ describe('users API', () => {
       return;
     }
 
-    const revokeDeviceRoute = getTestRoute(routes, 'delete', '/:id/devices/:sessionId');
+    const revokeDeviceRoute = getTestRoute(routes, 'delete', '/users/:id/devices/:sessionId');
     const revokeCurrentContext = await runMiddlewares(
       [errorMiddleware(), ...revokeDeviceRoute.handlers],
       createTestContext(
@@ -538,7 +539,7 @@ describe('users API', () => {
       error: 'AUTH_CURRENT_SESSION_REVOKE_FORBIDDEN',
     });
 
-    const revokeDevicesRoute = getTestRoute(routes, 'delete', '/:id/devices');
+    const revokeDevicesRoute = getTestRoute(routes, 'delete', '/users/:id/devices');
     const revokeDevicesContext = await runMiddlewares(
       [errorMiddleware(), ...revokeDevicesRoute.handlers],
       createTestContext(
@@ -594,7 +595,7 @@ describe('users API', () => {
       lastUsedAt: null,
     });
 
-    const deletePasskeyRoute = getTestRoute(routes, 'delete', '/:id/passkeys/:passkeyId');
+    const deletePasskeyRoute = getTestRoute(routes, 'delete', '/users/:id/passkeys/:passkeyId');
     const passkeyContext = await runMiddlewares(
       [errorMiddleware(), ...deletePasskeyRoute.handlers],
       createTestContext(
@@ -616,7 +617,7 @@ describe('users API', () => {
     expect(passkeyBody.data.passkeys).toHaveLength(0);
     expect(passkeyBody.data.mfaSettings.passkeyCount).toBe(0);
 
-    const disableTotpRoute = getTestRoute(routes, 'post', '/:id/totp/disable');
+    const disableTotpRoute = getTestRoute(routes, 'post', '/users/:id/totp/disable');
     const totpContext = await runMiddlewares(
       [errorMiddleware(), ...disableTotpRoute.handlers],
       createTestContext(
@@ -659,7 +660,7 @@ describe('users API', () => {
       providerSubject: 'mahoutsukai-target-sso',
     });
 
-    const mfaRoute = getTestRoute(routes, 'patch', '/:id/mfa');
+    const mfaRoute = getTestRoute(routes, 'patch', '/users/:id/mfa');
     const mfaContext = await runMiddlewares(
       [errorMiddleware(), ...mfaRoute.handlers],
       createTestContext(
@@ -681,7 +682,7 @@ describe('users API', () => {
 
     expect(mfaBody.data.mfaSettings.mfaRequiredForSso).toBe(false);
 
-    const deleteSsoRoute = getTestRoute(routes, 'delete', '/:id/sso-identities/:providerId');
+    const deleteSsoRoute = getTestRoute(routes, 'delete', '/users/:id/sso-identities/:providerId');
     const ssoContext = await runMiddlewares(
       [errorMiddleware(), ...deleteSsoRoute.handlers],
       createTestContext(
@@ -715,7 +716,7 @@ describe('users API', () => {
       return;
     }
 
-    const updateRoute = getTestRoute(routes, 'put', '/:id');
+    const updateRoute = getTestRoute(routes, 'put', '/users/:id');
     const context = await runMiddlewares(
       [errorMiddleware(), ...updateRoute.handlers],
       createTestContext(
@@ -788,7 +789,7 @@ describe('users API', () => {
       return;
     }
 
-    const updateRoute = getTestRoute(routes, 'put', '/:id');
+    const updateRoute = getTestRoute(routes, 'put', '/users/:id');
     const context = await runMiddlewares(
       [errorMiddleware(), ...updateRoute.handlers],
       createTestContext(
@@ -826,7 +827,7 @@ describe('users API', () => {
       return;
     }
 
-    const updateRoute = getTestRoute(routes, 'put', '/:id');
+    const updateRoute = getTestRoute(routes, 'put', '/users/:id');
     const context = await runMiddlewares(
       [errorMiddleware(), ...updateRoute.handlers],
       createTestContext(

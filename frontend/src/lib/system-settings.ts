@@ -7,11 +7,11 @@ export interface SystemSettings {
 }
 
 export async function fetchSystemSettings() {
-  return apiRequest<SystemSettings>('/api/system-settings/');
+  return apiRequest<SystemSettings>('/api/admin/system-settings/');
 }
 
 export async function updateSystemSettings(environment: SetupEnvironment) {
-  return apiRequest<{ restartRequired: true; updated: true }>('/api/system-settings/', {
+  return apiRequest<{ restartRequired: true; updated: true }>('/api/admin/system-settings/', {
     body: {
       environment,
     },

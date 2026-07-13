@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { apiKeyPrefix } from '@tilty/shared/api-keys';
+
 import { csrfProtectionMiddleware } from '../src/middleware/csrf';
 import { requestIdMiddleware } from '../src/middleware/request-id';
 import { securityHeadersMiddleware } from '../src/middleware/security-headers';
@@ -152,6 +154,25 @@ describe('security middleware', () => {
         {
           method: 'POST',
           path: '/api/auth/login',
+        },
+      ),
+    );
+
+    expect(context.status).toBeUndefined();
+  });
+
+  it('allows unsafe API Key bearer requests without browser origin headers', async () => {
+    const context = await runMiddleware(
+      csrfProtectionMiddleware({ allowedOrigins: ['http://localhost:8011'] }),
+      createTestContext(
+        undefined,
+        {
+          authorization: `Bearer ${apiKeyPrefix}_test`,
+        },
+        undefined,
+        {
+          method: 'POST',
+          path: '/api/users/me',
         },
       ),
     );

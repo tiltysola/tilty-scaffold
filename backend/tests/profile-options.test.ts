@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { defaultAuthCookieConfig } from '../src/modules/auth/auth.http';
-import { createProfileOptionsModule, type ProfileOptionsUserService } from '../src/modules/profile-options';
+import { createUsersModule } from '../src/modules/users';
+import { type UserProfileOptionsService } from '../src/modules/users/user-profile-options.controller';
 import { createTestContext, getTestRoute, runMiddlewares } from './support/http';
 
 interface ProfileOptionsBody {
@@ -18,14 +19,14 @@ interface ProfileOptionsBody {
 describe('profile options API', () => {
   const userService = {
     listDistinctProfileGenders: async () => ['Wuzhuang Helicaptor', 'Agender', 'male'],
-  } satisfies ProfileOptionsUserService;
+  } satisfies UserProfileOptionsService;
   const options = {
     authService: {
       authenticate: async () => ({}),
     },
     cookies: defaultAuthCookieConfig,
   };
-  const routes = createProfileOptionsModule(userService, options).routes;
+  const routes = createProfileOptionsRoutes(userService, options);
 
   it('returns default gender options before custom user gender options', async () => {
     const context = await runProfileOptionsRoute(routes, '/genders');
@@ -81,12 +82,12 @@ describe('profile options API', () => {
   });
 
   it('limits custom gender options to 30 random values', async () => {
-    const limitedRoutes = createProfileOptionsModule(
+    const limitedRoutes = createProfileOptionsRoutes(
       {
         listDistinctProfileGenders: async () => Array.from({ length: 40 }, (_, index) => `Custom Gender ${index + 1}`),
       },
       options,
-    ).routes;
+    );
     const context = await runProfileOptionsRoute(limitedRoutes, '/genders');
     const body = context.body as ProfileOptionsBody;
 
@@ -201,7 +202,7 @@ describe('profile options API', () => {
 });
 
 function runProfileOptionsRoute(
-  routes: ReturnType<typeof createProfileOptionsModule>['routes'],
+  routes: ReturnType<typeof createProfileOptionsRoutes>,
   path: string,
   options: {
     authenticated?: boolean;
@@ -209,7 +210,7 @@ function runProfileOptionsRoute(
   } = {},
 ) {
   return runMiddlewares(
-    getTestRoute(routes, 'get', path).handlers,
+    getTestRoute(routes, 'get', `/profile-options${path}`).handlers,
     createTestContext(undefined, {}, undefined, {
       cookies:
         options.authenticated === false
@@ -220,4 +221,20 @@ function runProfileOptionsRoute(
       query: options.query,
     }),
   );
+}
+
+function createProfileOptionsRoutes(
+  userService: UserProfileOptionsService,
+  options: {
+    authService: { authenticate: () => Promise<unknown> };
+    cookies: typeof defaultAuthCookieConfig;
+  },
+) {
+  return createUsersModule(
+    userService as Parameters<typeof createUsersModule>[0],
+    options.authService as Parameters<typeof createUsersModule>[1],
+    {
+      cookies: options.cookies,
+    },
+  ).routes;
 }

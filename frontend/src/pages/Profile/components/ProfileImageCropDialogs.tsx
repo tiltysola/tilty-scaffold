@@ -8,32 +8,32 @@ interface ProfileImageCropDialogsProps {
   avatarUrl?: string;
   avatarUploadError: string | null;
   deletingAvatar: boolean;
-  deletingProfileBackground: boolean;
   deletingProfileBanner: boolean;
+  deletingProfileBackground: boolean;
   maxFileBytes: number | null;
   onAvatarImageSelect: (file: File) => void;
   onAvatarOpenChange: (open: boolean) => void;
   onAvatarRemove: () => Promise<void> | void;
   onAvatarSubmit: (file: File) => Promise<void> | void;
-  onProfileBackgroundImageSelect: (file: File) => void;
-  onProfileBackgroundOpenChange: (open: boolean) => void;
-  onProfileBackgroundRemove: () => Promise<void> | void;
-  onProfileBackgroundSubmit: (file: File) => Promise<void> | void;
   onProfileBannerImageSelect: (file: File) => void;
   onProfileBannerOpenChange: (open: boolean) => void;
   onProfileBannerRemove: () => Promise<void> | void;
   onProfileBannerSubmit: (file: File) => Promise<void> | void;
-  profileBackgroundCropImageUrl: string | null;
-  profileBackgroundOpen: boolean;
-  profileBackgroundUploadError: string | null;
-  profileBackgroundUrl?: string;
+  onProfileBackgroundImageSelect: (file: File) => void;
+  onProfileBackgroundOpenChange: (open: boolean) => void;
+  onProfileBackgroundRemove: () => Promise<void> | void;
+  onProfileBackgroundSubmit: (file: File) => Promise<void> | void;
   profileBannerCropImageUrl: string | null;
   profileBannerOpen: boolean;
   profileBannerUploadError: string | null;
   profileBannerUrl?: string;
+  profileBackgroundCropImageUrl: string | null;
+  profileBackgroundOpen: boolean;
+  profileBackgroundUploadError: string | null;
+  profileBackgroundUrl?: string;
   uploadingAvatar: boolean;
-  uploadingProfileBackground: boolean;
   uploadingProfileBanner: boolean;
+  uploadingProfileBackground: boolean;
 }
 
 export function ProfileImageCropDialogs({
@@ -42,32 +42,32 @@ export function ProfileImageCropDialogs({
   avatarUploadError,
   avatarUrl,
   deletingAvatar,
-  deletingProfileBackground,
   deletingProfileBanner,
+  deletingProfileBackground,
   maxFileBytes,
   onAvatarImageSelect,
   onAvatarOpenChange,
   onAvatarRemove,
   onAvatarSubmit,
-  onProfileBackgroundImageSelect,
-  onProfileBackgroundOpenChange,
-  onProfileBackgroundRemove,
-  onProfileBackgroundSubmit,
   onProfileBannerImageSelect,
   onProfileBannerOpenChange,
   onProfileBannerRemove,
   onProfileBannerSubmit,
-  profileBackgroundCropImageUrl,
-  profileBackgroundOpen,
-  profileBackgroundUploadError,
-  profileBackgroundUrl,
+  onProfileBackgroundImageSelect,
+  onProfileBackgroundOpenChange,
+  onProfileBackgroundRemove,
+  onProfileBackgroundSubmit,
   profileBannerCropImageUrl,
   profileBannerOpen,
   profileBannerUploadError,
   profileBannerUrl,
+  profileBackgroundCropImageUrl,
+  profileBackgroundOpen,
+  profileBackgroundUploadError,
+  profileBackgroundUrl,
   uploadingAvatar,
-  uploadingProfileBackground,
   uploadingProfileBanner,
+  uploadingProfileBackground,
 }: ProfileImageCropDialogsProps) {
   const intl = useIntl();
 

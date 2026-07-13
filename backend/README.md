@@ -34,15 +34,16 @@ and `npm start`.
 
 ## Configuration
 
-For manual configuration, copy `config.toml.example` to `config.toml` and edit
-supported configuration keys there.
+For manual configuration, copy the repository root `config.toml.example` to
+`config.toml` and edit supported configuration keys there.
 
 ```bash
-cp config.toml.example config.toml
+cp ../config.toml.example ../config.toml
 ```
 
-Application configuration is loaded from `config.toml`. Process environment
-variables are used only by setup-only mode before the backend is locked.
+Application configuration is loaded from the repository root `config.toml`.
+Process environment variables are used only by setup-only mode before the
+backend is locked.
 
 Project-defined configuration keys use uppercase snake case and begin with a
 domain prefix, such as `APP_`, `SERVER_`, `AUTH_`, `DATABASE_`, `EMAIL_`,
@@ -71,14 +72,13 @@ masked; inactive provider fields are omitted.
 Relative runtime paths such as `DATABASE_STORAGE`, `LOG_LOCAL_PATH`, and
 `FILE_LOCAL_ROOT` must resolve inside the project root.
 
-Local defaults use SQLite, `DATABASE_SYNC=off`, and schema migrations.
+Local defaults use SQLite and schema migrations.
 `db:migrate` applies migrations and synchronizes built-in permissions and roles.
-Startup validates that migrations are fully applied when `DATABASE_SYNC=off`,
-then synchronizes those records after database connection. Production requires
-`DATABASE_SYNC=off`, `AUTH_COOKIE_SECURE=true`, a non-example
-`AUTH_TOKEN_SECRET`, and a CORS allowlist without `*`. Use MySQL or PostgreSQL
-for multi-instance deployments. Keep total pooled database connections across
-all backend instances below the database connection limit.
+Startup validates that migrations are fully applied, then synchronizes those
+records after database connection. Production requires `AUTH_COOKIE_SECURE=true`,
+a non-example `AUTH_TOKEN_SECRET`, and a CORS allowlist without `*`. Use MySQL or
+PostgreSQL for multi-instance deployments. Keep total pooled database
+connections across all backend instances below the database connection limit.
 
 `APP_DOMAIN` defines the primary public application origin, including protocol,
 such as `https://app.example.com`. Setup uses this value as the default
@@ -125,7 +125,7 @@ file URLs must use HTTPS in production. Avatar, profile banner, and profile
 background uploads are limited by `FILE_UPLOAD_MAX_BYTES`.
 
 Authentication uses short-lived access tokens and longer-lived refresh tokens.
-Browser sessions store both tokens in HttpOnly cookies. Token lifetimes are
+User sessions store both tokens in HttpOnly cookies. Token lifetimes are
 controlled by `AUTH_ACCESS_TOKEN_TTL_SECONDS` and
 `AUTH_REFRESH_TOKEN_TTL_SECONDS`; cookie names and policies are controlled by
 `AUTH_ACCESS_TOKEN_COOKIE_NAME`, `AUTH_REFRESH_TOKEN_COOKIE_NAME`,
@@ -227,67 +227,120 @@ logout use the configured refresh-token cookie.
 Changing the current user's password requires the current password and, when
 the account has an available email, SMS, authenticator app, or passkey
 verifier, a verified `change_password` step-up grant.
-User administration endpoints require the matching user permission and a
-verified `user_management` step-up grant from a passkey or authenticator app.
+API Keys use `Authorization: Bearer ak_{keyId}_{secret}_{checksum}` and inherit
+the current account permissions. They cannot exceed the user's RBAC grants; if
+the user is disabled or loses a permission, the API Key loses access as well.
+Each account can keep up to 10 active or disabled API Keys. Keys may be created
+without an expiration time, and the plain key is returned only once.
+API Key management requires a verified session with a `manage_api_key` step-up
+grant. API Keys cannot manage API Keys, system settings, login sessions, MFA,
+passkeys, SSO, or session-only admin user-management routes.
+OpenAPI lists `apiKeyAuth` only on endpoints that accept API Key
+authentication. The `Auth` column uses these values:
 
-| Method   | Path                                          | Description                                             |
-| -------- | --------------------------------------------- | ------------------------------------------------------- |
-| `GET`    | `/api/setup/defaults`                         | Return generated setup defaults                         |
-| `POST`   | `/api/setup/validate`                         | Validate setup input                                    |
-| `POST`   | `/api/setup/validate/environment`             | Validate setup environment fields                       |
-| `POST`   | `/api/setup/test/database`                    | Test database connectivity and user presence            |
-| `POST`   | `/api/setup/test/cache`                       | Test cache connectivity                                 |
-| `POST`   | `/api/setup/test/file-storage`                | Test file storage configuration                         |
-| `POST`   | `/api/setup/test/logging`                     | Test logging configuration                              |
-| `POST`   | `/api/setup/test/email`                       | Test email configuration                                |
-| `POST`   | `/api/setup/test/sms`                         | Test SMS configuration                                  |
-| `POST`   | `/api/setup/test/sso`                         | Test SSO provider discovery                             |
-| `POST`   | `/api/setup/complete`                         | Complete setup                                          |
-| `GET`    | `/api/auth/config`                            | Return public authentication configuration              |
-| `POST`   | `/api/auth/register`                          | Create an account                                       |
-| `POST`   | `/api/auth/register/email-verification`       | Send a registration email verification code             |
-| `POST`   | `/api/auth/password-reset/email-verification` | Send a password reset email verification code           |
-| `POST`   | `/api/auth/password-reset`                    | Reset an account password                               |
-| `POST`   | `/api/auth/login`                             | Authenticate an account                                 |
-| `GET`    | `/api/auth/me`                                | Return the authenticated user                           |
-| `PATCH`  | `/api/auth/me`                                | Update the authenticated user's profile                 |
-| `PATCH`  | `/api/auth/me/password`                       | Change the authenticated user's password                |
-| `POST`   | `/api/auth/me/email-verification`             | Send a profile email verification code                  |
-| `POST`   | `/api/auth/me/email-verification/confirm`     | Confirm a profile email verification code               |
-| `POST`   | `/api/auth/me/phone-verification`             | Send a profile phone verification code                  |
-| `POST`   | `/api/auth/me/phone-verification/confirm`     | Confirm a profile phone verification code               |
-| `POST`   | `/api/auth/refresh`                           | Refresh the authenticated session                       |
-| `POST`   | `/api/auth/logout`                            | Clear the authenticated session                         |
-| `POST`   | `/api/auth/avatar`                            | Upload the authenticated user's avatar                  |
-| `DELETE` | `/api/auth/avatar`                            | Remove the authenticated user's avatar                  |
-| `POST`   | `/api/auth/profile-banner`                    | Upload the authenticated user's profile banner          |
-| `DELETE` | `/api/auth/profile-banner`                    | Remove the authenticated user's profile banner          |
-| `POST`   | `/api/auth/profile-background`                | Upload the authenticated user's profile background      |
-| `DELETE` | `/api/auth/profile-background`                | Remove the authenticated user's profile background      |
-| `GET`    | `/api/auth/sso/config`                        | Return public SSO authentication configuration          |
-| `GET`    | `/api/auth/sso/start`                         | Redirect to the configured SSO provider                 |
-| `GET`    | `/api/auth/sso/bind/start`                    | Redirect for profile binding after step-up verification |
-| `GET`    | `/api/auth/sso/identities`                    | Return SSO identities bound to the current user         |
-| `GET`    | `/api/auth/sso/callback`                      | Handle the SSO provider callback                        |
-| `POST`   | `/api/auth/sso/session`                       | Exchange an SSO handoff token for a session             |
-| `POST`   | `/api/auth/sso/account`                       | Create an account from an unbound SSO identity          |
-| `POST`   | `/api/auth/sso/bind`                          | Bind an SSO identity to an existing account             |
-| `GET`    | `/api/users/`                                 | List users after user management verification           |
-| `PUT`    | `/api/users/:id`                              | Update a managed user after verification                |
-| `PUT`    | `/api/users/:id/roles`                        | Replace user roles after verification                   |
-| `GET`    | `/api/users/:id/devices`                      | List managed user login devices after verification      |
-| `DELETE` | `/api/users/:id/devices`                      | Revoke managed user login devices after verification    |
-| `DELETE` | `/api/users/:id/devices/:sessionId`           | Revoke one managed user login device after verification |
-| `GET`    | `/api/profile-options/genders`                | Return gender profile options                           |
-| `GET`    | `/api/profile-options/locations/countries`    | Return country location options                         |
-| `GET`    | `/api/profile-options/locations/regions`      | Return region location options                          |
-| `GET`    | `/api/profile-options/locations/cities`       | Return city location options                            |
-| `GET`    | `/api/system-settings/`                       | Return system settings                                  |
-| `PUT`    | `/api/system-settings/`                       | Update system settings                                  |
-| `GET`    | `/api/health`                                 | Return service health                                   |
-| `GET`    | `/api/health/ready`                           | Return service readiness                                |
-| `GET`    | `/api/openapi.json`                           | Return the OpenAPI document                             |
-| `GET`    | `/api/docs`                                   | Serve Swagger UI                                        |
+- `Public`: no session or API Key is required.
+- `Setup`: available only while setup endpoints are enabled.
+- `Session`: requires the authenticated HttpOnly cookie session.
+- `Verified session`: requires a session plus the route's documented sensitive
+  checks, such as permission, step-up verification, and CSRF for unsafe methods.
+- `Verification token`: requires a short-lived verification challenge token.
+- `Session or API Key`: accepts either a session or API Key Bearer token.
+
+| Method   | Path                                              | Auth               | Description                                                 |
+| -------- | ------------------------------------------------- | ------------------ | ----------------------------------------------------------- |
+| `GET`    | `/api/setup/defaults`                             | Setup              | Return generated setup defaults                             |
+| `POST`   | `/api/setup/validate`                             | Setup              | Validate setup input                                        |
+| `POST`   | `/api/setup/validate/environment`                 | Setup              | Validate setup environment fields                           |
+| `POST`   | `/api/setup/test/database`                        | Setup              | Test database connectivity and user presence                |
+| `POST`   | `/api/setup/test/cache`                           | Setup              | Test cache connectivity                                     |
+| `POST`   | `/api/setup/test/file-storage`                    | Setup              | Test file storage configuration                             |
+| `POST`   | `/api/setup/test/logging`                         | Setup              | Test logging configuration                                  |
+| `POST`   | `/api/setup/test/email`                           | Setup              | Test email configuration                                    |
+| `POST`   | `/api/setup/test/sms`                             | Setup              | Test SMS configuration                                      |
+| `POST`   | `/api/setup/test/sso`                             | Setup              | Test SSO provider discovery                                 |
+| `POST`   | `/api/setup/complete`                             | Setup              | Complete setup                                              |
+| `GET`    | `/api/auth/config`                                | Public             | Return public authentication configuration                  |
+| `POST`   | `/api/auth/register`                              | Public             | Create an account                                           |
+| `POST`   | `/api/auth/register/email-verification`           | Public             | Send a registration email verification code                 |
+| `POST`   | `/api/auth/password-reset/email-verification`     | Public             | Send a password reset email verification code               |
+| `POST`   | `/api/auth/password-reset`                        | Public             | Reset an account password                                   |
+| `PATCH`  | `/api/auth/password`                              | Session            | Change the authenticated user's password                    |
+| `POST`   | `/api/auth/login`                                 | Public             | Authenticate an account                                     |
+| `POST`   | `/api/auth/refresh`                               | Session            | Refresh the authenticated session                           |
+| `POST`   | `/api/auth/logout`                                | Session            | Clear the authenticated session                             |
+| `GET`    | `/api/auth/totp`                                  | Session            | Return the authenticated user's authenticator-app status    |
+| `POST`   | `/api/auth/totp/setup`                            | Session            | Create authenticator-app setup options                      |
+| `POST`   | `/api/auth/totp/enable`                           | Session            | Enable authenticator-app verification                       |
+| `POST`   | `/api/auth/totp/disable`                          | Session            | Disable authenticator-app verification                      |
+| `POST`   | `/api/auth/totp/recovery-codes`                   | Session            | Regenerate authenticator-app recovery codes                 |
+| `POST`   | `/api/auth/verification/challenges`               | Session            | Create a step-up verification challenge                     |
+| `POST`   | `/api/auth/verification/code`                     | Verification token | Send an email or SMS verification code for a challenge      |
+| `POST`   | `/api/auth/verification/passkey/options`          | Verification token | Create passkey authentication options for a challenge       |
+| `POST`   | `/api/auth/verification/confirm`                  | Verification token | Confirm a sign-in or step-up verification challenge         |
+| `GET`    | `/api/auth/mfa`                                   | Session            | Return the authenticated user's MFA settings                |
+| `PATCH`  | `/api/auth/mfa`                                   | Session            | Update the authenticated user's MFA settings                |
+| `GET`    | `/api/auth/passkeys`                              | Session            | List the authenticated user's passkeys                      |
+| `POST`   | `/api/auth/passkeys/registration-options`         | Session            | Create passkey registration options                         |
+| `POST`   | `/api/auth/passkeys`                              | Session            | Verify and add a passkey                                    |
+| `DELETE` | `/api/auth/passkeys/:passkeyId`                   | Session            | Remove one of the authenticated user's passkeys             |
+| `GET`    | `/api/auth/devices`                               | Session            | List the authenticated user's active devices                |
+| `DELETE` | `/api/auth/devices/others`                        | Session            | Revoke all other authenticated device sessions              |
+| `DELETE` | `/api/auth/devices/:sessionId`                    | Session            | Revoke an authenticated device session                      |
+| `GET`    | `/api/auth/sso/config`                            | Public             | Return public SSO authentication configuration              |
+| `GET`    | `/api/auth/sso/start`                             | Public             | Redirect to the configured SSO provider                     |
+| `GET`    | `/api/auth/sso/bind/start`                        | Session            | Redirect for profile binding after step-up verification     |
+| `GET`    | `/api/auth/sso/identities`                        | Session            | Return SSO identities bound to the current user             |
+| `GET`    | `/api/auth/sso/callback`                          | Public             | Handle the SSO provider callback                            |
+| `POST`   | `/api/auth/sso/session`                           | Public             | Exchange an SSO handoff token for a session                 |
+| `POST`   | `/api/auth/sso/account`                           | Public             | Create an account from an unbound SSO identity              |
+| `POST`   | `/api/auth/sso/bind`                              | Public             | Bind an SSO identity to an existing account                 |
+| `GET`    | `/api/api-keys`                                   | Verified session   | List API Keys for the current user                          |
+| `POST`   | `/api/api-keys`                                   | Verified session   | Create an API Key                                           |
+| `POST`   | `/api/api-keys/:id/disable`                       | Verified session   | Disable an API Key                                          |
+| `POST`   | `/api/api-keys/:id/enable`                        | Verified session   | Enable an API Key                                           |
+| `POST`   | `/api/api-keys/:id/revoke`                        | Verified session   | Revoke an API Key                                           |
+| `GET`    | `/api/admin/api-keys`                             | Verified session   | List all API Keys after admin verification                  |
+| `POST`   | `/api/admin/api-keys/:id/revoke`                  | Verified session   | Revoke any API Key after admin verification                 |
+| `GET`    | `/api/users/me`                                   | Session or API Key | Return the authenticated user                               |
+| `PATCH`  | `/api/users/me`                                   | Session or API Key | Update the authenticated user's profile                     |
+| `POST`   | `/api/users/me/email-verification`                | Session            | Send a profile email verification code                      |
+| `POST`   | `/api/users/me/email-verification/confirm`        | Session            | Confirm a profile email verification code                   |
+| `POST`   | `/api/users/me/phone-verification`                | Session            | Send a profile phone verification code                      |
+| `POST`   | `/api/users/me/phone-verification/confirm`        | Session            | Confirm a profile phone verification code                   |
+| `POST`   | `/api/users/me/avatar`                            | Session or API Key | Upload the authenticated user's avatar                      |
+| `DELETE` | `/api/users/me/avatar`                            | Session or API Key | Remove the authenticated user's avatar                      |
+| `POST`   | `/api/users/me/profile-banner`                    | Session or API Key | Upload the authenticated user's profile banner              |
+| `DELETE` | `/api/users/me/profile-banner`                    | Session or API Key | Remove the authenticated user's profile banner              |
+| `POST`   | `/api/users/me/profile-background`                | Session or API Key | Upload the authenticated user's profile background          |
+| `DELETE` | `/api/users/me/profile-background`                | Session or API Key | Remove the authenticated user's profile background          |
+| `GET`    | `/api/admin/users/`                               | Verified session   | List users with user-list access                            |
+| `GET`    | `/api/admin/users/:id/details`                    | Verified session   | Return managed user details after verification              |
+| `PUT`    | `/api/admin/users/:id`                            | Verified session   | Update a managed user after verification                    |
+| `PUT`    | `/api/admin/users/:id/roles`                      | Verified session   | Replace user roles after verification                       |
+| `PATCH`  | `/api/admin/users/:id/mfa`                        | Verified session   | Update managed user MFA settings after verification         |
+| `POST`   | `/api/admin/users/:id/totp/disable`               | Verified session   | Disable managed user TOTP after verification                |
+| `DELETE` | `/api/admin/users/:id/passkeys/:passkeyId`        | Verified session   | Remove a managed user passkey after verification            |
+| `GET`    | `/api/admin/users/:id/devices`                    | Verified session   | List managed user login devices after verification          |
+| `DELETE` | `/api/admin/users/:id/devices`                    | Verified session   | Revoke managed user login devices after verification        |
+| `DELETE` | `/api/admin/users/:id/devices/:sessionId`         | Verified session   | Revoke one managed user login device after verification     |
+| `GET`    | `/api/admin/users/:id/sso-identities`             | Verified session   | List managed user SSO bindings after verification           |
+| `DELETE` | `/api/admin/users/:id/sso-identities/:providerId` | Verified session   | Remove a managed user SSO binding after verification        |
+| `POST`   | `/api/admin/users/:id/avatar`                     | Verified session   | Upload a managed user avatar after verification             |
+| `DELETE` | `/api/admin/users/:id/avatar`                     | Verified session   | Remove a managed user avatar after verification             |
+| `POST`   | `/api/admin/users/:id/profile-banner`             | Verified session   | Upload a managed user profile banner after verification     |
+| `DELETE` | `/api/admin/users/:id/profile-banner`             | Verified session   | Remove a managed user profile banner after verification     |
+| `POST`   | `/api/admin/users/:id/profile-background`         | Verified session   | Upload a managed user profile background after verification |
+| `DELETE` | `/api/admin/users/:id/profile-background`         | Verified session   | Remove a managed user profile background after verification |
+| `GET`    | `/api/users/profile-options/genders`              | Session or API Key | Return gender profile options                               |
+| `GET`    | `/api/users/profile-options/locations/countries`  | Public             | Return country location options                             |
+| `GET`    | `/api/users/profile-options/locations/regions`    | Public             | Return region location options                              |
+| `GET`    | `/api/users/profile-options/locations/cities`     | Public             | Return city location options                                |
+| `GET`    | `/api/admin/system-settings/`                     | Verified session   | Return system settings                                      |
+| `PUT`    | `/api/admin/system-settings/`                     | Verified session   | Update system settings                                      |
+| `GET`    | `/api/health`                                     | Public             | Return service health                                       |
+| `GET`    | `/api/health/ready`                               | Public             | Return service readiness                                    |
+| `GET`    | `/api/openapi.json`                               | Public             | Return the OpenAPI document                                 |
+| `GET`    | `/api/docs`                                       | Public             | Serve Swagger UI                                            |
 
 Error responses use this shape:
 
@@ -302,12 +355,13 @@ Error responses use this shape:
 
 ## Modules
 
-Setup, health, authentication, users, system settings, profile options,
-documentation, and demo modules are registered by default. The users and system
-settings modules provide RBAC-protected administration endpoints. The profile
-options module serves profile form lookup data. The documentation module serves
-the OpenAPI document and Swagger UI. The demo module has no public API routes;
-it registers a scheduler heartbeat job as an example module-owned job.
+Setup, health, authentication, API Keys, users, admin, documentation, and demo
+modules are registered by default. The API Key module manages account API Keys.
+The users module serves current-user profile APIs and profile form lookup data.
+The admin module provides RBAC-protected user management, system settings, and
+API Key oversight endpoints. The documentation module serves the OpenAPI
+document and Swagger UI. The demo module has no public API routes; it registers
+a scheduler heartbeat job as an example module-owned job.
 
 The scheduler core runs module-owned jobs when modules define them and
 `SCHEDULER_ENABLED=true`.

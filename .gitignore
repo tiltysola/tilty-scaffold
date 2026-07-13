@@ -4,4 +4,7 @@ coverage/
 /data/
 /logs/
 .env
+config.toml
+config.toml.setup.lock
+config.toml.*.tmp
 *.log

@@ -29,8 +29,6 @@ import {
   SetupDatabaseDialect,
   type SetupDatabaseDialectValue,
   setupDatabaseDialectValues,
-  type SetupDatabaseSyncValue,
-  setupDatabaseSyncValues,
   SetupEmailVerificationService,
   type SetupEmailVerificationServiceValue,
   setupEmailVerificationServiceValues,
@@ -83,8 +81,6 @@ const nodeEnvOptions = createSelectOptions<SetupNodeEnvValue>(setupNodeEnvValues
 
 const databaseDialectOptions = createSelectOptions<SetupDatabaseDialectValue>(setupDatabaseDialectValues);
 
-const databaseSyncOptions = createSelectOptions<SetupDatabaseSyncValue>(setupDatabaseSyncValues);
-
 const cacheStoreOptions = createSelectOptions<SetupCacheStoreValue>(setupCacheStoreValues);
 
 const fileStorageDriverOptions = createSelectOptions<SetupFileStorageDriverValue>(setupFileStorageDriverValues);
@@ -127,7 +123,6 @@ export const setupFieldHelp: Record<string, FieldHelp> = {
   DATABASE_POOL_MIN: { placeholderMessageId: 'setup.field.DATABASE_POOL_MIN.placeholder' },
   DATABASE_POOL_ACQUIRE_MS: { placeholderMessageId: 'setup.field.DATABASE_POOL_ACQUIRE_MS.placeholder' },
   DATABASE_POOL_IDLE_MS: { placeholderMessageId: 'setup.field.DATABASE_POOL_IDLE_MS.placeholder' },
-  DATABASE_SYNC: {},
   CACHE_STORE: {},
   CACHE_REDIS_URL: { placeholderMessageId: 'setup.field.CACHE_REDIS_URL.placeholder' },
   CACHE_REDIS_REQUEST_TIMEOUT_MS: { placeholderMessageId: 'setup.field.CACHE_REDIS_REQUEST_TIMEOUT_MS.placeholder' },
@@ -306,12 +301,6 @@ export const setupSteps: SetupStepDefinition[] = [
         key: 'DATABASE_POOL_IDLE_MS',
         group: 'connectionPool',
         visible: (environment) => environment.DATABASE_DIALECT !== SetupDatabaseDialect.Sqlite,
-      },
-      {
-        key: 'DATABASE_SYNC',
-        group: 'schema',
-        kind: 'select',
-        options: databaseSyncOptions,
       },
     ],
   },

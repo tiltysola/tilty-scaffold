@@ -210,7 +210,7 @@ export function useProfileImageUploads({ enabled, onUserUpdated }: UseProfileIma
 
   return {
     avatar,
-    profileBackground,
     profileBanner,
+    profileBackground,
   };
 }

@@ -145,7 +145,7 @@ describe('auth session storage', () => {
 
     expect(getCurrentAuthSession()).toEqual(session);
     await expect(fetchCurrentUser()).resolves.toEqual(updatedUser);
-    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/auth/refresh', '/api/auth/me']);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/auth/refresh', '/api/users/me']);
     expect(getCurrentAuthSession()).toEqual(session);
   });
 
@@ -294,7 +294,11 @@ describe('auth session storage', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(fetchCurrentUser()).resolves.toEqual(updatedUser);
-    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/auth/me', '/api/auth/refresh', '/api/auth/me']);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      '/api/users/me',
+      '/api/auth/refresh',
+      '/api/users/me',
+    ]);
     expect(getCurrentAuthSession()).toEqual(refreshedSession);
   });
 
@@ -370,7 +374,7 @@ describe('auth session storage', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(fetchCurrentUser()).resolves.toEqual(updatedUser);
-    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/auth/refresh', '/api/auth/me']);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/auth/refresh', '/api/users/me']);
     expect(getCurrentAuthSession()).toEqual(refreshedSession);
   });
 

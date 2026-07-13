@@ -1,3 +1,5 @@
+import { type Middleware } from 'koa';
+
 interface ApiSuccess<T> {
   code: 200;
   error: null;
@@ -26,4 +28,8 @@ export function fail(status: number, error: string, message: string, details?: u
     message,
     ...(details === undefined ? {} : { details }),
   };
+}
+
+export function getRouteParams(ctx: Parameters<Middleware>[0]) {
+  return (ctx as { params?: Record<string, string> }).params;
 }

@@ -3,6 +3,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { AuthVerificationPurpose } from '@tilty/shared/auth';
 import { localeRequestHeader } from '@tilty/shared/i18n';
 
 import { initModels } from '../src/composition/models';
@@ -13,9 +14,9 @@ import { createSequelize } from '../src/infra/database';
 import { createMigrator } from '../src/infra/migrator';
 import { errorMiddleware } from '../src/middleware/error';
 import { localeMiddleware } from '../src/middleware/locale';
+import { createAdminModule } from '../src/modules/admin';
 import { defaultAuthCookieConfig } from '../src/modules/auth/auth.http';
 import { defaultAuthSessionRequestContext } from '../src/modules/auth/auth.service';
-import { createSystemSettingsModule } from '../src/modules/system-settings';
 import { registerTestUser } from './support/auth';
 import { createTestContext, getTestRoute, runMiddlewares } from './support/http';
 import { createTotpCode } from './support/totp';
@@ -50,8 +51,10 @@ describe('system settings API', () => {
     await createMigrator(sequelize).up();
     await services.accessControl.syncSystemAccessControl();
 
-    routes = createSystemSettingsModule(services.auth, {
+    routes = createAdminModule(services.user, services.accessControl, services.auth, {
+      apiKeyService: services.apiKey,
       cookies: defaultAuthCookieConfig,
+      ssoService: services.sso,
     }).routes;
   });
 
@@ -76,7 +79,7 @@ describe('system settings API', () => {
       ].join('\n'),
       'utf8',
     );
-    const readRoute = getTestRoute(routes, 'get', '/');
+    const readRoute = getTestRoute(routes, 'get', '/system-settings/');
     const context = await runMiddlewares(
       [errorMiddleware(), ...readRoute.handlers],
       createTestContext(undefined, {}, undefined, {
@@ -100,7 +103,7 @@ describe('system settings API', () => {
       'Root User',
       'root-settings-no-strong-verifier@example.com',
     );
-    const readRoute = getTestRoute(routes, 'get', '/');
+    const readRoute = getTestRoute(routes, 'get', '/system-settings/');
     const context = await runMiddlewares(
       [errorMiddleware(), localeMiddleware(), ...readRoute.handlers],
       createTestContext(
@@ -128,7 +131,7 @@ describe('system settings API', () => {
     const rootSession = await registerTestUser(services.auth, 'Root User', 'root-settings-password-sudo@example.com');
     const setupChallenge = await services.auth.createVerificationChallenge(
       rootSession.accessToken,
-      'manage_totp',
+      AuthVerificationPurpose.ManageTotp,
       defaultAuthSessionRequestContext,
     );
 
@@ -154,7 +157,7 @@ describe('system settings API', () => {
 
     const systemSettingsChallenge = await services.auth.createVerificationChallenge(
       rootSession.accessToken,
-      'system_settings',
+      AuthVerificationPurpose.SystemSettings,
       defaultAuthSessionRequestContext,
     );
 
@@ -168,7 +171,7 @@ describe('system settings API', () => {
 
   it('writes configuration updates and reports that a restart is required', async () => {
     const rootSession = await registerRootWithSystemSettingsAccess('Root User', 'root-settings-write@example.com');
-    const updateRoute = getTestRoute(routes, 'put', '/');
+    const updateRoute = getTestRoute(routes, 'put', '/system-settings/');
     const environment = {
       ...getSetupEnvironmentDefaults().environment,
       DATABASE_STORAGE: './data/updated-system-settings.sqlite',
@@ -206,7 +209,7 @@ describe('system settings API', () => {
   it('rejects non-root users', async () => {
     await registerTestUser(services.auth, 'Root User', 'root-settings-forbidden@example.com');
     const regularSession = await registerTestUser(services.auth, 'Regular User', 'regular-settings@example.com');
-    const readRoute = getTestRoute(routes, 'get', '/');
+    const readRoute = getTestRoute(routes, 'get', '/system-settings/');
     const context = await runMiddlewares(
       [errorMiddleware(), ...readRoute.handlers],
       createTestContext(undefined, {}, undefined, {
@@ -224,7 +227,7 @@ describe('system settings API', () => {
 
   it('rejects invalid updates without writing configuration', async () => {
     const rootSession = await registerRootWithSystemSettingsAccess('Root User', 'root-settings-invalid@example.com');
-    const updateRoute = getTestRoute(routes, 'put', '/');
+    const updateRoute = getTestRoute(routes, 'put', '/system-settings/');
     const environment = {
       ...getSetupEnvironmentDefaults().environment,
       APP_CORS_ORIGINS: '',
@@ -266,7 +269,7 @@ describe('system settings API', () => {
 
     const challenge = await services.auth.createVerificationChallenge(
       session.accessToken,
-      'system_settings',
+      AuthVerificationPurpose.SystemSettings,
       defaultAuthSessionRequestContext,
     );
 

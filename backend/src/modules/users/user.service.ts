@@ -606,15 +606,15 @@ export class UserService {
   }
 
   async updateAvatar(user: UserModel, avatarUrl: string, avatarStorageKey: string) {
-    user.avatarStorageKey = avatarStorageKey;
     user.avatarUrl = avatarUrl;
+    user.avatarStorageKey = avatarStorageKey;
 
     return user.save();
   }
 
   async clearAvatar(user: UserModel) {
-    user.avatarStorageKey = null;
     user.avatarUrl = null;
+    user.avatarStorageKey = null;
 
     return user.save();
   }

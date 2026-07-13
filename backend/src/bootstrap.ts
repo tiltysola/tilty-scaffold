@@ -42,7 +42,7 @@ export async function bootstrap() {
       ...environmentConfig.authRateLimit,
       cacheStore,
     },
-    avatarUploadMaxBytes: environmentConfig.fileUpload.maxBytes,
+    fileUploadMaxBytes: environmentConfig.fileUpload.maxBytes,
     readinessChecks: [
       {
         name: 'database',
@@ -63,10 +63,8 @@ export async function bootstrap() {
     ],
   });
 
-  await connectDatabase(sequelize, environmentConfig.databaseSync);
-  if (environmentConfig.databaseSync === 'off') {
-    await assertDatabaseMigrationsApplied(sequelize);
-  }
+  await connectDatabase(sequelize);
+  await assertDatabaseMigrationsApplied(sequelize);
   await services.accessControl.syncSystemAccessControl();
 
   const scheduler = environmentConfig.scheduleEnabled
