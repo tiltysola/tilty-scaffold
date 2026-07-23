@@ -82,6 +82,7 @@ export async function bootstrap() {
     : undefined;
   const app = createApp(modules, {
     corsOrigins: environmentConfig.corsOrigins,
+    cspResourceOrigins: environmentConfig.cspResourceOrigins,
     frontendFiles: {
       root: frontendDistDirectory,
     },

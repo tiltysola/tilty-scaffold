@@ -41,7 +41,7 @@ export default defineConfig({
       allow: [repositoryRoot],
     },
     host: '0.0.0.0',
-    port: 8011,
+    port: 8001,
     proxy: devServerProxy,
     allowedHosts: ['dev.tiltysola.com'],
     strictPort: true,

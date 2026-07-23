@@ -127,7 +127,7 @@ describe('docs API', () => {
       title: 'Tilty Scaffold API',
       description:
         'Backend API contract for Tilty Scaffold. The public frontend landing page is available at /, the authenticated console starts at /dashboard, and Swagger UI is served from /api/docs.',
-      version: '0.1.13',
+      version: '0.1.14',
     });
     expect(body.servers[0]).toEqual({
       url: '/',

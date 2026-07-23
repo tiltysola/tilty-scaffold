@@ -17,6 +17,7 @@ const numberDefault = (value: string) => Number(value);
 const setupRuntimeEnvSchema = z.object({
   APP_DOMAIN: z.string().min(1).default(defaultSetupRuntimeEnvironment.APP_DOMAIN),
   APP_CORS_ORIGINS: z.string().min(1).optional(),
+  APP_CSP_RESOURCE_ORIGINS: z.string().min(1).default(defaultSetupRuntimeEnvironment.APP_CSP_RESOURCE_ORIGINS),
   GLOBAL_RATE_LIMIT_MAX: z.coerce
     .number()
     .int()
@@ -57,6 +58,7 @@ export async function bootstrapSetup() {
 
   const app = createApp([createSetupOnlyModule()], {
     corsOrigins: parseSeparatedValues(setupRuntimeConfig.APP_CORS_ORIGINS ?? setupRuntimeConfig.APP_DOMAIN, ','),
+    cspResourceOrigins: parseSeparatedValues(setupRuntimeConfig.APP_CSP_RESOURCE_ORIGINS, /[,\n]/),
     frontendFiles: {
       root: frontendDistDirectory,
     },

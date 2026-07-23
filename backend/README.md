@@ -84,6 +84,11 @@ connections across all backend instances below the database connection limit.
 such as `https://app.example.com`. Setup uses this value as the default
 `APP_CORS_ORIGINS` allowlist and as the base for generated callback URLs such
 as `/sso/callback` and `/api/auth/sso/callback`.
+`APP_CSP_RESOURCE_ORIGINS` is the comma- or newline-separated browser resource
+origin list applied to connections, fonts, images, and styles. Its default `*`
+allows every network origin. Restrict it to explicit HTTP or HTTPS origins when
+the deployment does not require arbitrary external resources. Script, form,
+frame, and object policies remain fixed.
 
 `SERVER_TRUST_PROXY=false` is the default. Enable `SERVER_TRUST_PROXY=true`
 only when the backend is deployed behind a trusted reverse proxy that controls

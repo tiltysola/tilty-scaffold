@@ -551,6 +551,10 @@ const messages = {
   'setup.field.APP_CORS_ORIGINS.description': '列出允许访问后端 API 的浏览器来源。默认使用应用域名。',
   'setup.field.APP_CORS_ORIGINS.label': 'CORS 来源',
   'setup.field.APP_CORS_ORIGINS.placeholder': 'https://app.example.com, http://localhost:8011',
+  'setup.field.APP_CSP_RESOURCE_ORIGINS.description':
+    '允许加载外部样式、字体、图片和发起浏览器连接。使用 * 允许所有网络来源；脚本、表单和框架限制仍会强制执行。',
+  'setup.field.APP_CSP_RESOURCE_ORIGINS.label': 'CSP 资源来源',
+  'setup.field.APP_CSP_RESOURCE_ORIGINS.placeholder': '*, https://cdn.example.com',
   'setup.field.APP_DOMAIN.description': '定义用于浏览器访问和回调地址默认值的主要公开应用来源。',
   'setup.field.APP_DOMAIN.label': '应用域名',
   'setup.field.APP_DOMAIN.placeholder': 'https://app.example.com',

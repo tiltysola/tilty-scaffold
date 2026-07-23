@@ -590,6 +590,35 @@ describe('setup service', () => {
     });
   });
 
+  it('rejects empty or invalid CSP resource origin configuration', () => {
+    const service = new SetupService('setup');
+    const defaults = service.getDefaults().environment;
+
+    expect(
+      getThrownError(() =>
+        service.validateEnvironment({
+          environment: { ...defaults, APP_CSP_RESOURCE_ORIGINS: '' },
+        }),
+      ),
+    ).toMatchObject({
+      code: 'SETUP_ENV_REQUIRED',
+      details: { missing: ['APP_CSP_RESOURCE_ORIGINS'] },
+      status: 400,
+    });
+    expect(
+      getThrownError(() =>
+        service.validateEnvironment({
+          environment: { ...defaults, APP_CSP_RESOURCE_ORIGINS: 'https://cdn.example.com/assets' },
+          stepId: 'runtime',
+        }),
+      ),
+    ).toMatchObject({
+      code: 'SETUP_ENV_INVALID',
+      details: { field: 'APP_CSP_RESOURCE_ORIGINS' },
+      status: 400,
+    });
+  });
+
   it('validates only the selected setup step before completion', async () => {
     const service = new SetupService('setup');
     const environment = {

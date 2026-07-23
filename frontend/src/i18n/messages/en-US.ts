@@ -584,6 +584,10 @@ const messages = {
     'Lists the browser origins permitted to access the backend API. Defaults to the application domain.',
   'setup.field.APP_CORS_ORIGINS.label': 'CORS Origins',
   'setup.field.APP_CORS_ORIGINS.placeholder': 'https://app.example.com, http://localhost:8011',
+  'setup.field.APP_CSP_RESOURCE_ORIGINS.description':
+    'Allows external styles, fonts, images, and browser connections. Use * to allow every network origin; script, form, and frame restrictions remain enforced.',
+  'setup.field.APP_CSP_RESOURCE_ORIGINS.label': 'CSP Resource Origins',
+  'setup.field.APP_CSP_RESOURCE_ORIGINS.placeholder': '*, https://cdn.example.com',
   'setup.field.APP_DOMAIN.description':
     'Defines the primary public application origin used for browser access and callback URL defaults.',
   'setup.field.APP_DOMAIN.label': 'Application Domain',

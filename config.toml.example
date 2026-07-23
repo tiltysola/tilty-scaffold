@@ -31,6 +31,11 @@ APP_DOMAIN = "http://localhost:8011"
 # Production must not include *.
 APP_CORS_ORIGINS = "http://localhost:8011"
 
+# Comma- or newline-separated external resource origins allowed by browser CSP.
+# Applies to connections, fonts, images, and styles. Use * to allow all network origins.
+# Script, form, frame, and object restrictions remain enforced.
+APP_CSP_RESOURCE_ORIGINS = "*"
+
 # Whether Koa trusts reverse proxy headers such as X-Forwarded-For.
 # Enable only behind a trusted reverse proxy that controls those headers.
 SERVER_TRUST_PROXY = "false"

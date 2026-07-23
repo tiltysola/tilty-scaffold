@@ -18,6 +18,7 @@ import { type StaticFilesConfig, staticFilesMiddleware } from './middleware/stat
 
 interface AppConfig {
   corsOrigins: string[];
+  cspResourceOrigins?: string[];
   frontendFiles?: FrontendFilesConfig;
   globalRateLimit?: RateLimitOptions;
   requestLogEnabled: boolean;
@@ -30,6 +31,7 @@ interface AppConfig {
 
 const defaultAppConfig: AppConfig = {
   corsOrigins: [defaultFrontendOrigin],
+  cspResourceOrigins: ['*'],
   requestLogEnabled: false,
   trustProxy: false,
 };
@@ -43,7 +45,7 @@ export function createApp(modules: BackendModule[], config: AppConfig = defaultA
   app.use(localeMiddleware());
   app.use(requestIdMiddleware());
   app.use(requestLogMiddleware(config.requestLogEnabled));
-  app.use(securityHeadersMiddleware());
+  app.use(securityHeadersMiddleware({ resourceOrigins: config.cspResourceOrigins ?? ['*'] }));
   app.use(
     cors({
       credentials: true,

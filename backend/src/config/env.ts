@@ -64,6 +64,15 @@ const appDomainSchema = z
   .min(1)
   .max(1024)
   .refine(isHttpOrigin, 'Must be an http:// or https:// origin such as https://app.example.com');
+const cspResourceOriginsSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(16384)
+  .refine(
+    (value) => parseListValues(value).every((source) => source === '*' || isHttpOrigin(source)),
+    'Must contain only * or comma/newline-separated http:// or https:// origins',
+  );
 const optionalSmtpCredentialSchema = z.preprocess(
   (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
   z.string().trim().min(1).max(512).optional(),
@@ -250,6 +259,7 @@ const envSchema = z
     SERVER_PORT: z.coerce.number().int().positive().default(numberDefault(defaultSetupEnvironment.SERVER_PORT)),
     APP_DOMAIN: appDomainSchema.default(defaultSetupEnvironment.APP_DOMAIN),
     APP_CORS_ORIGINS: z.string().trim().min(1).optional(),
+    APP_CSP_RESOURCE_ORIGINS: cspResourceOriginsSchema.default(defaultSetupEnvironment.APP_CSP_RESOURCE_ORIGINS),
     SERVER_TRUST_PROXY: z.enum(setupBooleanValues).default(defaultSetupEnvironment.SERVER_TRUST_PROXY),
     SERVER_MULTI_INSTANCE_ENABLED: z
       .enum(setupBooleanValues)
@@ -695,6 +705,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
   const parsed = parseEnvSource(resolvedSource);
   const appDomain = normalizeOrigin(parsed.APP_DOMAIN);
   const corsOrigins = parseCommaSeparatedValues(parsed.APP_CORS_ORIGINS ?? appDomain);
+  const cspResourceOrigins = parseCspResourceOrigins(parsed.APP_CSP_RESOURCE_ORIGINS);
   const logTargets = parseLogTargets(parsed.LOG_TARGETS);
   const smtpProfiles =
     parsed.EMAIL_VERIFICATION_SERVICE === SetupEmailVerificationService.Smtp
@@ -726,6 +737,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env) {
 
   return {
     appDomain,
+    cspResourceOrigins,
     nodeEnv: parsed.NODE_ENV,
     host: parsed.SERVER_HOST,
     port: parsed.SERVER_PORT,
@@ -1028,6 +1040,16 @@ function parseLogTargets(value: string) {
 
 function parseCommaSeparatedValues(value: string) {
   return parseSeparatedValues(value, /,/);
+}
+
+function parseListValues(value: string) {
+  return parseUniqueSeparatedValues(value, /[,\n]/);
+}
+
+function parseCspResourceOrigins(value: string) {
+  const origins = parseListValues(value);
+
+  return origins.includes('*') ? ['*'] : [...new Set(origins.map(normalizeOrigin))];
 }
 
 function parseSmtpProfiles(value: string) {

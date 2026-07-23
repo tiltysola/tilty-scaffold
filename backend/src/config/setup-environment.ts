@@ -56,6 +56,7 @@ export const setupEnvSchema = z
     SERVER_PORT: z.string().trim().max(16),
     APP_DOMAIN: z.string().trim().max(1024),
     APP_CORS_ORIGINS: z.string().trim().max(2048),
+    APP_CSP_RESOURCE_ORIGINS: z.string().trim().max(16384),
     SERVER_TRUST_PROXY: z.string().trim().max(16),
     SERVER_MULTI_INSTANCE_ENABLED: z.string().trim().max(16),
     DATABASE_DIALECT: z.string().trim().max(16),
@@ -166,6 +167,7 @@ const runtimeEnvironmentKeys = [
   'SERVER_PORT',
   'APP_DOMAIN',
   'APP_CORS_ORIGINS',
+  'APP_CSP_RESOURCE_ORIGINS',
   'SERVER_TRUST_PROXY',
   'SERVER_MULTI_INSTANCE_ENABLED',
 ] as const satisfies Array<keyof SetupEnvironment>;
@@ -253,6 +255,7 @@ const envGroups = [
       'SERVER_PORT',
       'APP_DOMAIN',
       'APP_CORS_ORIGINS',
+      'APP_CSP_RESOURCE_ORIGINS',
       'SERVER_TRUST_PROXY',
       'SERVER_MULTI_INSTANCE_ENABLED',
     ],
@@ -365,6 +368,10 @@ const setupConfigComments: Partial<Record<keyof SetupEnvironment, string[]>> = {
   SERVER_PORT: ['HTTP server bind port.'],
   APP_DOMAIN: ['Primary public application origin, including protocol. Used for default CORS and callback URLs.'],
   APP_CORS_ORIGINS: ['Comma-separated browser CORS origin allowlist. Production must not include *.'],
+  APP_CSP_RESOURCE_ORIGINS: [
+    'Comma- or newline-separated external resource origins allowed by browser CSP.',
+    'Use * to allow every network origin. Script, form, frame, and object restrictions are not configurable.',
+  ],
   SERVER_TRUST_PROXY: ['Whether Koa trusts reverse proxy headers. Enable only behind a trusted reverse proxy.'],
   SERVER_MULTI_INSTANCE_ENABLED: [
     'Whether multiple backend instances may run at the same time.',
@@ -541,6 +548,7 @@ export function assertValidSetupStepEnvironment(environment: SetupEnvironment, s
 function assertValidRuntimeEnvironment(environment: SetupEnvironment) {
   assertRequiredFields(environment, runtimeEnvironmentKeys);
   assertHttpOrigin(environment.APP_DOMAIN, 'APP_DOMAIN');
+  assertCspResourceOrigins(environment.APP_CSP_RESOURCE_ORIGINS);
   assertAllowedValue(environment.NODE_ENV, 'NODE_ENV', setupNodeEnvValues);
   assertAllowedValue(environment.SERVER_TRUST_PROXY, 'SERVER_TRUST_PROXY', setupBooleanValues);
   assertAllowedValue(environment.SERVER_MULTI_INSTANCE_ENABLED, 'SERVER_MULTI_INSTANCE_ENABLED', setupBooleanValues);
@@ -744,6 +752,14 @@ function assertHttpOrigin(value: string, label: string) {
   throw new AppError('SETUP_ENV_INVALID', 'error.SETUP_ENV_INVALID', 400, { field: label });
 }
 
+function assertCspResourceOrigins(value: string) {
+  for (const source of parseSeparatedValues(value, /[,\n]/)) {
+    if (source !== '*') {
+      assertHttpOrigin(source, 'APP_CSP_RESOURCE_ORIGINS');
+    }
+  }
+}
+
 export function toDatabaseConfig(environment: SetupEnvironment) {
   const dialect = setupDatabaseDialectSchema.parse(environment.DATABASE_DIALECT.trim());
 
@@ -824,6 +840,7 @@ function assertRequiredEnvironment(environment: SetupEnvironment, options: Envir
     'SERVER_PORT',
     'APP_DOMAIN',
     'APP_CORS_ORIGINS',
+    'APP_CSP_RESOURCE_ORIGINS',
     'SERVER_TRUST_PROXY',
     'SERVER_MULTI_INSTANCE_ENABLED',
     'DATABASE_DIALECT',

@@ -112,6 +112,7 @@ export const setupFieldHelp: Record<string, FieldHelp> = {
   SERVER_PORT: { placeholderMessageId: 'setup.field.SERVER_PORT.placeholder' },
   APP_DOMAIN: { placeholderMessageId: 'setup.field.APP_DOMAIN.placeholder' },
   APP_CORS_ORIGINS: { placeholderMessageId: 'setup.field.APP_CORS_ORIGINS.placeholder' },
+  APP_CSP_RESOURCE_ORIGINS: { placeholderMessageId: 'setup.field.APP_CSP_RESOURCE_ORIGINS.placeholder' },
   SERVER_TRUST_PROXY: {},
   SERVER_MULTI_INSTANCE_ENABLED: {},
   DATABASE_DIALECT: {},
@@ -235,6 +236,7 @@ export const setupSteps: SetupStepDefinition[] = [
       { key: 'SERVER_PORT', group: 'server' },
       { key: 'APP_DOMAIN', group: 'application' },
       { key: 'APP_CORS_ORIGINS', group: 'application', kind: 'textarea' },
+      { key: 'APP_CSP_RESOURCE_ORIGINS', group: 'application', kind: 'textarea' },
       {
         key: 'SERVER_TRUST_PROXY',
         group: 'deployment',

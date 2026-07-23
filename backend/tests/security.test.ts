@@ -12,10 +12,33 @@ describe('security middleware', () => {
     const context = await runMiddleware(securityHeadersMiddleware(), createTestContext());
 
     expect(context.responseHeaders['content-security-policy']).toContain("default-src 'self'");
+    expect(context.responseHeaders['content-security-policy']).toContain("connect-src 'self' *");
+    expect(context.responseHeaders['content-security-policy']).toContain("font-src 'self' *");
     expect(context.responseHeaders['content-security-policy']).toContain("frame-ancestors 'none'");
+    expect(context.responseHeaders['content-security-policy']).toContain("img-src 'self' data: *");
+    expect(context.responseHeaders['content-security-policy']).toContain("style-src 'self' * 'unsafe-inline'");
     expect(context.responseHeaders['x-content-type-options']).toBe('nosniff');
     expect(context.responseHeaders['x-frame-options']).toBe('DENY');
     expect(context.responseHeaders['referrer-policy']).toBe('no-referrer');
+  });
+
+  it('restricts browser resources to normalized configured origins', async () => {
+    const context = await runMiddleware(
+      securityHeadersMiddleware({
+        resourceOrigins: [
+          'https://cdn.example.com/',
+          'https://cdn.example.com',
+          'https://fonts.example.com',
+          'https://invalid.example.com; script-src *',
+        ],
+      }),
+      createTestContext(),
+    );
+    const policy = context.responseHeaders['content-security-policy'];
+
+    expect(policy).toContain("font-src 'self' https://cdn.example.com https://fonts.example.com");
+    expect(policy).toContain("img-src 'self' data: https://cdn.example.com https://fonts.example.com");
+    expect(policy).not.toContain('invalid.example.com');
   });
 
   it('preserves or creates request ids', async () => {

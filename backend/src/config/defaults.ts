@@ -26,6 +26,7 @@ export const defaultSetupEnvironment = {
   SERVER_PORT: '3000',
   APP_DOMAIN: defaultFrontendOrigin,
   APP_CORS_ORIGINS: defaultCorsOrigins,
+  APP_CSP_RESOURCE_ORIGINS: '*',
   SERVER_TRUST_PROXY: SetupBoolean.False,
   SERVER_MULTI_INSTANCE_ENABLED: SetupBoolean.False,
   DATABASE_DIALECT: SetupDatabaseDialect.Sqlite,
@@ -97,6 +98,7 @@ export const defaultSetupEnvironment = {
 
 export const defaultSetupRuntimeEnvironment = {
   APP_DOMAIN: defaultSetupEnvironment.APP_DOMAIN,
+  APP_CSP_RESOURCE_ORIGINS: defaultSetupEnvironment.APP_CSP_RESOURCE_ORIGINS,
   GLOBAL_RATE_LIMIT_MAX: defaultSetupEnvironment.GLOBAL_RATE_LIMIT_MAX,
   GLOBAL_RATE_LIMIT_WINDOW_MS: defaultSetupEnvironment.GLOBAL_RATE_LIMIT_WINDOW_MS,
   LOG_PENDING_WRITE_MAX: defaultSetupEnvironment.LOG_PENDING_WRITE_MAX,

@@ -59,6 +59,7 @@ describe('environment configuration', () => {
       secure: 'auto',
     });
     expect(env.appDomain).toBe('http://localhost:8011');
+    expect(env.cspResourceOrigins).toEqual(['*']);
     expect(env.cache).toEqual({
       store: 'memory',
     });
@@ -163,6 +164,26 @@ describe('environment configuration', () => {
 
     expect(env.appDomain).toBe('https://app.example.com');
     expect(env.corsOrigins).toEqual(['https://app.example.com']);
+  });
+
+  it('loads unique normalized CSP resource origins', () => {
+    const env = loadEnv({
+      APP_CSP_RESOURCE_ORIGINS: 'https://cdn.example.com/, https://fonts.example.com\nhttps://cdn.example.com',
+      AUTH_TOKEN_SECRET: authTokenSecret,
+      DATABASE_DIALECT: 'sqlite',
+    } as NodeJS.ProcessEnv);
+
+    expect(env.cspResourceOrigins).toEqual(['https://cdn.example.com', 'https://fonts.example.com']);
+  });
+
+  it('rejects invalid CSP resource origins', () => {
+    const message = getEnvValidationMessage({
+      APP_CSP_RESOURCE_ORIGINS: 'https://cdn.example.com/assets; script-src *',
+      AUTH_TOKEN_SECRET: authTokenSecret,
+      DATABASE_DIALECT: 'sqlite',
+    } as NodeJS.ProcessEnv);
+
+    expect(message).toContain('APP_CSP_RESOURCE_ORIGINS');
   });
 
   it('requires a local configuration file for process environment validation', async () => {
