@@ -103,10 +103,58 @@ export const openApiDocument = {
     },
   ],
   paths: withLocaleRequestParameters({
+    '/api/setup/unlock': {
+      post: {
+        tags: ['Setup'],
+        summary: 'Exchange the one-time setup token for a short-lived setup access cookie',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['token'],
+                properties: {
+                  token: {
+                    type: 'string',
+                    minLength: 32,
+                    maxLength: 512,
+                    writeOnly: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Setup access unlocked',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ApiSuccess',
+                },
+              },
+            },
+          },
+          '401': {
+            $ref: '#/components/responses/SetupAccessRequired',
+          },
+          '403': {
+            $ref: '#/components/responses/SetupForbidden',
+          },
+          '429': {
+            $ref: '#/components/responses/RateLimited',
+          },
+        },
+      },
+    },
     '/api/setup/defaults': {
       get: {
         tags: ['Setup'],
         summary: 'Return setup defaults',
+        security: [{ setupAccessCookieAuth: [] }],
         responses: {
           '200': {
             description: 'Setup defaults',
@@ -133,6 +181,9 @@ export const openApiDocument = {
           '403': {
             $ref: '#/components/responses/SetupLocked',
           },
+          '401': {
+            $ref: '#/components/responses/SetupAccessRequired',
+          },
         },
       },
     },
@@ -140,6 +191,7 @@ export const openApiDocument = {
       post: {
         tags: ['Setup'],
         summary: 'Validate setup input',
+        security: [{ setupAccessCookieAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -183,6 +235,9 @@ export const openApiDocument = {
           '400': {
             $ref: '#/components/responses/ValidationError',
           },
+          '401': {
+            $ref: '#/components/responses/SetupAccessRequired',
+          },
           '403': {
             $ref: '#/components/responses/SetupForbidden',
           },
@@ -193,6 +248,7 @@ export const openApiDocument = {
       post: {
         tags: ['Setup'],
         summary: 'Validate setup environment fields',
+        security: [{ setupAccessCookieAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -236,6 +292,9 @@ export const openApiDocument = {
           '400': {
             $ref: '#/components/responses/ValidationError',
           },
+          '401': {
+            $ref: '#/components/responses/SetupAccessRequired',
+          },
           '403': {
             $ref: '#/components/responses/SetupForbidden',
           },
@@ -246,6 +305,7 @@ export const openApiDocument = {
       post: {
         tags: ['Setup'],
         summary: 'Test setup database connectivity',
+        security: [{ setupAccessCookieAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -277,6 +337,9 @@ export const openApiDocument = {
               },
             },
           },
+          '401': {
+            $ref: '#/components/responses/SetupAccessRequired',
+          },
           '403': {
             $ref: '#/components/responses/SetupForbidden',
           },
@@ -287,6 +350,7 @@ export const openApiDocument = {
       post: {
         tags: ['Setup'],
         summary: 'Test setup cache connectivity',
+        security: [{ setupAccessCookieAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -318,6 +382,9 @@ export const openApiDocument = {
               },
             },
           },
+          '401': {
+            $ref: '#/components/responses/SetupAccessRequired',
+          },
           '403': {
             $ref: '#/components/responses/SetupForbidden',
           },
@@ -328,6 +395,7 @@ export const openApiDocument = {
       post: {
         tags: ['Setup'],
         summary: 'Test setup file storage connectivity',
+        security: [{ setupAccessCookieAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -359,6 +427,9 @@ export const openApiDocument = {
               },
             },
           },
+          '401': {
+            $ref: '#/components/responses/SetupAccessRequired',
+          },
           '403': {
             $ref: '#/components/responses/SetupForbidden',
           },
@@ -369,6 +440,7 @@ export const openApiDocument = {
       post: {
         tags: ['Setup'],
         summary: 'Test setup logging connectivity',
+        security: [{ setupAccessCookieAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -400,6 +472,9 @@ export const openApiDocument = {
               },
             },
           },
+          '401': {
+            $ref: '#/components/responses/SetupAccessRequired',
+          },
           '403': {
             $ref: '#/components/responses/SetupForbidden',
           },
@@ -410,6 +485,7 @@ export const openApiDocument = {
       post: {
         tags: ['Setup'],
         summary: 'Test setup email connectivity',
+        security: [{ setupAccessCookieAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -441,6 +517,9 @@ export const openApiDocument = {
               },
             },
           },
+          '401': {
+            $ref: '#/components/responses/SetupAccessRequired',
+          },
           '403': {
             $ref: '#/components/responses/SetupForbidden',
           },
@@ -451,6 +530,7 @@ export const openApiDocument = {
       post: {
         tags: ['Setup'],
         summary: 'Test setup SMS configuration',
+        security: [{ setupAccessCookieAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -482,6 +562,9 @@ export const openApiDocument = {
               },
             },
           },
+          '401': {
+            $ref: '#/components/responses/SetupAccessRequired',
+          },
           '403': {
             $ref: '#/components/responses/SetupForbidden',
           },
@@ -492,6 +575,7 @@ export const openApiDocument = {
       post: {
         tags: ['Setup'],
         summary: 'Test setup SSO discovery',
+        security: [{ setupAccessCookieAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -523,6 +607,9 @@ export const openApiDocument = {
               },
             },
           },
+          '401': {
+            $ref: '#/components/responses/SetupAccessRequired',
+          },
           '403': {
             $ref: '#/components/responses/SetupForbidden',
           },
@@ -533,6 +620,7 @@ export const openApiDocument = {
       post: {
         tags: ['Setup'],
         summary: 'Complete setup',
+        security: [{ setupAccessCookieAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -556,6 +644,9 @@ export const openApiDocument = {
           },
           '400': {
             $ref: '#/components/responses/ValidationError',
+          },
+          '401': {
+            $ref: '#/components/responses/SetupAccessRequired',
           },
           '403': {
             $ref: '#/components/responses/SetupForbidden',
@@ -2286,10 +2377,10 @@ export const openApiDocument = {
       post: createApiKeySummaryOperation('Revoke an API Key'),
     },
     '/api/admin/api-keys': {
-      get: createApiKeyListOperation('List all API Keys', { admin: true }),
+      get: createApiKeyListOperation('List API Keys for manageable users', { admin: true }),
     },
     '/api/admin/api-keys/{id}/revoke': {
-      post: createApiKeySummaryOperation('Revoke any API Key', { admin: true }),
+      post: createApiKeySummaryOperation('Revoke an API Key for a manageable user', { admin: true }),
     },
     '/api/admin/users/': {
       get: {
@@ -3101,6 +3192,11 @@ export const openApiDocument = {
         in: 'cookie',
         name: 'tilty_scaffold_refresh_token',
       },
+      setupAccessCookieAuth: {
+        type: 'apiKey',
+        in: 'cookie',
+        name: 'tilty_scaffold_setup_access',
+      },
     },
     parameters: {
       LocaleHeader: {
@@ -3381,7 +3477,7 @@ export const openApiDocument = {
       },
       UserManagementAccessRequired: {
         description:
-          'User list/admin permission, a configured passkey or authenticator app, and verified user_management access are required',
+          'User list/admin permission, a configured passkey or authenticator app, verified user_management access, and authority over the target account are required',
         content: {
           'application/json': {
             schema: {
@@ -3394,6 +3490,14 @@ export const openApiDocument = {
                   code: 403,
                   error: 'AUTH_FORBIDDEN',
                   message: 'You do not have permission to perform this action.',
+                },
+              },
+              targetForbidden: {
+                summary: 'Administrator target requires ROOT',
+                value: {
+                  code: 403,
+                  error: 'ADMIN_TARGET_FORBIDDEN',
+                  message: 'Only a root administrator can manage another administrator account.',
                 },
               },
               strongVerifierRequired: {
@@ -3418,7 +3522,7 @@ export const openApiDocument = {
       },
       CsrfOrUserManagementAccessRequired: {
         description:
-          'The unsafe request origin is missing or not allowed, or user management access requirements are not satisfied',
+          'The unsafe request origin is missing or not allowed, or user management access and target authority requirements are not satisfied',
         content: {
           'application/json': {
             schema: {
@@ -3483,7 +3587,8 @@ export const openApiDocument = {
         },
       },
       AdminApiKeyManagementAccessRequired: {
-        description: 'USER_ADMIN or ROOT permission and verified manage_api_key access are required',
+        description:
+          'USER_ADMIN or ROOT permission, verified manage_api_key access, and authority over the API Key owner are required',
         content: {
           'application/json': {
             schema: {
@@ -3494,7 +3599,7 @@ export const openApiDocument = {
       },
       CsrfOrAdminApiKeyManagementAccessRequired: {
         description:
-          'The unsafe request origin is missing or not allowed, or admin API Key management access requirements are not satisfied',
+          'The unsafe request origin is missing or not allowed, or admin API Key management and owner-target requirements are not satisfied',
         content: {
           'application/json': {
             schema: {
@@ -3649,8 +3754,18 @@ export const openApiDocument = {
           },
         },
       },
+      SetupAccessRequired: {
+        description: 'A valid short-lived setup access cookie is required',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/ApiFailure',
+            },
+          },
+        },
+      },
       SetupForbidden: {
-        description: 'Setup is locked, or the unsafe request origin is missing or not allowed',
+        description: 'Setup is locked, transport is insecure, or the unsafe request origin is missing or not allowed',
         content: {
           'application/json': {
             schema: {
@@ -3951,6 +4066,8 @@ export const openApiDocument = {
         properties: {
           environment: {
             $ref: '#/components/schemas/SetupEnvironment',
+            description:
+              'Existing secret values are replaced with a non-secret configured-value placeholder and resolved only on the backend.',
           },
           environmentFileLoaded: {
             type: 'boolean',
@@ -4061,11 +4178,14 @@ export const openApiDocument = {
             properties: {
               data: {
                 type: 'object',
-                required: ['connected', 'hasExistingUsers'],
+                required: ['connected', 'hasExistingAdministrator', 'hasExistingUsers'],
                 properties: {
                   connected: {
                     type: 'boolean',
                     const: true,
+                  },
+                  hasExistingAdministrator: {
+                    type: 'boolean',
                   },
                   hasExistingUsers: {
                     type: 'boolean',

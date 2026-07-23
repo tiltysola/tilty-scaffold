@@ -155,6 +155,30 @@ describe('environment configuration', () => {
     expect(message).toContain('APP_CORS_ORIGINS');
   });
 
+  it('requires HTTPS application and explicit CSP origins in production', () => {
+    const insecureDomainMessage = getEnvValidationMessage({
+      APP_CSP_RESOURCE_ORIGINS: 'https://cdn.example.com',
+      APP_DOMAIN: 'http://app.example.com',
+      APP_CORS_ORIGINS: 'http://app.example.com',
+      AUTH_COOKIE_SECURE: 'true',
+      AUTH_TOKEN_SECRET: authTokenSecret,
+      DATABASE_DIALECT: 'sqlite',
+      NODE_ENV: 'production',
+    } as NodeJS.ProcessEnv);
+    const wildcardCspMessage = getEnvValidationMessage({
+      APP_CSP_RESOURCE_ORIGINS: '*',
+      APP_DOMAIN: 'https://app.example.com',
+      APP_CORS_ORIGINS: 'https://app.example.com',
+      AUTH_COOKIE_SECURE: 'true',
+      AUTH_TOKEN_SECRET: authTokenSecret,
+      DATABASE_DIALECT: 'sqlite',
+      NODE_ENV: 'production',
+    } as NodeJS.ProcessEnv);
+
+    expect(insecureDomainMessage).toContain('APP_DOMAIN');
+    expect(wildcardCspMessage).toContain('APP_CSP_RESOURCE_ORIGINS');
+  });
+
   it('defaults CORS origins from the application domain', () => {
     const env = loadEnv({
       APP_DOMAIN: 'https://app.example.com',

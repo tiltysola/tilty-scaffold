@@ -205,11 +205,11 @@ export class AccessControlService {
     return roles.map((role) => toRoleSummary(role, permissionKeysByRoleId.get(role.id) ?? [], locale));
   }
 
-  async getUserAccess(userId: string) {
-    return (await this.getUsersAccess([userId])).get(userId) ?? createEmptyAccess();
+  async getUserAccess(userId: string, options: DatabaseWriteOptions = {}) {
+    return (await this.getUsersAccess([userId], options)).get(userId) ?? createEmptyAccess();
   }
 
-  async getUsersAccess(userIds: string[]) {
+  async getUsersAccess(userIds: string[], options: DatabaseWriteOptions = {}) {
     const accessByUserId = new Map<string, UserAccess>();
 
     for (const userId of userIds) {
@@ -221,6 +221,7 @@ export class AccessControlService {
     }
 
     const assignments = await this.models.userRole.findAll({
+      ...withTransaction(options),
       where: {
         userId: {
           [Op.in]: userIds,
@@ -234,6 +235,7 @@ export class AccessControlService {
     }
 
     const roles = await this.models.role.findAll({
+      ...withTransaction(options),
       where: {
         id: {
           [Op.in]: roleIds,
@@ -242,7 +244,10 @@ export class AccessControlService {
       },
     });
     const roleById = new Map(roles.map((role) => [role.id, role]));
-    const permissionKeysByRoleId = await this.getPermissionKeysByRoleIds(roles.map((role) => role.id));
+    const permissionKeysByRoleId = await this.getPermissionKeysByRoleIds(
+      roles.map((role) => role.id),
+      options,
+    );
 
     for (const assignment of assignments) {
       const role = roleById.get(assignment.roleId);
@@ -281,6 +286,40 @@ export class AccessControlService {
         roleId: role.id,
       },
     });
+  }
+
+  async assertCanManageUser(actorAccess: UserAccess, targetUserId: string, options: DatabaseWriteOptions = {}) {
+    if (hasPermission(actorAccess, SystemPermission.Root)) {
+      return;
+    }
+
+    const targetAccess = await this.getUserAccess(targetUserId, options);
+
+    if (hasPermission(targetAccess, SystemPermission.UserAdmin)) {
+      throwAdminTargetForbidden();
+    }
+  }
+
+  async assertCanAssignRoles(actorAccess: UserAccess, roleKeys: string[], options: DatabaseWriteOptions = {}) {
+    if (hasPermission(actorAccess, SystemPermission.Root)) {
+      return;
+    }
+
+    const normalizedRoleKeys = normalizeRoleKeys(roleKeys);
+    const roles = await this.findAvailableRolesByKeys(normalizedRoleKeys, options);
+
+    if (roles.length !== normalizedRoleKeys.length) {
+      throw new AppError('ROLE_NOT_FOUND', 'error.ROLE_NOT_FOUND', 404);
+    }
+
+    const permissionKeysByRoleId = await this.getPermissionKeysByRoleIds(
+      roles.map((role) => role.id),
+      options,
+    );
+
+    if (roles.some((role) => hasGrantedPermission(permissionKeysByRoleId.get(role.id), SystemPermission.UserAdmin))) {
+      throwAdminTargetForbidden();
+    }
   }
 
   async replaceUserRoles(userId: string, roleKeys: string[], options: DatabaseWriteOptions = {}) {
@@ -567,4 +606,8 @@ function sortKeys(keys: string[], systemOrder: readonly string[]) {
 
 function throwLastRootRequired(): never {
   throw new AppError('LAST_ROOT_ROLE_REQUIRED', 'error.LAST_ROOT_ROLE_REQUIRED', 409);
+}
+
+function throwAdminTargetForbidden(): never {
+  throw new AppError('ADMIN_TARGET_FORBIDDEN', 'error.ADMIN_TARGET_FORBIDDEN', 403);
 }

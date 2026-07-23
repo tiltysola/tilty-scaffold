@@ -9,7 +9,9 @@ export class AdminApiKeyController {
   constructor(private readonly apiKeyService: ApiKeyService) {}
 
   list: Middleware = async (ctx) => {
-    ctx.body = ok(await this.apiKeyService.listForAdmin());
+    const auth = getSessionAuth(ctx);
+
+    ctx.body = ok(await this.apiKeyService.listForAdmin(auth.access));
   };
 
   revoke: Middleware = async (ctx) => {
@@ -18,6 +20,7 @@ export class AdminApiKeyController {
 
     ctx.body = ok(
       await this.apiKeyService.revoke({
+        actorAccess: auth.access,
         actorUserId: auth.user.id,
         context: getAuthRequestContext(ctx),
         keyId: id,

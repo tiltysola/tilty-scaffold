@@ -27,16 +27,16 @@ interface ReviewSectionDefinition {
 export function ConfigurationReview({
   administrator,
   environment,
-  hasExistingUsers,
+  hasExistingAdministrator,
 }: {
   administrator?: SetupAdministrator;
   environment: SetupEnvironment;
-  hasExistingUsers?: boolean;
+  hasExistingAdministrator?: boolean;
 }) {
   const intl = useIntl();
   const environmentSections = getEnvironmentReviewSections(environment, intl);
   const administratorFields =
-    administrator && !hasExistingUsers
+    administrator && !hasExistingAdministrator
       ? [
           {
             key: 'ADMIN_USERNAME',
@@ -64,7 +64,7 @@ export function ConfigurationReview({
 
   return (
     <div className="grid gap-6">
-      {hasExistingUsers ? (
+      {hasExistingAdministrator ? (
         <ReviewSection
           groups={[
             {

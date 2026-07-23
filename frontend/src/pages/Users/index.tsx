@@ -50,6 +50,7 @@ const Index = () => {
   const intl = useIntl();
   const session = useAuthenticatedSession();
   const canManageUsers = hasPermission(session.user.permissions, SystemPermission.UserAdmin);
+  const isRootAdministrator = hasPermission(session.user.permissions, SystemPermission.Root);
 
   const applyUserList = useCallback((result: Awaited<ReturnType<typeof fetchUsers>>) => {
     setUsers(result.users);
@@ -61,7 +62,19 @@ const Index = () => {
     setUsers((current) => current.map((user) => (user.id === updatedUser.id ? updatedUser : user)));
   }, []);
 
-  const availableRoles = useMemo(() => roles.filter((role) => role.available), [roles]);
+  const canManageUser = useCallback(
+    (user: UserListItem) => isRootAdministrator || !hasPermission(user.permissions, SystemPermission.UserAdmin),
+    [isRootAdministrator],
+  );
+
+  const availableRoles = useMemo(
+    () =>
+      roles.filter(
+        (role) =>
+          role.available && (isRootAdministrator || !hasPermission(role.permissionKeys, SystemPermission.UserAdmin)),
+      ),
+    [isRootAdministrator, roles],
+  );
   const {
     clearError: clearVerificationError,
     confirmChallenge,
@@ -193,6 +206,10 @@ const Index = () => {
   };
 
   const handleEditUser = (user: UserListItem) => {
+    if (!canManageUser(user)) {
+      return;
+    }
+
     const phoneCountryCode = getPhoneCountryCode(user.phoneNumber, phoneCountryCodes);
 
     setEditingUser(user);
@@ -320,6 +337,7 @@ const Index = () => {
       ) : (
         <UsersTable
           authConfigLoaded={authConfigLoaded}
+          canManageUser={canManageUser}
           canManageUsers={canManageUsers}
           displayTotalPages={displayTotalPages}
           loading={loading}

@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { Op, type Transaction } from 'sequelize';
 
+import { hasPermission as hasGrantedPermission, SystemPermission } from '@tilty/shared/access-control';
 import {
   apiKeyActiveLimitPerUser,
   apiKeyChecksumLength,
@@ -15,7 +16,7 @@ import {
 } from '@tilty/shared/api-keys';
 
 import { AppError } from '../../core/errors';
-import { type AccessControlService } from '../access-control/access-control.service';
+import { type AccessControlService, type UserAccess } from '../access-control/access-control.service';
 import { toAuthUser } from '../auth/auth.service';
 import { type UserService } from '../users/user.service';
 import { type ApiKeyAuditEventModel, type ApiKeyModel } from './api-key.model';
@@ -32,6 +33,7 @@ interface CreateApiKeyOptions {
 }
 
 interface MutateApiKeyOptions {
+  actorAccess?: UserAccess;
   actorUserId: string;
   context: ApiKeyRequestContext;
   keyId: string;
@@ -186,16 +188,25 @@ export class ApiKeyService {
     };
   }
 
-  async listForAdmin() {
+  async listForAdmin(actorAccess: UserAccess) {
     const keys = await this.apiKeyModel.findAll({
       order: [
         ['createdAt', 'DESC'],
         ['name', 'ASC'],
       ],
     });
+    const accessByUserId = await this.accessControl.getUsersAccess([...new Set(keys.map((key) => key.userId))]);
+    const visibleKeys = keys.filter((key) => {
+      const targetAccess = accessByUserId.get(key.userId);
+
+      return (
+        hasGrantedPermission(actorAccess.permissions, SystemPermission.Root) ||
+        !hasGrantedPermission(targetAccess?.permissions, SystemPermission.UserAdmin)
+      );
+    });
 
     return {
-      keys: keys.map(toApiKeySummary),
+      keys: visibleKeys.map(toApiKeySummary),
       limit: apiKeyActiveLimitPerUser,
     };
   }
@@ -235,6 +246,10 @@ export class ApiKeyService {
 
   async revoke(options: MutateApiKeyOptions) {
     const key = await this.requireKey(options.keyId, options.userId);
+
+    if (options.actorAccess) {
+      await this.accessControl.assertCanManageUser(options.actorAccess, key.userId);
+    }
 
     key.status = 'revoked';
     key.revokedByUserId = options.actorUserId;

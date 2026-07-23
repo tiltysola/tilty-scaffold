@@ -1,68 +1,96 @@
+import { type Middleware } from 'koa';
+
 import { type BackendModule } from '../../core/module';
 import { SetupController } from './setup.controller';
 import { SetupService } from './setup.service';
+import { type SetupAccessService } from './setup-access';
 
-export function createSetupModule(service: SetupService): BackendModule {
-  const controller = new SetupController(service);
+interface SetupModuleOptions {
+  access?: SetupAccessService;
+  completeRateLimit?: Middleware;
+  probeRateLimit?: Middleware;
+  rateLimit?: Middleware;
+}
+
+interface SetupOnlyModuleOptions extends SetupModuleOptions {
+  onCompleted?: () => Promise<void> | void;
+}
+
+export function createSetupModule(service: SetupService, options: SetupModuleOptions = {}): BackendModule {
+  const controller = new SetupController(service, options.access);
+  const protectedHandlers = (handler: Middleware, rateLimit = options.rateLimit) => [
+    ...(rateLimit ? [rateLimit] : []),
+    ...(options.access ? [options.access.requireAccess] : []),
+    handler,
+  ];
 
   return {
     name: 'setup',
     prefix: '/api/setup',
     routes: [
+      ...(options.access
+        ? [
+            {
+              method: 'post' as const,
+              path: '/unlock',
+              handlers: [...(options.completeRateLimit ? [options.completeRateLimit] : []), options.access.unlock],
+            },
+          ]
+        : []),
       {
         method: 'get',
         path: '/defaults',
-        handlers: [controller.defaults],
+        handlers: protectedHandlers(controller.defaults),
       },
       {
         method: 'post',
         path: '/validate',
-        handlers: [controller.validate],
+        handlers: protectedHandlers(controller.validate),
       },
       {
         method: 'post',
         path: '/validate/environment',
-        handlers: [controller.validateEnvironment],
+        handlers: protectedHandlers(controller.validateEnvironment),
       },
       {
         method: 'post',
         path: '/test/database',
-        handlers: [controller.testDatabase],
+        handlers: protectedHandlers(controller.testDatabase, options.probeRateLimit),
       },
       {
         method: 'post',
         path: '/test/cache',
-        handlers: [controller.testCache],
+        handlers: protectedHandlers(controller.testCache, options.probeRateLimit),
       },
       {
         method: 'post',
         path: '/test/file-storage',
-        handlers: [controller.testFileStorage],
+        handlers: protectedHandlers(controller.testFileStorage, options.probeRateLimit),
       },
       {
         method: 'post',
         path: '/test/logging',
-        handlers: [controller.testLogging],
+        handlers: protectedHandlers(controller.testLogging, options.probeRateLimit),
       },
       {
         method: 'post',
         path: '/test/email',
-        handlers: [controller.testEmail],
+        handlers: protectedHandlers(controller.testEmail, options.probeRateLimit),
       },
       {
         method: 'post',
         path: '/test/sms',
-        handlers: [controller.testSms],
+        handlers: protectedHandlers(controller.testSms, options.probeRateLimit),
       },
       {
         method: 'post',
         path: '/test/sso',
-        handlers: [controller.testSso],
+        handlers: protectedHandlers(controller.testSso, options.probeRateLimit),
       },
       {
         method: 'post',
         path: '/complete',
-        handlers: [controller.complete],
+        handlers: protectedHandlers(controller.complete, options.completeRateLimit),
       },
     ],
   };
@@ -72,6 +100,11 @@ export function createLockedSetupModule() {
   return createSetupModule(new SetupService('locked'));
 }
 
-export function createSetupOnlyModule() {
-  return createSetupModule(new SetupService('setup'));
+export function createSetupOnlyModule(options: SetupOnlyModuleOptions = {}) {
+  return createSetupModule(
+    new SetupService('setup', {
+      ...(options.onCompleted ? { onCompleted: options.onCompleted } : {}),
+    }),
+    options,
+  );
 }

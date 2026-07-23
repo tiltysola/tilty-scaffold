@@ -209,4 +209,105 @@ describe('access control', () => {
       error: 'LAST_ROOT_ROLE_REQUIRED',
     });
   });
+
+  it('allows user administrators to manage regular users but not administrator targets or roles', async () => {
+    const rootSession = await registerRootWithUserManagementAccess(
+      services,
+      'Root User',
+      'root-target-policy@example.com',
+    );
+    const adminSession = await registerUserWithUserManagementAccess(
+      services,
+      'Admin User',
+      'admin-target-policy@example.com',
+    );
+    await registerTestUser(services.auth, 'Peer Admin', 'peer-admin-target-policy@example.com');
+    await registerTestUser(services.auth, 'Target User', 'regular-target-policy@example.com');
+    const adminUser = await services.user.findByEmail('admin-target-policy@example.com');
+    const peerAdmin = await services.user.findByEmail('peer-admin-target-policy@example.com');
+    const regularUser = await services.user.findByEmail('regular-target-policy@example.com');
+    const rootUser = await services.user.findByEmail('root-target-policy@example.com');
+
+    expect(adminUser).not.toBeNull();
+    expect(peerAdmin).not.toBeNull();
+    expect(regularUser).not.toBeNull();
+    expect(rootUser).not.toBeNull();
+
+    await services.accessControl.replaceUserRoles(adminUser!.id, [SystemRole.UserAdmin]);
+    await services.accessControl.replaceUserRoles(peerAdmin!.id, [SystemRole.UserAdmin]);
+
+    const updateRolesRoute = getTestRoute(routes, 'put', '/users/:id/roles');
+    const detailsRoute = getTestRoute(routes, 'get', '/users/:id/details');
+    const allowedContext = await runMiddlewares(
+      [errorMiddleware(), ...updateRolesRoute.handlers],
+      createTestContext(
+        { roleKeys: [SystemRole.UserList] },
+        {},
+        { id: regularUser!.id },
+        {
+          cookies: {
+            tilty_scaffold_access_token: adminSession.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(allowedContext.status).toBeUndefined();
+
+    for (const targetUserId of [peerAdmin!.id, rootUser!.id]) {
+      const forbiddenContext = await runMiddlewares(
+        [errorMiddleware(), ...detailsRoute.handlers],
+        createTestContext(
+          undefined,
+          {},
+          { id: targetUserId },
+          {
+            cookies: {
+              tilty_scaffold_access_token: adminSession.accessToken,
+            },
+          },
+        ),
+      );
+
+      expect(forbiddenContext.status).toBe(403);
+      expect(forbiddenContext.body).toMatchObject({
+        error: 'ADMIN_TARGET_FORBIDDEN',
+      });
+    }
+
+    const grantAdminContext = await runMiddlewares(
+      [errorMiddleware(), ...updateRolesRoute.handlers],
+      createTestContext(
+        { roleKeys: [SystemRole.UserAdmin] },
+        {},
+        { id: regularUser!.id },
+        {
+          cookies: {
+            tilty_scaffold_access_token: adminSession.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(grantAdminContext.status).toBe(403);
+    expect(grantAdminContext.body).toMatchObject({
+      error: 'ADMIN_TARGET_FORBIDDEN',
+    });
+
+    const rootManagementContext = await runMiddlewares(
+      [errorMiddleware(), ...detailsRoute.handlers],
+      createTestContext(
+        undefined,
+        {},
+        { id: peerAdmin!.id },
+        {
+          cookies: {
+            tilty_scaffold_access_token: rootSession.accessToken,
+          },
+        },
+      ),
+    );
+
+    expect(rootManagementContext.status).toBeUndefined();
+  });
 });

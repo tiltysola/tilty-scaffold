@@ -57,13 +57,15 @@ navigation redirects to `/setup`, and non-setup API requests return
 `SETUP_RESTART_REQUIRED` until restart, and direct `/setup` visits return to
 `/login`. Backend setup lock configuration is documented in `backend/README.md`.
 
-The setup page applies migrations through `/api/setup/*`. Database, Redis
-cache, OSS storage, SLS logging, SMTP email, Aliyun SMS, and SSO must pass
-connection tests when enabled. The database step detects available users; setup
-creates the root administrator only when none exist. Existing users are
-retained. Configuration without a network dependency is validated for required
-values and URL or email format. Review pages list active configuration fields
-with sensitive values masked and omit inactive provider fields. The application
+The setup page first exchanges the one-time backend setup token for a
+30-minute HttpOnly setup cookie, then applies migrations through
+`/api/setup/*`. Database, Redis cache, OSS storage, SLS logging, SMTP email,
+Aliyun SMS, and SSO must pass connection tests when enabled. The database step
+detects a compatible schema and an available root administrator; unrelated
+existing users do not suppress root creation. Configuration without a network
+dependency is validated for required values and URL or email format. Review
+pages list active configuration fields with sensitive values represented by
+non-secret placeholders and omit inactive provider fields. The application
 domain defaults to the current frontend origin, and CORS origins default to
 that domain.
 
@@ -76,6 +78,10 @@ Authenticated user metadata includes role and permission keys. The dashboard
 displays authenticated user context and application status. The sidebar and
 protected routes use role and permission keys for navigation and page access;
 the backend remains the source of truth for API authorization.
+On the Users page, a non-root user administrator can see administrator
+directory entries but cannot open their management dialog or assign
+administrator roles; only a root administrator can manage another
+administrator account.
 
 The profile page updates the current user's profile fields through
 `PATCH /api/users/me`. Gender and location editing use server-provided options

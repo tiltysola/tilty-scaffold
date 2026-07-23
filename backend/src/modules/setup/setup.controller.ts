@@ -2,9 +2,13 @@ import { type Middleware } from 'koa';
 
 import { ok } from '../../core/http';
 import { type SetupService } from './setup.service';
+import { type SetupAccessService } from './setup-access';
 
 export class SetupController {
-  constructor(private readonly service: SetupService) {}
+  constructor(
+    private readonly service: SetupService,
+    private readonly access?: SetupAccessService,
+  ) {}
 
   defaults: Middleware = async (ctx) => {
     ctx.body = ok(this.service.getDefaults());
@@ -49,5 +53,6 @@ export class SetupController {
   complete: Middleware = async (ctx) => {
     ctx.status = 201;
     ctx.body = ok(await this.service.complete(ctx.request.body));
+    this.access?.clearAccessCookie(ctx);
   };
 }

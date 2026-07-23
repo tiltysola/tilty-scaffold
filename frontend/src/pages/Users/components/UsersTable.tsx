@@ -13,6 +13,7 @@ import { VerifiedContact } from './VerifiedContact';
 
 export function UsersTable({
   authConfigLoaded,
+  canManageUser,
   canManageUsers,
   displayTotalPages,
   loading,
@@ -25,6 +26,7 @@ export function UsersTable({
   users,
 }: {
   authConfigLoaded: boolean;
+  canManageUser: (user: UserListItem) => boolean;
   canManageUsers: boolean;
   displayTotalPages: number;
   loading: boolean;
@@ -97,9 +99,14 @@ export function UsersTable({
                 {canManageUsers ? (
                   <TableCell className="text-right">
                     <Button
-                      disabled={savingUserId === user.id || !authConfigLoaded}
+                      disabled={savingUserId === user.id || !authConfigLoaded || !canManageUser(user)}
                       onClick={() => onEditUser(user)}
                       size="sm"
+                      title={
+                        canManageUser(user)
+                          ? undefined
+                          : intl.formatMessage({ id: 'users.action.admin.target.forbidden' })
+                      }
                     >
                       <PencilIcon />
                       {intl.formatMessage({ id: 'common.edit' })}

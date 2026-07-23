@@ -18,6 +18,7 @@ import { type SsoService } from '../auth/auth.sso';
 import { type UserService } from '../users/user.service';
 import { AdminApiKeyController } from './admin-api-key.controller';
 import { AdminSystemSettingsController } from './admin-system-settings.controller';
+import { requireAssignableUserRoles, requireManageableUserTarget } from './admin-user.helpers';
 import { AdminUserDirectoryController } from './admin-user-directory.controller';
 import { AdminUserMediaController } from './admin-user-media.controller';
 import { AdminUserProfileController } from './admin-user-profile.controller';
@@ -79,6 +80,8 @@ export function createAdminModule(
     SystemPermission.UserAdmin,
     AuthVerificationPurpose.UserManagement,
   );
+  const requireManageableUser = requireManageableUserTarget(accessControl);
+  const requireAssignableRoles = requireAssignableUserRoles(accessControl);
 
   return {
     name: 'admin',
@@ -112,87 +115,97 @@ export function createAdminModule(
       {
         method: 'get',
         path: '/users/:id/details',
-        handlers: [...requireVerifiedUserAdmin, userProfileController.details],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userProfileController.details],
       },
       {
         method: 'put',
         path: '/users/:id',
-        handlers: [...requireVerifiedUserAdmin, userProfileController.update],
+        handlers: [
+          ...requireVerifiedUserAdmin,
+          requireManageableUser,
+          requireAssignableRoles,
+          userProfileController.update,
+        ],
       },
       {
         method: 'put',
         path: '/users/:id/roles',
-        handlers: [...requireVerifiedUserAdmin, userProfileController.updateRoles],
+        handlers: [
+          ...requireVerifiedUserAdmin,
+          requireManageableUser,
+          requireAssignableRoles,
+          userProfileController.updateRoles,
+        ],
       },
       {
         method: 'patch',
         path: '/users/:id/mfa',
-        handlers: [...requireVerifiedUserAdmin, userSecurityController.updateMfa],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userSecurityController.updateMfa],
       },
       {
         method: 'post',
         path: '/users/:id/totp/disable',
-        handlers: [...requireVerifiedUserAdmin, userSecurityController.disableTotp],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userSecurityController.disableTotp],
       },
       {
         method: 'delete',
         path: '/users/:id/passkeys/:passkeyId',
-        handlers: [...requireVerifiedUserAdmin, userSecurityController.deletePasskey],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userSecurityController.deletePasskey],
       },
       {
         method: 'get',
         path: '/users/:id/devices',
-        handlers: [...requireVerifiedUserAdmin, userSecurityController.devices],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userSecurityController.devices],
       },
       {
         method: 'delete',
         path: '/users/:id/devices',
-        handlers: [...requireVerifiedUserAdmin, userSecurityController.revokeDevices],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userSecurityController.revokeDevices],
       },
       {
         method: 'delete',
         path: '/users/:id/devices/:sessionId',
-        handlers: [...requireVerifiedUserAdmin, userSecurityController.revokeDevice],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userSecurityController.revokeDevice],
       },
       {
         method: 'get',
         path: '/users/:id/sso-identities',
-        handlers: [...requireVerifiedUserAdmin, userSecurityController.ssoIdentities],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userSecurityController.ssoIdentities],
       },
       {
         method: 'delete',
         path: '/users/:id/sso-identities/:providerId',
-        handlers: [...requireVerifiedUserAdmin, userSecurityController.deleteSsoIdentity],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userSecurityController.deleteSsoIdentity],
       },
       {
         method: 'post',
         path: '/users/:id/avatar',
-        handlers: [...requireVerifiedUserAdmin, userMediaController.uploadAvatar],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userMediaController.uploadAvatar],
       },
       {
         method: 'delete',
         path: '/users/:id/avatar',
-        handlers: [...requireVerifiedUserAdmin, userMediaController.deleteAvatar],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userMediaController.deleteAvatar],
       },
       {
         method: 'post',
         path: '/users/:id/profile-banner',
-        handlers: [...requireVerifiedUserAdmin, userMediaController.uploadProfileBanner],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userMediaController.uploadProfileBanner],
       },
       {
         method: 'delete',
         path: '/users/:id/profile-banner',
-        handlers: [...requireVerifiedUserAdmin, userMediaController.deleteProfileBanner],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userMediaController.deleteProfileBanner],
       },
       {
         method: 'post',
         path: '/users/:id/profile-background',
-        handlers: [...requireVerifiedUserAdmin, userMediaController.uploadProfileBackground],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userMediaController.uploadProfileBackground],
       },
       {
         method: 'delete',
         path: '/users/:id/profile-background',
-        handlers: [...requireVerifiedUserAdmin, userMediaController.deleteProfileBackground],
+        handlers: [...requireVerifiedUserAdmin, requireManageableUser, userMediaController.deleteProfileBackground],
       },
     ],
   };

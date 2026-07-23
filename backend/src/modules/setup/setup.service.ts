@@ -1,5 +1,7 @@
 import { randomUUID } from 'crypto';
-import { open, unlink } from 'fs/promises';
+import { open, readFile, unlink } from 'fs/promises';
+import { hostname } from 'os';
+import { Op, type Transaction } from 'sequelize';
 import { z } from 'zod';
 
 import { SystemRole } from '@tilty/shared/access-control';
@@ -18,6 +20,7 @@ import {
   assertValidSsoEnvironment,
   getSetupEnvironmentDefaults,
   parseLogTargets,
+  resolveConfiguredSetupSecrets,
   type SetupEnvironment,
   setupEnvironmentInputSchema,
   setupEnvironmentValidationInputSchema,
@@ -39,11 +42,16 @@ import { SmtpEmailSender } from '../auth/auth.email';
 import { checkAliyunSmsProfiles } from '../auth/auth.sms';
 import { testSsoDiscovery } from '../auth/auth.sso';
 import { initUserModel } from '../users/user.model';
+import { assertSafeSetupNetworkTargets } from './setup-network';
 
 type SetupMode = 'locked' | 'setup';
+interface SetupServiceOptions {
+  onCompleted?: () => Promise<void> | void;
+}
 type SetupCompletionLock = {
   fileHandle: Awaited<ReturnType<typeof open>>;
   lockFilePath: string;
+  owner: string;
 };
 type SetupCompleteInput = z.infer<typeof setupCompleteSchema>;
 
@@ -60,7 +68,10 @@ const setupCompleteSchema = z.object({
 let setupCompletionInProgress = false;
 
 export class SetupService {
-  constructor(private readonly mode: SetupMode) {}
+  constructor(
+    private readonly mode: SetupMode,
+    private readonly options: SetupServiceOptions = {},
+  ) {}
 
   getDefaults() {
     this.assertSetupAvailable();
@@ -71,7 +82,7 @@ export class SetupService {
   validate(input: unknown) {
     this.assertSetupAvailable();
 
-    const parsed = setupCompleteSchema.parse(input);
+    const parsed = resolveSetupCompleteInput(input);
 
     assertValidEnvironment(parsed.environment);
 
@@ -83,7 +94,9 @@ export class SetupService {
   validateEnvironment(input: unknown) {
     this.assertSetupAvailable();
 
-    const { environment, stepId } = setupEnvironmentValidationInputSchema.parse(input);
+    const parsed = setupEnvironmentValidationInputSchema.parse(input);
+    const environment = resolveConfiguredSetupSecrets(parsed.environment);
+    const { stepId } = parsed;
 
     if (stepId) {
       assertValidSetupStepEnvironment(environment, stepId);
@@ -99,22 +112,28 @@ export class SetupService {
   async testDatabase(input: unknown) {
     this.assertSetupAvailable();
 
-    const { environment } = setupEnvironmentInputSchema.parse(input);
+    const environment = resolveSetupEnvironmentInput(input);
     assertValidDatabaseEnvironment(environment);
+    assertSafeSetupNetworkTargets(environment, 'database');
 
     const sequelize = createSequelize(toDatabaseConfig(environment));
 
     try {
       await sequelize.authenticate();
-      const hasExistingUsers = await hasAvailableUsers(sequelize);
+      const databaseState = await inspectExistingDatabase(sequelize);
 
       return {
         connected: true,
-        hasExistingUsers,
+        hasExistingAdministrator: databaseState.hasExistingAdministrator,
+        hasExistingUsers: databaseState.hasExistingUsers,
       } as const;
     } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
       throw new AppError('SETUP_DATABASE_CONNECTION_FAILED', 'error.SETUP_DATABASE_CONNECTION_FAILED', 400, {
-        reason: getConnectionErrorMessage(error),
+        reason: getConnectionErrorReason(error),
       });
     } finally {
       await sequelize.close();
@@ -124,7 +143,8 @@ export class SetupService {
   async testCache(input: unknown) {
     this.assertSetupAvailable();
 
-    const { environment } = setupEnvironmentInputSchema.parse(input);
+    const environment = resolveSetupEnvironmentInput(input);
+    assertSafeSetupNetworkTargets(environment, 'cache');
     const cacheConfig = toCacheConfig(environment);
     const cache = createCacheStore(cacheConfig);
 
@@ -137,7 +157,7 @@ export class SetupService {
       } as const;
     } catch (error) {
       throw new AppError('SETUP_CACHE_CONNECTION_FAILED', 'error.SETUP_CACHE_CONNECTION_FAILED', 400, {
-        reason: getConnectionErrorMessage(error),
+        reason: getConnectionErrorReason(error),
       });
     } finally {
       await cache.close();
@@ -147,10 +167,14 @@ export class SetupService {
   async testFileStorage(input: unknown) {
     this.assertSetupAvailable();
 
-    const { environment } = setupEnvironmentInputSchema.parse(input);
+    const environment = resolveSetupEnvironmentInput(input);
+    assertSafeSetupNetworkTargets(environment, 'file-storage');
     const config = toFileStorageConfig(environment);
     const storage = createFileStorage(config);
     const key = `setup-tests/${randomUUID()}.txt`;
+
+    let deleted = false;
+    let saved = false;
 
     try {
       await storage.save({
@@ -158,7 +182,9 @@ export class SetupService {
         contentType: 'text/plain',
         key,
       });
+      saved = true;
       await storage.delete(key);
+      deleted = true;
 
       return {
         connected: true,
@@ -166,16 +192,21 @@ export class SetupService {
       } as const;
     } catch (error) {
       throw new AppError('SETUP_FILE_STORAGE_CONNECTION_FAILED', 'error.SETUP_FILE_STORAGE_CONNECTION_FAILED', 400, {
-        reason: getConnectionErrorMessage(error),
+        reason: getConnectionErrorReason(error),
       });
+    } finally {
+      if (saved && !deleted) {
+        await storage.delete(key).catch(() => undefined);
+      }
     }
   }
 
   async testLogging(input: unknown) {
     this.assertSetupAvailable();
 
-    const { environment } = setupEnvironmentInputSchema.parse(input);
+    const environment = resolveSetupEnvironmentInput(input);
     const envSource = assertValidLoggingEnvironment(environment);
+    assertSafeSetupNetworkTargets(environment, 'logging');
     const logTargets = parseLogTargets(environment.LOG_TARGETS);
 
     if (!logTargets.includes(SetupLogTarget.Sls)) {
@@ -191,40 +222,18 @@ export class SetupService {
         import('@alicloud/sls20201230'),
       ]);
       const { $OpenApiUtil } = openApiModule;
-      const {
-        default: SlsClient,
-        LogContent,
-        LogGroup,
-        LogItem,
-        PutLogsRequest,
-      } = slsModule as unknown as typeof import('@alicloud/sls20201230/dist/client');
+      const { default: SlsClient } = slsModule as unknown as typeof import('@alicloud/sls20201230/dist/client');
       const client = new SlsClient(
         new $OpenApiUtil.Config({
           accessKeyId: envSource.LOG_SLS_ACCESS_KEY_ID!,
           accessKeySecret: envSource.LOG_SLS_ACCESS_KEY_SECRET!,
+          connectTimeout: Number(envSource.LOG_WRITE_TIMEOUT_MS),
           endpoint: envSource.LOG_SLS_ENDPOINT!,
+          readTimeout: Number(envSource.LOG_WRITE_TIMEOUT_MS),
         }),
       );
 
-      await client.putLogs(
-        envSource.LOG_SLS_PROJECT!,
-        envSource.LOG_SLS_LOGSTORE!,
-        new PutLogsRequest({
-          body: new LogGroup({
-            logItems: [
-              new LogItem({
-                contents: [
-                  new LogContent({ key: 'message', value: 'setup SLS connectivity test' }),
-                  new LogContent({ key: 'source', value: envSource.LOG_SLS_SOURCE ?? 'backend' }),
-                ],
-                time: Math.floor(Date.now() / 1000),
-              }),
-            ],
-            source: envSource.LOG_SLS_SOURCE ?? 'backend',
-            topic: envSource.LOG_SLS_TOPIC ?? 'tilty-scaffold',
-          }),
-        }),
-      );
+      await client.getLogStore(envSource.LOG_SLS_PROJECT!, envSource.LOG_SLS_LOGSTORE!);
 
       return {
         connected: true,
@@ -232,7 +241,7 @@ export class SetupService {
       } as const;
     } catch (error) {
       throw new AppError('SETUP_SLS_CONNECTION_FAILED', 'error.SETUP_SLS_CONNECTION_FAILED', 400, {
-        reason: getConnectionErrorMessage(error),
+        reason: getConnectionErrorReason(error),
       });
     }
   }
@@ -241,6 +250,7 @@ export class SetupService {
     this.assertSetupAvailable();
 
     const { environment, environmentConfig } = loadValidatedSetupEnvironment(input, assertValidEmailEnvironment);
+    assertSafeSetupNetworkTargets(environment, 'email');
 
     if (environment.EMAIL_VERIFICATION_SERVICE.trim() !== SetupEmailVerificationService.Smtp) {
       return {
@@ -262,7 +272,8 @@ export class SetupService {
   async testSms(input: unknown) {
     this.assertSetupAvailable();
 
-    const { environmentConfig } = loadValidatedSetupEnvironment(input, assertValidSmsEnvironment);
+    const { environment, environmentConfig } = loadValidatedSetupEnvironment(input, assertValidSmsEnvironment);
+    assertSafeSetupNetworkTargets(environment, 'sms');
 
     if (!environmentConfig.sms) {
       return {
@@ -273,26 +284,22 @@ export class SetupService {
 
     const smsConfig = environmentConfig.sms;
 
-    return runSetupConnectionTest(
-      'SETUP_SMS_CONNECTION_FAILED',
-      'error.SETUP_SMS_CONNECTION_FAILED',
-      async () => {
-        await checkAliyunSmsProfiles(smsConfig.aliyunProfiles);
+    return runSetupConnectionTest('SETUP_SMS_CONNECTION_FAILED', 'error.SETUP_SMS_CONNECTION_FAILED', async () => {
+      await checkAliyunSmsProfiles(smsConfig.aliyunProfiles);
 
-        return {
-          connected: true,
-          service: SetupSmsVerificationService.Aliyun,
-          profileCountryCodes: smsConfig.aliyunProfiles.map((profile) => profile.phoneCountryCode),
-        } as const;
-      },
-      { preserveAppError: true },
-    );
+      return {
+        connected: true,
+        service: SetupSmsVerificationService.Aliyun,
+        profileCountryCodes: smsConfig.aliyunProfiles.map((profile) => profile.phoneCountryCode),
+      } as const;
+    });
   }
 
   async testSso(input: unknown) {
     this.assertSetupAvailable();
 
-    const { environmentConfig } = loadValidatedSetupEnvironment(input, assertValidSsoEnvironment);
+    const { environment, environmentConfig } = loadValidatedSetupEnvironment(input, assertValidSsoEnvironment);
+    assertSafeSetupNetworkTargets(environment, 'sso');
 
     if (!environmentConfig.sso) {
       return {
@@ -325,7 +332,7 @@ export class SetupService {
     let setupCompletionLock: SetupCompletionLock | undefined;
 
     try {
-      const setupRequest = setupCompleteSchema.parse(input);
+      const setupRequest = resolveSetupCompleteInput(input);
       const setupEnvironmentSource = assertValidEnvironment(setupRequest.environment);
 
       setupCompletionLock = await acquireSetupCompletionLock();
@@ -334,6 +341,7 @@ export class SetupService {
 
       const administratorCreated = await provisionDatabase(setupEnvironmentSource, setupRequest.administrator);
       await writeConfigFile(setupEnvironmentSource);
+      await this.options.onCompleted?.();
 
       return {
         administratorCreated,
@@ -359,7 +367,7 @@ function loadValidatedSetupEnvironment(
   input: unknown,
   validateEnvironment: (environment: SetupEnvironment) => NodeJS.ProcessEnv,
 ) {
-  const { environment } = setupEnvironmentInputSchema.parse(input);
+  const environment = resolveSetupEnvironmentInput(input);
 
   return {
     environment,
@@ -367,21 +375,12 @@ function loadValidatedSetupEnvironment(
   };
 }
 
-async function runSetupConnectionTest<T>(
-  errorCode: string,
-  errorMessageId: string,
-  check: () => Promise<T>,
-  options: { preserveAppError?: boolean } = {},
-) {
+async function runSetupConnectionTest<T>(errorCode: string, errorMessageId: string, check: () => Promise<T>) {
   try {
     return await check();
   } catch (error) {
-    if (options.preserveAppError && error instanceof AppError) {
-      throw error;
-    }
-
     throw new AppError(errorCode, errorMessageId, 400, {
-      reason: getConnectionErrorMessage(error),
+      reason: getConnectionErrorReason(error),
     });
   }
 }
@@ -400,49 +399,132 @@ async function provisionDatabase(
 
   try {
     await sequelize.authenticate();
+    await inspectExistingDatabase(sequelize);
     await createMigrator(sequelize).up();
     await accessControl.syncSystemAccessControl();
+    await sequelize.authenticate();
 
-    const existingUsers = await models.user.count({
-      where: {
-        available: true,
-      },
-    });
-
-    if (existingUsers > 0) {
-      return false;
+    if (sequelize.getDialect() === 'sqlite') {
+      return await ensureRootAdministrator(models, administratorInput);
     }
 
-    const administrator = administratorSchema.parse(administratorInput);
-    const credentials = await hashPassword(administrator.password);
-    const user = await models.user.create({
-      username: administrator.username,
-      displayName: administrator.displayName,
-      email: administrator.email,
-      ...credentials,
-    });
-
-    await accessControl.assignSystemRoleToUser(user.id, SystemRole.Root);
-    return true;
+    return await sequelize.transaction((transaction) =>
+      ensureRootAdministrator(models, administratorInput, transaction),
+    );
   } finally {
     await sequelize.close();
   }
 }
 
-async function hasAvailableUsers(sequelize: ReturnType<typeof createSequelize>) {
-  const tableNames = await sequelize.getQueryInterface().showAllTables();
-  const usersTableExists = tableNames.some((tableName) => normalizeTableName(tableName) === 'users');
+async function ensureRootAdministrator(
+  models: ReturnType<typeof initAccessControlModels> & { user: ReturnType<typeof initUserModel> },
+  administratorInput: SetupCompleteInput['administrator'],
+  transaction?: Transaction,
+) {
+  const rootRole = await models.role.findOne({
+    ...(transaction ? { lock: transaction.LOCK.UPDATE, transaction } : {}),
+    where: {
+      available: true,
+      key: SystemRole.Root,
+    },
+  });
 
-  if (!usersTableExists) {
+  if (!rootRole) {
+    throw new AppError('ROLE_NOT_FOUND', 'error.ROLE_NOT_FOUND', 500);
+  }
+
+  if (await hasAvailableRootAdministrator(models, rootRole.id, transaction)) {
     return false;
   }
 
-  const userModel = initUserModel(sequelize);
+  const administrator = administratorSchema.parse(administratorInput);
+  const credentials = await hashPassword(administrator.password);
+  const user = await models.user.create(
+    {
+      username: administrator.username,
+      displayName: administrator.displayName,
+      email: administrator.email,
+      ...credentials,
+    },
+    transaction ? { transaction } : undefined,
+  );
 
-  return (
-    (await userModel.count({
+  await models.userRole.create(
+    {
+      userId: user.id,
+      roleId: rootRole.id,
+    },
+    transaction ? { transaction } : undefined,
+  );
+  return true;
+}
+
+async function inspectExistingDatabase(sequelize: ReturnType<typeof createSequelize>) {
+  const tableNames = new Set(
+    (await sequelize.getQueryInterface().showAllTables()).map(normalizeTableName).filter(Boolean),
+  );
+
+  if (tableNames.size === 0) {
+    return {
+      hasExistingAdministrator: false,
+      hasExistingUsers: false,
+    };
+  }
+
+  const requiredScaffoldTables = ['roles', 'sequelize_meta', 'user_roles', 'users'];
+
+  if (requiredScaffoldTables.some((tableName) => !tableNames.has(tableName))) {
+    throw new AppError('SETUP_DATABASE_INCOMPATIBLE', 'error.SETUP_DATABASE_INCOMPATIBLE', 400);
+  }
+
+  const models = {
+    ...initAccessControlModels(sequelize),
+    user: initUserModel(sequelize),
+  };
+  const hasExistingUsers =
+    (await models.user.count({
       where: {
         available: true,
+      },
+    })) > 0;
+  const rootRole = await models.role.findOne({
+    where: {
+      available: true,
+      key: SystemRole.Root,
+    },
+  });
+
+  return {
+    hasExistingAdministrator: rootRole ? await hasAvailableRootAdministrator(models, rootRole.id) : false,
+    hasExistingUsers,
+  };
+}
+
+async function hasAvailableRootAdministrator(
+  models: ReturnType<typeof initAccessControlModels> & { user: ReturnType<typeof initUserModel> },
+  rootRoleId: string,
+  transaction?: Transaction,
+) {
+  const assignments = await models.userRole.findAll({
+    ...(transaction ? { transaction } : {}),
+    where: {
+      roleId: rootRoleId,
+    },
+  });
+  const userIds = assignments.map((assignment) => assignment.userId);
+
+  if (userIds.length === 0) {
+    return false;
+  }
+
+  return (
+    (await models.user.count({
+      ...(transaction ? { transaction } : {}),
+      where: {
+        available: true,
+        id: {
+          [Op.in]: userIds,
+        },
       },
     })) > 0
   );
@@ -466,26 +548,88 @@ function normalizeTableName(tableName: unknown) {
   return '';
 }
 
-function getConnectionErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : 'Connection test could not be completed.';
+function getConnectionErrorReason(error: unknown) {
+  const code = getErrorCode(error).toLowerCase();
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+
+  if (code.includes('timeout') || message.includes('timeout') || message.includes('timed out')) {
+    return 'timeout';
+  }
+
+  if (
+    code.includes('auth') ||
+    code.includes('access') ||
+    message.includes('authentication') ||
+    message.includes('credential') ||
+    message.includes('password')
+  ) {
+    return 'authentication';
+  }
+
+  if (code.includes('cert') || code.includes('ssl') || code.includes('tls') || message.includes('certificate')) {
+    return 'tls';
+  }
+
+  if (code.includes('refused') || code.includes('notfound') || message.includes('refused')) {
+    return 'unreachable';
+  }
+
+  return 'rejected';
 }
 
-async function acquireSetupCompletionLock(): Promise<SetupCompletionLock> {
+function getErrorCode(error: unknown) {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return '';
+  }
+
+  const code = error.code;
+
+  return typeof code === 'string' ? code : '';
+}
+
+function resolveSetupEnvironmentInput(input: unknown) {
+  const { environment } = setupEnvironmentInputSchema.parse(input);
+
+  return resolveConfiguredSetupSecrets(environment);
+}
+
+function resolveSetupCompleteInput(input: unknown) {
+  const parsed = setupCompleteSchema.parse(input);
+
+  return {
+    ...parsed,
+    environment: resolveConfiguredSetupSecrets(parsed.environment),
+  };
+}
+
+async function acquireSetupCompletionLock(retryAfterStaleLock = true): Promise<SetupCompletionLock> {
   const setupCompletionLockFilePath = `${getConfigFilePath()}.setup.lock`;
   let setupCompletionLockFileHandle: Awaited<ReturnType<typeof open>> | undefined;
+  const owner = randomUUID();
 
   try {
     setupCompletionLockFileHandle = await open(setupCompletionLockFilePath, 'wx', 0o600);
-    await setupCompletionLockFileHandle.writeFile(`${process.pid}\n${new Date().toISOString()}\n`, 'utf8');
+    await setupCompletionLockFileHandle.writeFile(
+      `${JSON.stringify({ host: hostname(), owner, pid: process.pid, startedAt: new Date().toISOString() })}\n`,
+      'utf8',
+    );
+    await setupCompletionLockFileHandle.sync();
 
     return {
       fileHandle: setupCompletionLockFileHandle,
       lockFilePath: setupCompletionLockFilePath,
+      owner,
     };
   } catch (error) {
     if (setupCompletionLockFileHandle) {
       await setupCompletionLockFileHandle.close().catch(() => undefined);
       await unlink(setupCompletionLockFilePath).catch(() => undefined);
+    }
+
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST' && retryAfterStaleLock) {
+      if (await removeStaleSetupLock(setupCompletionLockFilePath)) {
+        return acquireSetupCompletionLock(false);
+      }
     }
 
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
@@ -498,5 +642,76 @@ async function acquireSetupCompletionLock(): Promise<SetupCompletionLock> {
 
 async function releaseSetupCompletionLock(lock: SetupCompletionLock) {
   await lock.fileHandle.close().catch(() => undefined);
-  await unlink(lock.lockFilePath).catch(() => undefined);
+
+  try {
+    const record = parseSetupLockRecord(await readFile(lock.lockFilePath, 'utf8'));
+
+    if (record?.owner === lock.owner) {
+      await unlink(lock.lockFilePath);
+    }
+  } catch {
+    // A missing or replaced lock file is already released from this owner's perspective.
+  }
+}
+
+async function removeStaleSetupLock(lockFilePath: string) {
+  try {
+    const record = parseSetupLockRecord(await readFile(lockFilePath, 'utf8'));
+
+    if (!record || !isSetupLockStale(record)) {
+      return false;
+    }
+
+    await unlink(lockFilePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function parseSetupLockRecord(value: string) {
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+
+    if (
+      typeof parsed.host === 'string' &&
+      typeof parsed.owner === 'string' &&
+      typeof parsed.pid === 'number' &&
+      typeof parsed.startedAt === 'string'
+    ) {
+      return {
+        host: parsed.host,
+        owner: parsed.owner,
+        pid: parsed.pid,
+        startedAt: parsed.startedAt,
+      };
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function isSetupLockStale(record: NonNullable<ReturnType<typeof parseSetupLockRecord>>) {
+  if (record.host === hostname()) {
+    return !isProcessRunning(record.pid);
+  }
+
+  const startedAt = Date.parse(record.startedAt);
+
+  return Number.isFinite(startedAt) && Date.now() - startedAt > 2 * 60 * 60_000;
+}
+
+function isProcessRunning(pid: number) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }

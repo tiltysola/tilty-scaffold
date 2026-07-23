@@ -1,4 +1,5 @@
 const messages = {
+  'api.error.ADMIN_TARGET_FORBIDDEN': 'Only a root administrator can manage another administrator account.',
   'api.error.API_ERROR': 'The request could not be completed.',
   'api.error.API_KEY_AUTH_CONFLICT': 'Session authentication and API Key authentication cannot be used together.',
   'api.error.API_KEY_CREATE_LIMIT_EXCEEDED': 'The API Key limit has been reached.',
@@ -31,8 +32,11 @@ const messages = {
   'api.error.PROFILE_BACKGROUND_FILE_INVALID': 'Profile background must be a JPEG, PNG, WebP, or GIF image.',
   'api.error.PROFILE_BANNER_FILE_INVALID': 'Profile banner must be a JPEG, PNG, WebP, or GIF image.',
   'api.error.SETUP_LOCKED': 'Setup is locked.',
+  'api.error.SETUP_ACCESS_REQUIRED': 'Enter the one-time setup token to continue.',
+  'api.error.SETUP_HTTPS_REQUIRED': 'Remote setup requests must use HTTPS.',
   'api.error.SETUP_REQUIRED': 'Setup is required before the application can be used.',
   'api.error.SETUP_RESTART_REQUIRED': 'Setup is complete. Restart the backend service before using the application.',
+  'api.error.SETUP_TOKEN_INVALID': 'The setup token is invalid.',
   'api.error.USER_EMAIL_EXISTS': 'The email address is already registered.',
   'api.keys.action.failed': 'API Key action could not be completed.',
   'api.keys.copy': 'Copy key',
@@ -562,6 +566,12 @@ const messages = {
   'setup.admin.username': 'Administrator username',
   'setup.admin.username.description': 'Set the unique username used by the root administrator to log in.',
   'setup.admin.username.placeholder': 'root_admin',
+  'setup.access.action': 'Unlock setup',
+  'setup.access.description':
+    'Read the one-time token from the setup token file on the backend host, or use the value configured through SETUP_TOKEN.',
+  'setup.access.error': 'Setup access could not be unlocked.',
+  'setup.access.title': 'Unlock setup',
+  'setup.access.token.label': 'One-time setup token',
   'setup.completed.description':
     'The setup process has completed successfully. Restart the backend service for the new configuration to take effect.',
   'setup.completed.title': 'Setup completed',
@@ -578,8 +588,8 @@ const messages = {
   'setup.error.sso.verification.failed': 'SSO configuration verification failed.',
   'setup.error.validation.failed': 'Setup configuration validation failed.',
   'setup.existing.users.description':
-    'The selected database already contains available users. Setup will retain those users and skip administrator creation.',
-  'setup.existing.users.title': 'Existing users detected',
+    'The selected installation already has an available root administrator. Setup will retain existing users and skip administrator creation.',
+  'setup.existing.users.title': 'Existing root administrator detected',
   'setup.field.APP_CORS_ORIGINS.description':
     'Lists the browser origins permitted to access the backend API. Defaults to the application domain.',
   'setup.field.APP_CORS_ORIGINS.label': 'CORS Origins',
@@ -835,7 +845,7 @@ const messages = {
   'setup.review.database': 'Database',
   'setup.review.email': 'Email',
   'setup.review.environment': 'Environment',
-  'setup.review.existing.users.retained': 'Existing users retained',
+  'setup.review.existing.users.retained': 'Existing root administrator retained',
   'setup.review.empty': 'Empty',
   'setup.review.file.storage': 'File storage',
   'setup.review.http': 'HTTP',
@@ -1018,7 +1028,8 @@ const messages = {
   'setup.toast.aliyun.sms.verified': 'Aliyun SMS configuration verified.',
   'setup.toast.cache.memory.verified': 'Memory cache configuration verified.',
   'setup.toast.configuration.validated': 'Configuration validated successfully.',
-  'setup.toast.database.existing.users': 'Database connection verified. Existing users will be retained.',
+  'setup.toast.database.existing.users':
+    'Database connection verified. The existing root administrator will be retained.',
   'setup.toast.database.verified': 'Database connection verified.',
   'setup.toast.email.verified': 'Email configuration verified.',
   'setup.toast.local.file.storage.verified': 'Local file storage verified.',
@@ -1085,6 +1096,7 @@ const messages = {
   'theme.mode.light': 'Light',
   'theme.mode.switcher': 'Theme mode',
   'users.action': 'Action',
+  'users.action.admin.target.forbidden': 'Only a root administrator can manage this administrator account.',
   'users.access.verification.failed': 'Access verification failed.',
   'users.auth.config.load.failed': 'Authentication configuration could not be loaded.',
   'users.available': 'Available',

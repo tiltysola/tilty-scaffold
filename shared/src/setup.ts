@@ -3,6 +3,9 @@ export const SetupBoolean = {
   True: 'true',
 } as const;
 
+export const configuredSecretPlaceholder = '__TILTY_CONFIGURED_SECRET__';
+export const setupAccessCookieName = 'tilty_scaffold_setup_access';
+
 export const setupBooleanValues = [SetupBoolean.False, SetupBoolean.True] as const;
 
 export type SetupBooleanValue = (typeof setupBooleanValues)[number];

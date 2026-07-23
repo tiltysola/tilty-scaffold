@@ -2,6 +2,7 @@ import {
   type ChangeEvent,
   type CSSProperties,
   type SubmitEventHandler,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -10,7 +11,7 @@ import {
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
 
-import { CheckCircle2Icon, SaveIcon } from 'lucide-react';
+import { CheckCircle2Icon, KeyRoundIcon, SaveIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAsyncAction } from '@/hooks/useAsyncAction';
@@ -18,7 +19,6 @@ import { ApiError, getApiErrorMessage } from '@/lib/api';
 import {
   completeSetup,
   fetchSetupDefaults,
-  generateSetupSecret,
   type SetupAdministrator,
   type SetupEnvironment,
   testCacheConnection,
@@ -28,11 +28,14 @@ import {
   testLoggingConnection,
   testSmsConnection,
   testSsoConnection,
+  unlockSetup,
   validateSetupEnvironment,
 } from '@/lib/setup';
 import { routePath } from '@/router';
 import { Button } from '@/shadcn/components/ui/button';
-import { Card, CardContent } from '@/shadcn/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shadcn/components/ui/card';
+import { Input } from '@/shadcn/components/ui/input';
+import { Label } from '@/shadcn/components/ui/label';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/shadcn/components/ui/sidebar';
 import { Spinner } from '@/shadcn/components/ui/spinner';
 import {
@@ -70,16 +73,52 @@ import { SetupSidebar } from './components/SetupSidebar';
 const Index = () => {
   const [activeStep, setActiveStep] = useState(setupSteps[0]?.id ?? 'runtime');
   const [administrator, setAdministrator] = useState<SetupAdministrator>(administratorDefaults);
+  const [accessRequired, setAccessRequired] = useState(false);
   const [completeConfirmationOpen, setCompleteConfirmationOpen] = useState(false);
   const [completion, setCompletion] = useState<{ administratorCreated: boolean } | null>(null);
-  const [databaseHasExistingUsers, setDatabaseHasExistingUsers] = useState<boolean | null>(null);
+  const [databaseHasExistingAdministrator, setDatabaseHasExistingAdministrator] = useState<boolean | null>(null);
   const [environment, setEnvironment] = useState<SetupEnvironment | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [maxUnlockedStepIndex, setMaxUnlockedStepIndex] = useState(0);
+  const [setupToken, setSetupToken] = useState('');
   const lastErrorToastRef = useRef<string | null>(null);
   const navigate = useNavigate();
   const intl = useIntl();
   const action = useAsyncAction();
+  const unlockAction = useAsyncAction();
+
+  const loadSetupDefaults = useCallback(async () => {
+    try {
+      const defaults = await fetchSetupDefaults();
+      const currentOrigin = getCurrentOrigin(defaults.environment.APP_DOMAIN ?? defaults.environment.APP_CORS_ORIGINS);
+      const setupEnvironmentDefaults = defaults.environmentFileLoaded
+        ? defaults.environment
+        : {
+            ...defaults.environment,
+            APP_DOMAIN: currentOrigin,
+            APP_CORS_ORIGINS: currentOrigin,
+          };
+
+      setAccessRequired(false);
+      setEnvironment(setupEnvironmentDefaults);
+      setLoadError(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'SETUP_LOCKED') {
+        navigate(routePath('login'), { replace: true });
+        return;
+      }
+
+      if (error instanceof ApiError && ['SETUP_ACCESS_REQUIRED', 'SETUP_TOKEN_INVALID'].includes(error.code)) {
+        setAccessRequired(true);
+        setEnvironment(null);
+        setLoadError(null);
+        return;
+      }
+
+      setLoadError(getApiErrorMessage(error, intl.formatMessage({ id: 'setup.defaults.load.failed' })));
+    }
+  }, [intl, navigate]);
+
   const activeStepDefinition = useMemo(
     () => setupSteps.find((step) => step.id === activeStep) ?? setupSteps[0],
     [activeStep],
@@ -88,52 +127,20 @@ const Index = () => {
     setupSteps.findIndex((step) => step.id === activeStep),
     0,
   );
-  const hasExistingUsers = databaseHasExistingUsers === true;
+  const hasExistingAdministrator = databaseHasExistingAdministrator === true;
   const primaryActionLabel = environment
-    ? getPrimaryActionLabel(activeStep, environment, hasExistingUsers, intl)
+    ? getPrimaryActionLabel(activeStep, environment, hasExistingAdministrator, intl)
     : intl.formatMessage({ id: 'common.continue' });
   const setupInput = environment
     ? {
         environment,
-        ...(hasExistingUsers ? {} : { administrator }),
+        ...(hasExistingAdministrator ? {} : { administrator }),
       }
     : null;
 
   useEffect(() => {
-    let isActive = true;
-
-    void fetchSetupDefaults()
-      .then((defaults) => {
-        if (isActive) {
-          const currentOrigin = getCurrentOrigin(
-            defaults.environment.APP_DOMAIN ?? defaults.environment.APP_CORS_ORIGINS,
-          );
-          const setupEnvironmentDefaults = defaults.environmentFileLoaded
-            ? defaults.environment
-            : {
-                ...defaults.environment,
-                APP_DOMAIN: currentOrigin,
-                APP_CORS_ORIGINS: currentOrigin,
-              };
-
-          setEnvironment(setupEnvironmentDefaults);
-        }
-      })
-      .catch((error: unknown) => {
-        if (isActive) {
-          if (error instanceof ApiError && error.code === 'SETUP_LOCKED') {
-            navigate(routePath('login'), { replace: true });
-            return;
-          }
-
-          setLoadError(getApiErrorMessage(error, intl.formatMessage({ id: 'setup.defaults.load.failed' })));
-        }
-      });
-
-    return () => {
-      isActive = false;
-    };
-  }, [intl, navigate]);
+    void Promise.resolve().then(loadSetupDefaults);
+  }, [loadSetupDefaults]);
 
   useEffect(() => {
     if (!action.error) {
@@ -182,7 +189,7 @@ const Index = () => {
       return nextEnvironment;
     });
     if (key.startsWith('DATABASE_')) {
-      setDatabaseHasExistingUsers(null);
+      setDatabaseHasExistingAdministrator(null);
     }
     resetProgressFromCurrentStep();
   };
@@ -192,11 +199,6 @@ const Index = () => {
       ...current,
       [field]: event.target.value,
     }));
-    resetProgressFromCurrentStep();
-  };
-
-  const regenerateSecret = () => {
-    setEnvironment((current) => (current ? { ...current, AUTH_TOKEN_SECRET: generateSetupSecret() } : current));
     resetProgressFromCurrentStep();
   };
 
@@ -233,9 +235,9 @@ const Index = () => {
         return;
       }
 
-      setDatabaseHasExistingUsers(result.hasExistingUsers);
+      setDatabaseHasExistingAdministrator(result.hasExistingAdministrator);
       goToNextStep(
-        result.hasExistingUsers
+        result.hasExistingAdministrator
           ? intl.formatMessage({ id: 'setup.toast.database.existing.users' })
           : intl.formatMessage({ id: 'setup.toast.database.verified' }),
       );
@@ -350,7 +352,7 @@ const Index = () => {
       return;
     }
 
-    if (activeStep === 'administrator' && !hasExistingUsers) {
+    if (activeStep === 'administrator' && !hasExistingAdministrator) {
       const administratorError = getAdministratorValidationError(administrator, intl);
 
       if (administratorError) {
@@ -382,6 +384,20 @@ const Index = () => {
     }
 
     await handlePrimaryAction();
+  };
+
+  const handleUnlockSubmit: SubmitEventHandler<HTMLFormElement> = async (event) => {
+    event.preventDefault();
+
+    const result = await unlockAction.run(
+      () => unlockSetup(setupToken),
+      intl.formatMessage({ id: 'setup.access.error' }),
+    );
+
+    if (result) {
+      setSetupToken('');
+      await loadSetupDefaults();
+    }
   };
 
   const handleBack = () => {
@@ -428,6 +444,45 @@ const Index = () => {
                 {intl.formatMessage({ id: 'setup.completed.description' })}
               </p>
             </div>
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
+  if (accessRequired) {
+    return (
+      <main className="flex min-h-svh w-full items-center justify-center bg-muted px-4 py-10 text-foreground sm:px-6">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <div className="mb-2 flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <KeyRoundIcon className="size-5" />
+            </div>
+            <CardTitle>{intl.formatMessage({ id: 'setup.access.title' })}</CardTitle>
+            <CardDescription>{intl.formatMessage({ id: 'setup.access.description' })}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form className="grid gap-4" onSubmit={handleUnlockSubmit}>
+              <div className="grid gap-2">
+                <Label htmlFor="setup-access-token">{intl.formatMessage({ id: 'setup.access.token.label' })}</Label>
+                <Input
+                  autoComplete="off"
+                  autoFocus
+                  id="setup-access-token"
+                  onChange={(event) => {
+                    setSetupToken(event.target.value);
+                    unlockAction.clearError();
+                  }}
+                  type="password"
+                  value={setupToken}
+                />
+              </div>
+              {unlockAction.error ? <p className="text-sm text-destructive">{unlockAction.error}</p> : null}
+              <Button disabled={unlockAction.pending || setupToken.trim().length < 32} type="submit">
+                {unlockAction.pending ? <Spinner /> : <KeyRoundIcon />}
+                {intl.formatMessage({ id: 'setup.access.action' })}
+              </Button>
+            </form>
           </CardContent>
         </Card>
       </main>
@@ -485,9 +540,9 @@ const Index = () => {
             <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-6">
               {activeStep === 'administrator' ? (
                 <AdministratorStep
-                  disabled={action.pending}
-                  hasExistingUsers={hasExistingUsers}
                   administrator={administrator}
+                  disabled={action.pending}
+                  hasExistingAdministrator={hasExistingAdministrator}
                   onChange={setAdministratorField}
                 />
               ) : null}
@@ -495,7 +550,7 @@ const Index = () => {
                 <ConfigurationReview
                   administrator={administrator}
                   environment={environment}
-                  hasExistingUsers={hasExistingUsers}
+                  hasExistingAdministrator={hasExistingAdministrator}
                 />
               ) : null}
               {activeStepDefinition?.fields ? (
@@ -505,7 +560,6 @@ const Index = () => {
                   fields={activeStepDefinition.fields}
                   onChange={setEnvironmentField}
                   onValueChange={setEnvironmentFieldValue}
-                  onRegenerateSecret={regenerateSecret}
                 />
               ) : null}
             </div>

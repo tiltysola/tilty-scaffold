@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { AppError } from '../../core/errors';
 import { getRouteParams } from '../../core/http';
-import { type AccessControlService } from '../access-control/access-control.service';
+import { type AccessControlService, type UserAccess } from '../access-control/access-control.service';
 import { type AuthService } from '../auth/auth.service';
 import { type SsoService } from '../auth/auth.sso';
 import { type UserModel } from '../users/user.model';
@@ -41,6 +41,44 @@ export async function requireManagedUserById(userService: UserService, userId: s
   }
 
   return user;
+}
+
+export function getAuthenticatedAdminAccess(ctx: Parameters<Middleware>[0]) {
+  const auth = ctx.state.auth as { access?: UserAccess } | undefined;
+
+  if (!auth?.access) {
+    throw new Error('Authenticated administrator access is required before target authorization.');
+  }
+
+  return auth.access;
+}
+
+export function requireManageableUserTarget(accessControl: AccessControlService): Middleware {
+  return async (ctx, next) => {
+    const userId = userIdParamsSchema.parse(getRouteParams(ctx)).id;
+
+    await accessControl.assertCanManageUser(getAuthenticatedAdminAccess(ctx), userId);
+    await next();
+  };
+}
+
+export function requireAssignableUserRoles(accessControl: AccessControlService): Middleware {
+  return async (ctx, next) => {
+    const body = ctx.request.body;
+    const roleKeys = body && typeof body === 'object' ? (body as Record<string, unknown>).roleKeys : undefined;
+
+    if (
+      Array.isArray(roleKeys) &&
+      roleKeys.length <= 50 &&
+      roleKeys.every(
+        (roleKey) => typeof roleKey === 'string' && roleKey.trim().length > 0 && roleKey.trim().length <= 64,
+      )
+    ) {
+      await accessControl.assertCanAssignRoles(getAuthenticatedAdminAccess(ctx), roleKeys);
+    }
+
+    await next();
+  };
 }
 
 export async function toManagedUserDetails(

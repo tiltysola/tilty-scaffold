@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AuthVerificationPurpose } from '@tilty/shared/auth';
 import { localeRequestHeader } from '@tilty/shared/i18n';
+import { configuredSecretPlaceholder } from '@tilty/shared/setup';
 
 import { initModels } from '../src/composition/models';
 import { createServices } from '../src/composition/services';
@@ -92,6 +93,7 @@ describe('system settings API', () => {
 
     expect(body.data.environmentFileLoaded).toBe(true);
     expect(body.data.environment.NODE_ENV).toBe('production');
+    expect(body.data.environment.AUTH_TOKEN_SECRET).toBe(configuredSecretPlaceholder);
     expect(body.data.environment.AUTH_COOKIE_SECURE).toBe('true');
     expect(body.data.environment.DATABASE_STORAGE).toBe('./data/system-settings.sqlite');
     expect('SETUP_LOCKED' in body.data.environment).toBe(false);

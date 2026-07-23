@@ -43,7 +43,13 @@ cp ../config.toml.example ../config.toml
 
 Application configuration is loaded from the repository root `config.toml`.
 Process environment variables are used only by setup-only mode before the
-backend is locked.
+backend is locked. `SETUP_TOKEN` optionally supplies the one-time setup token;
+otherwise the backend creates `config.toml.setup-token` with mode `0600` and
+logs only its path. `SETUP_REMOTE_ENABLED=true` is required before setup may
+bind to a non-loopback interface, and remote setup also requires an HTTPS
+`APP_DOMAIN`, HTTPS CORS origins, an explicit CSP resource allowlist, and
+`SERVER_TRUST_PROXY=true` behind the trusted TLS proxy. Requests that do not
+arrive as HTTPS after trusted-proxy handling are rejected in remote setup mode.
 
 Project-defined configuration keys use uppercase snake case and begin with a
 domain prefix, such as `APP_`, `SERVER_`, `AUTH_`, `DATABASE_`, `EMAIL_`,
@@ -53,14 +59,22 @@ selector, and `SETUP_LOCKED` is reserved for setup state.
 Startup enters setup-only mode when `config.toml` is absent, omits
 `SETUP_LOCKED`, or sets `SETUP_LOCKED=false`. In setup-only mode,
 `/api/setup/*` remains available, browser navigation redirects to `/setup`, and
-other API requests return `SETUP_REQUIRED`. Existing configuration values are
-merged into setup defaults. After setup writes `SETUP_LOCKED=true`,
+other API requests return `SETUP_REQUIRED`. `/api/setup/unlock` exchanges the
+one-time token for a short-lived HttpOnly cookie; every other setup endpoint is
+protected by that cookie and route-specific rate limits. Existing configuration
+values are merged into setup defaults, but stored secrets are replaced with a
+non-secret placeholder and resolved only on the backend. After setup writes `SETUP_LOCKED=true`,
 non-setup API requests return
 `SETUP_RESTART_REQUIRED` until restart.
 
 Complete `/setup` in the frontend to write `config.toml`, apply migrations, and
-seed built-in access control. Setup creates the root administrator only when the
-selected database has no available users; otherwise existing users are retained.
+seed built-in access control. A selected database must be empty or contain the
+compatible scaffold schema. Setup skips root administrator creation only when
+an available user already has the available `ROOT` role; unrelated users do not
+suppress root creation. Root user creation and role assignment are transactional
+for MySQL and PostgreSQL. The local completion lock records an owner and recovers
+locks left by stopped local processes. Setup-only deployment remains a singleton
+operation.
 Restart the backend to load the generated configuration.
 After startup, users with `ROOT` can update the same runtime configuration from
 the system settings page. Saving settings writes `config.toml` and requires a
@@ -75,8 +89,9 @@ Relative runtime paths such as `DATABASE_STORAGE`, `LOG_LOCAL_PATH`, and
 Local defaults use SQLite and schema migrations.
 `db:migrate` applies migrations and synchronizes built-in permissions and roles.
 Startup validates that migrations are fully applied, then synchronizes those
-records after database connection. Production requires `AUTH_COOKIE_SECURE=true`,
-a non-example `AUTH_TOKEN_SECRET`, and a CORS allowlist without `*`. Use MySQL or
+records after database connection. Production requires an HTTPS `APP_DOMAIN`,
+explicit CSP and CORS allowlists without `*`, `AUTH_COOKIE_SECURE=true`, and a
+non-example `AUTH_TOKEN_SECRET`. Use MySQL or
 PostgreSQL for multi-instance deployments. Keep total pooled database
 connections across all backend instances below the database connection limit.
 
@@ -85,9 +100,9 @@ such as `https://app.example.com`. Setup uses this value as the default
 `APP_CORS_ORIGINS` allowlist and as the base for generated callback URLs such
 as `/sso/callback` and `/api/auth/sso/callback`.
 `APP_CSP_RESOURCE_ORIGINS` is the comma- or newline-separated browser resource
-origin list applied to connections, fonts, images, and styles. Its default `*`
-allows every network origin. Restrict it to explicit HTTP or HTTPS origins when
-the deployment does not require arbitrary external resources. Script, form,
+origin list applied to connections, fonts, images, and styles. Its development
+default `*` allows every network origin; production rejects that value. Use
+explicit HTTP or HTTPS origins. Script, form,
 frame, and object policies remain fixed.
 
 `SERVER_TRUST_PROXY=false` is the default. Enable `SERVER_TRUST_PROXY=true`
@@ -159,7 +174,12 @@ control registry, apply it to backend guards, and update frontend navigation or
 route guards as needed. The next `db:migrate` or backend startup will upsert
 the permission and system-role grants. The initial built-in permissions are
 `ROOT`, `USER_ADMIN`, and `USER_LIST`; `ROOT` satisfies all permission checks.
-The first registered account receives the `ROOT` role automatically.
+The first registered account receives the `ROOT` role automatically. A
+non-root `USER_ADMIN` can manage only accounts that do not currently have
+`USER_ADMIN`; only `ROOT` can read or mutate another administrator's security,
+profile, roles, sessions, SSO bindings, media, or API Keys, and only `ROOT` can
+grant a role that includes `USER_ADMIN`. Administrators continue to manage
+their own account through the normal self-service profile and security routes.
 
 Registration email verification is disabled by default. Set
 `EMAIL_VERIFICATION_SERVICE=smtp` and configure `EMAIL_SMTP_PROFILES` as TOML
@@ -180,7 +200,11 @@ profile uses Dysmsapi `2017-05-25` `SendSms` with `signName` and
 `dysmsapi.ap-southeast-1.aliyuncs.com`, `regionId=ap-southeast-1`, and
 `messageTemplate`. Verification code timing is controlled by
 `SMS_VERIFICATION_CODE_EXPIRES_IN_MS` and `SMS_VERIFICATION_CODE_COOLDOWN_MS`.
-The setup connection test probes Aliyun credentials without sending a real SMS.
+Setup connection tests reject cloud metadata and link-local targets, use bounded
+provider timeouts, and return categorized errors without forwarding raw driver
+messages. The file-storage test writes and removes a uniquely named temporary
+probe, with a cleanup retry on failure. The SLS test is read-only. The Aliyun SMS
+test probes credentials without sending a real SMS.
 Verified phone bindings must store phone numbers in E.164 format.
 
 Internationalized backend messages use the request locale from
@@ -244,7 +268,8 @@ OpenAPI lists `apiKeyAuth` only on endpoints that accept API Key
 authentication. The `Auth` column uses these values:
 
 - `Public`: no session or API Key is required.
-- `Setup`: available only while setup endpoints are enabled.
+- `Setup`: available only while setup endpoints are enabled and requires the
+  short-lived setup access cookie created by `/api/setup/unlock`.
 - `Session`: requires the authenticated HttpOnly cookie session.
 - `Verified session`: requires a session plus the route's documented sensitive
   checks, such as permission, step-up verification, and CSRF for unsafe methods.
@@ -253,10 +278,11 @@ authentication. The `Auth` column uses these values:
 
 | Method   | Path                                              | Auth               | Description                                                 |
 | -------- | ------------------------------------------------- | ------------------ | ----------------------------------------------------------- |
+| `POST`   | `/api/setup/unlock`                               | One-time token     | Create a short-lived setup access cookie                    |
 | `GET`    | `/api/setup/defaults`                             | Setup              | Return generated setup defaults                             |
 | `POST`   | `/api/setup/validate`                             | Setup              | Validate setup input                                        |
 | `POST`   | `/api/setup/validate/environment`                 | Setup              | Validate setup environment fields                           |
-| `POST`   | `/api/setup/test/database`                        | Setup              | Test database connectivity and user presence                |
+| `POST`   | `/api/setup/test/database`                        | Setup              | Test the database schema and root administrator presence    |
 | `POST`   | `/api/setup/test/cache`                           | Setup              | Test cache connectivity                                     |
 | `POST`   | `/api/setup/test/file-storage`                    | Setup              | Test file storage configuration                             |
 | `POST`   | `/api/setup/test/logging`                         | Setup              | Test logging configuration                                  |
@@ -304,8 +330,8 @@ authentication. The `Auth` column uses these values:
 | `POST`   | `/api/api-keys/:id/disable`                       | Verified session   | Disable an API Key                                          |
 | `POST`   | `/api/api-keys/:id/enable`                        | Verified session   | Enable an API Key                                           |
 | `POST`   | `/api/api-keys/:id/revoke`                        | Verified session   | Revoke an API Key                                           |
-| `GET`    | `/api/admin/api-keys`                             | Verified session   | List all API Keys after admin verification                  |
-| `POST`   | `/api/admin/api-keys/:id/revoke`                  | Verified session   | Revoke any API Key after admin verification                 |
+| `GET`    | `/api/admin/api-keys`                             | Verified session   | List API Keys for manageable users                          |
+| `POST`   | `/api/admin/api-keys/:id/revoke`                  | Verified session   | Revoke an API Key for a manageable user                     |
 | `GET`    | `/api/users/me`                                   | Session or API Key | Return the authenticated user                               |
 | `PATCH`  | `/api/users/me`                                   | Session or API Key | Update the authenticated user's profile                     |
 | `POST`   | `/api/users/me/email-verification`                | Session            | Send a profile email verification code                      |

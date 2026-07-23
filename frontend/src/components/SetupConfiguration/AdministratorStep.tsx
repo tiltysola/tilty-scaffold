@@ -18,17 +18,17 @@ export function ActiveStepIcon({ icon: Icon }: { icon: LucideIcon }) {
 export function AdministratorStep({
   administrator,
   disabled,
-  hasExistingUsers,
+  hasExistingAdministrator,
   onChange,
 }: {
   administrator: SetupAdministrator;
   disabled: boolean;
-  hasExistingUsers: boolean;
+  hasExistingAdministrator: boolean;
   onChange: (field: keyof SetupAdministrator) => (event: ChangeEvent<HTMLInputElement>) => void;
 }) {
   const intl = useIntl();
 
-  if (hasExistingUsers) {
+  if (hasExistingAdministrator) {
     return (
       <div className="grid max-w-3xl gap-5">
         <Alert className="border-amber-200 bg-amber-50 text-amber-950">

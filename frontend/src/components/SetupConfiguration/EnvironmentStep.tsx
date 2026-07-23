@@ -39,7 +39,7 @@ export function EnvironmentStep({
   fields: SetupFieldDefinition[];
   onChange: (key: string) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
   onValueChange: (key: string, value: string) => void;
-  onRegenerateSecret: () => void;
+  onRegenerateSecret?: () => void;
 }) {
   const intl = useIntl();
   const visibleFields = fields.filter((field) => !field.visible || field.visible(environment));

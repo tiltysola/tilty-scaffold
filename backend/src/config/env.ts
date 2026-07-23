@@ -580,6 +580,25 @@ const envSchema = z
       });
     }
 
+    if (env.NODE_ENV === SetupNodeEnv.Production && hasUrlProtocol(env.APP_DOMAIN, ['http:'])) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['APP_DOMAIN'],
+        message: 'Must use https when NODE_ENV is production',
+      });
+    }
+
+    if (
+      env.NODE_ENV === SetupNodeEnv.Production &&
+      parseCspResourceOrigins(env.APP_CSP_RESOURCE_ORIGINS).includes('*')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['APP_CSP_RESOURCE_ORIGINS'],
+        message: 'Must not include * when NODE_ENV is production',
+      });
+    }
+
     if (env.NODE_ENV === SetupNodeEnv.Production && !env.AUTH_TOKEN_SECRET) {
       ctx.addIssue({
         code: 'custom',

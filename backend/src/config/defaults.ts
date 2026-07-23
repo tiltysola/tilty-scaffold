@@ -98,8 +98,8 @@ export const defaultSetupEnvironment = {
 
 export const defaultSetupRuntimeEnvironment = {
   APP_DOMAIN: defaultSetupEnvironment.APP_DOMAIN,
-  APP_CSP_RESOURCE_ORIGINS: defaultSetupEnvironment.APP_CSP_RESOURCE_ORIGINS,
-  GLOBAL_RATE_LIMIT_MAX: defaultSetupEnvironment.GLOBAL_RATE_LIMIT_MAX,
+  APP_CSP_RESOURCE_ORIGINS: defaultSetupEnvironment.APP_DOMAIN,
+  GLOBAL_RATE_LIMIT_MAX: '120',
   GLOBAL_RATE_LIMIT_WINDOW_MS: defaultSetupEnvironment.GLOBAL_RATE_LIMIT_WINDOW_MS,
   LOG_PENDING_WRITE_MAX: defaultSetupEnvironment.LOG_PENDING_WRITE_MAX,
   LOG_REQUEST_ENABLED: defaultSetupEnvironment.LOG_REQUEST_ENABLED,

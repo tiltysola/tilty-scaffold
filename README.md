@@ -33,9 +33,23 @@ landing page without authentication, and the authenticated console starts at
 seed built-in access control. Backend defaults to `http://localhost:3000`;
 Swagger UI is available at `/api/docs`.
 
+Setup binds to loopback by default. On first setup-only startup, the backend
+creates a one-time token in `config.toml.setup-token` with mode `0600`; enter
+that token on `/setup` to obtain a short-lived HttpOnly setup session. Set
+`SETUP_TOKEN` to supply the token through deployment secrets instead. Remote
+setup must be enabled explicitly with `SETUP_REMOTE_ENABLED=true`, an HTTPS
+`APP_DOMAIN`, HTTPS CORS origins, an explicit CSP resource allowlist, and
+`SERVER_TRUST_PROXY=true` behind the trusted TLS proxy. The backend also rejects
+remote setup requests that do not arrive as HTTPS after trusted-proxy handling.
+Run a single setup-only backend instance and start configured runtime replicas
+only after setup completes.
+
 After setup, runtime configuration is managed from System Settings. That page
 is available only to `ROOT` users with a configured passkey or authenticator app
 and requires step-up verification before configuration is shown or saved.
+Non-root `USER_ADMIN` accounts can manage regular users but cannot read or
+modify another administrator account or grant administrator roles; `ROOT`
+remains required for administrator-account governance.
 
 For production, run `npm run build` and `npm start`. The backend serves the
 compiled frontend files from `dist/frontend` and starts from `dist/backend`.

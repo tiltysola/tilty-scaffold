@@ -32,6 +32,13 @@ export interface SetupCompleteInput {
 
 export type SetupEnvironmentStepId = SetupEnvironmentStepValue;
 
+export async function unlockSetup(token: string) {
+  return apiRequest<{ expiresInSeconds: number; unlocked: true }>('/api/setup/unlock', {
+    body: { token },
+    method: 'POST',
+  });
+}
+
 export async function fetchSetupDefaults() {
   return apiRequest<SetupDefaults>('/api/setup/defaults');
 }
@@ -47,10 +54,13 @@ export async function validateSetupEnvironment(environment: SetupEnvironment, st
 }
 
 export async function testDatabaseConnection(environment: SetupEnvironment) {
-  return apiRequest<{ connected: true; hasExistingUsers: boolean }>('/api/setup/test/database', {
-    body: { environment },
-    method: 'POST',
-  });
+  return apiRequest<{ connected: true; hasExistingAdministrator: boolean; hasExistingUsers: boolean }>(
+    '/api/setup/test/database',
+    {
+      body: { environment },
+      method: 'POST',
+    },
+  );
 }
 
 export async function testCacheConnection(environment: SetupEnvironment) {

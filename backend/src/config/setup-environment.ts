@@ -1,9 +1,11 @@
 import { randomBytes, randomUUID } from 'crypto';
 import { constants } from 'fs';
-import { access, rename, stat, unlink, writeFile } from 'fs/promises';
+import { access, open, rename, stat, unlink, writeFile } from 'fs/promises';
+import { dirname } from 'path';
 import { z } from 'zod';
 
 import {
+  configuredSecretPlaceholder,
   SetupBoolean,
   setupBooleanValues,
   SetupCacheStore,
@@ -140,11 +142,24 @@ const setupFileStorageDriverSchema = z.enum(setupFileStorageDriverValues);
 
 export const setupEnvironmentKeys = setupEnvSchema.keyof().options;
 
-const profileEnvironmentKeySet = new Set<keyof SetupEnvironment>([
+const profileEnvironmentKeys = [
   'EMAIL_SMTP_PROFILES',
   'SMS_ALICLOUD_PROFILES',
   'SSO_PROFILES',
-]);
+] as const satisfies Array<keyof SetupEnvironment>;
+const profileEnvironmentKeySet = new Set<keyof SetupEnvironment>(profileEnvironmentKeys);
+const sensitiveScalarEnvironmentKeys = [
+  'AUTH_TOKEN_SECRET',
+  'CACHE_REDIS_URL',
+  'DATABASE_URL',
+  'FILE_OSS_ACCESS_KEY_SECRET',
+  'LOG_SLS_ACCESS_KEY_SECRET',
+] as const satisfies Array<keyof SetupEnvironment>;
+const profileSecretFields = {
+  EMAIL_SMTP_PROFILES: ['password'],
+  SMS_ALICLOUD_PROFILES: ['accessKeySecret'],
+  SSO_PROFILES: ['clientSecret'],
+} as const satisfies Record<(typeof profileEnvironmentKeys)[number], readonly string[]>;
 const emptyOptionalConfigKeySet = new Set<keyof SetupEnvironment>([
   'CACHE_REDIS_URL',
   'DATABASE_URL',
@@ -478,9 +493,40 @@ export function getSetupEnvironmentDefaults() {
   };
 }
 
+export function resolveConfiguredSetupSecrets(environment: SetupEnvironment) {
+  const existingEnvironment = getExistingSetupEnvironment();
+  const resolvedEnvironment = { ...environment };
+
+  for (const key of sensitiveScalarEnvironmentKeys) {
+    if (resolvedEnvironment[key] !== configuredSecretPlaceholder) {
+      continue;
+    }
+
+    const existingValue = existingEnvironment[key];
+
+    if (existingValue) {
+      resolvedEnvironment[key] = existingValue;
+    } else if (key === 'AUTH_TOKEN_SECRET') {
+      resolvedEnvironment[key] = generateSecret();
+    } else {
+      throwSecretReplacementRequired(key);
+    }
+  }
+
+  for (const key of profileEnvironmentKeys) {
+    resolvedEnvironment[key] = resolveProfileSecretPlaceholders(
+      key,
+      resolvedEnvironment[key],
+      existingEnvironment[key],
+    );
+  }
+
+  return resolvedEnvironment;
+}
+
 export async function updateSetupEnvironmentConfig(input: unknown) {
   const { environment } = setupEnvironmentInputSchema.parse(input);
-  const setupEnvironmentSource = assertValidEnvironment(environment);
+  const setupEnvironmentSource = assertValidEnvironment(resolveConfiguredSetupSecrets(environment));
 
   await writeConfigFile(setupEnvironmentSource, {
     allowLocked: true,
@@ -1014,18 +1060,40 @@ export async function writeConfigFile(setupEnvironmentSource: NodeJS.ProcessEnv,
   const temporaryConfigFilePath = getTemporaryConfigFilePath(configFilePath);
 
   try {
-    await writeFile(temporaryConfigFilePath, renderConfigFile(setupEnvironmentSource, options.generator), {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600,
-    });
+    await writeFileDurably(temporaryConfigFilePath, renderConfigFile(setupEnvironmentSource, options.generator));
     if (!options.allowLocked && isSetupLocked()) {
       throw new AppError('SETUP_LOCKED', 'error.SETUP_LOCKED', 403);
     }
     await rename(temporaryConfigFilePath, configFilePath);
+    await syncDirectory(dirname(configFilePath));
   } catch (error) {
     await unlink(temporaryConfigFilePath).catch(() => undefined);
     throw error;
+  }
+}
+
+async function writeFileDurably(filePath: string, content: string) {
+  const fileHandle = await open(filePath, 'wx', 0o600);
+
+  try {
+    await fileHandle.writeFile(content, 'utf8');
+    await fileHandle.sync();
+  } finally {
+    await fileHandle.close();
+  }
+}
+
+async function syncDirectory(directoryPath: string) {
+  const directoryHandle = await open(directoryPath, 'r');
+
+  try {
+    await directoryHandle.sync();
+  } catch (error) {
+    if (!['EINVAL', 'ENOTSUP'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+      throw error;
+    }
+  } finally {
+    await directoryHandle.close();
   }
 }
 
@@ -1145,16 +1213,17 @@ function formatTomlValue(value: unknown): string {
 }
 
 function getDefaultSetupEnvironment() {
+  const existingEnvironment = getExistingSetupEnvironment();
   const setupEnvironment: SetupEnvironment = {
     ...defaultSetupEnvironment,
-    ...getExistingSetupEnvironment(),
+    ...existingEnvironment,
   };
 
   if (!setupEnvironment.AUTH_TOKEN_SECRET.trim()) {
-    setupEnvironment.AUTH_TOKEN_SECRET = generateSecret();
+    setupEnvironment.AUTH_TOKEN_SECRET = configuredSecretPlaceholder;
   }
 
-  return setupEnvironment;
+  return redactSetupEnvironmentSecrets(setupEnvironment, existingEnvironment);
 }
 
 function getExistingSetupEnvironment() {
@@ -1174,4 +1243,90 @@ function getExistingSetupEnvironment() {
 
 function generateSecret() {
   return randomBytes(48).toString('base64url');
+}
+
+function redactSetupEnvironmentSecrets(environment: SetupEnvironment, existingEnvironment: Partial<SetupEnvironment>) {
+  const redactedEnvironment = { ...environment };
+
+  for (const key of sensitiveScalarEnvironmentKeys) {
+    if (existingEnvironment[key]?.trim()) {
+      redactedEnvironment[key] = configuredSecretPlaceholder;
+    }
+  }
+
+  for (const key of profileEnvironmentKeys) {
+    if (!existingEnvironment[key]) {
+      continue;
+    }
+
+    const profiles = parseProfileEnvironmentValue(key, redactedEnvironment[key]);
+
+    redactedEnvironment[key] = JSON.stringify(
+      profiles.map((profile) => {
+        const redactedProfile = { ...profile };
+
+        for (const field of profileSecretFields[key]) {
+          if (typeof redactedProfile[field] === 'string' && redactedProfile[field]) {
+            redactedProfile[field] = configuredSecretPlaceholder;
+          }
+        }
+
+        return redactedProfile;
+      }),
+    );
+  }
+
+  return redactedEnvironment;
+}
+
+function resolveProfileSecretPlaceholders(
+  key: (typeof profileEnvironmentKeys)[number],
+  inputValue: string,
+  existingValue?: string,
+) {
+  const inputProfiles = parseProfileEnvironmentValue(key, inputValue);
+  const existingProfiles = existingValue ? parseProfileEnvironmentValue(key, existingValue) : [];
+
+  return JSON.stringify(
+    inputProfiles.map((profile, index) => {
+      const resolvedProfile = { ...profile };
+      const existingProfile = findMatchingProfile(key, profile, existingProfiles, index);
+
+      for (const field of profileSecretFields[key]) {
+        if (resolvedProfile[field] !== configuredSecretPlaceholder) {
+          continue;
+        }
+
+        const existingSecret = existingProfile?.[field];
+
+        if (typeof existingSecret !== 'string' || !existingSecret) {
+          throwSecretReplacementRequired(`${key}.${field}`);
+        }
+
+        resolvedProfile[field] = existingSecret;
+      }
+
+      return resolvedProfile;
+    }),
+  );
+}
+
+function findMatchingProfile(
+  key: (typeof profileEnvironmentKeys)[number],
+  profile: Record<string, unknown>,
+  existingProfiles: Record<string, unknown>[],
+  fallbackIndex: number,
+) {
+  const identityField =
+    key === 'SSO_PROFILES' ? 'id' : key === 'SMS_ALICLOUD_PROFILES' ? 'phoneCountryCode' : undefined;
+
+  if (identityField && typeof profile[identityField] === 'string') {
+    return existingProfiles.find((candidate) => candidate[identityField] === profile[identityField]);
+  }
+
+  return existingProfiles[fallbackIndex];
+}
+
+function throwSecretReplacementRequired(field: string): never {
+  throw new AppError('SETUP_SECRET_REPLACEMENT_REQUIRED', 'error.SETUP_SECRET_REPLACEMENT_REQUIRED', 400, { field });
 }

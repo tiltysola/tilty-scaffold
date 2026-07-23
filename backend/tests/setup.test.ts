@@ -1,13 +1,17 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
-import { tmpdir } from 'os';
+import { hostname, tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { SystemRole } from '@tilty/shared/access-control';
+import { configuredSecretPlaceholder } from '@tilty/shared/setup';
 
 import { initModels } from '../src/composition/models';
 import { loadConfigFileSource, loadEnv } from '../src/config/env';
 import { resolveRuntimePath } from '../src/core/files';
 import { createSequelize } from '../src/infra/database';
 import { createMigrator } from '../src/infra/migrator';
+import { AccessControlService } from '../src/modules/access-control/access-control.service';
 import { SmtpEmailSender } from '../src/modules/auth/auth.email';
 import { SetupService } from '../src/modules/setup/setup.service';
 
@@ -60,7 +64,7 @@ describe('setup service', () => {
     expect(defaults.environment.CACHE_REDIS_URL).toBe('redis://localhost:6379/0');
     expect(defaults.environment.EMAIL_SMTP_PROFILES).toBe('[]');
     expect(defaults.environment.SMS_VERIFICATION_SERVICE).toBe('off');
-    expect(defaults.environment.AUTH_TOKEN_SECRET).toHaveLength(64);
+    expect(defaults.environment.AUTH_TOKEN_SECRET).toBe(configuredSecretPlaceholder);
   });
 
   it('loads existing configuration values when the setup lock is missing', async () => {
@@ -69,6 +73,7 @@ describe('setup service', () => {
       [
         'NODE_ENV = "production"',
         'AUTH_TOKEN_SECRET = "existing-auth-token-secret-minimum-32-characters"',
+        'DATABASE_URL = "postgres://user:database-password@db.example.com/app"',
         'DATABASE_STORAGE = "./data/existing-config.sqlite"',
         '',
       ].join('\n'),
@@ -80,7 +85,8 @@ describe('setup service', () => {
 
     expect(defaults.environmentFileLoaded).toBe(true);
     expect(defaults.environment.NODE_ENV).toBe('production');
-    expect(defaults.environment.AUTH_TOKEN_SECRET).toBe('existing-auth-token-secret-minimum-32-characters');
+    expect(defaults.environment.AUTH_TOKEN_SECRET).toBe(configuredSecretPlaceholder);
+    expect(defaults.environment.DATABASE_URL).toBe(configuredSecretPlaceholder);
     expect(defaults.environment.DATABASE_STORAGE).toBe('./data/existing-config.sqlite');
     expect(defaults.environment.CACHE_STORE).toBe('memory');
     expect('SETUP_LOCKED' in defaults.environment).toBe(false);
@@ -95,6 +101,37 @@ describe('setup service', () => {
 
     expect(defaults.environmentFileLoaded).toBe(true);
     expect(defaults.environment.DATABASE_STORAGE).toBe('./data/unlocked.sqlite');
+  });
+
+  it('redacts and server-resolves nested provider secrets', async () => {
+    await writeFile(
+      'config.toml',
+      [
+        'SETUP_LOCKED = false',
+        'AUTH_TOKEN_SECRET = "existing-auth-token-secret-minimum-32-characters"',
+        'EMAIL_VERIFICATION_SERVICE = "smtp"',
+        '[[EMAIL_SMTP_PROFILES]]',
+        'from = "Tilty <noreply@example.com>"',
+        'host = "smtp.example.com"',
+        'password = "existing-smtp-password"',
+        'port = 465',
+        'secure = true',
+        'startTls = false',
+        'timeoutMs = 10000',
+        'username = "smtp-user"',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const service = new SetupService('setup');
+    const defaults = service.getDefaults();
+    const profiles = JSON.parse(defaults.environment.EMAIL_SMTP_PROFILES) as Array<Record<string, unknown>>;
+    const checkSpy = vi.spyOn(SmtpEmailSender.prototype, 'check').mockResolvedValue(undefined);
+
+    expect(profiles[0]?.password).toBe(configuredSecretPlaceholder);
+    expect(defaults.environment.EMAIL_SMTP_PROFILES).not.toContain('existing-smtp-password');
+    await expect(service.testEmail({ environment: defaults.environment })).resolves.toMatchObject({ connected: true });
+    expect(checkSpy).toHaveBeenCalledOnce();
   });
 
   it('locks setup when the setup lock is true', async () => {
@@ -243,7 +280,7 @@ describe('setup service', () => {
     expect(loadedEnvironment.sso?.profiles).toHaveLength(1);
   });
 
-  it('writes configuration and skips administrator creation when available users already exist', async () => {
+  it('creates a root administrator when available users exist without a root assignment', async () => {
     const sequelize = createSequelize({ dialect: 'sqlite', storage: './data/existing-users.sqlite' });
     const models = initModels(sequelize);
 
@@ -267,14 +304,22 @@ describe('setup service', () => {
 
     await expect(service.testDatabase({ environment })).resolves.toEqual({
       connected: true,
+      hasExistingAdministrator: false,
       hasExistingUsers: true,
     });
     await expect(
       service.complete({
+        administrator: {
+          username: 'root_user',
+          displayName: 'Root User',
+          email: 'root@example.com',
+          password: 'password123',
+          confirmPassword: 'password123',
+        },
         environment,
       }),
     ).resolves.toEqual({
-      administratorCreated: false,
+      administratorCreated: true,
       completed: true,
       restartRequired: true,
     });
@@ -288,11 +333,49 @@ describe('setup service', () => {
     const verificationModels = initModels(verificationSequelize);
 
     try {
-      await expect(verificationModels.user.count()).resolves.toBe(1);
+      await expect(verificationModels.user.count()).resolves.toBe(2);
       await expect(verificationModels.user.findOne({ where: { email: 'existing@example.com' } })).resolves.toBeTruthy();
     } finally {
       await verificationSequelize.close();
     }
+  });
+
+  it('retains an existing available root administrator', async () => {
+    const sequelize = createSequelize({ dialect: 'sqlite', storage: './data/existing-root.sqlite' });
+    const models = initModels(sequelize);
+    const accessControl = new AccessControlService(models);
+
+    try {
+      await createMigrator(sequelize).up();
+      await accessControl.syncSystemAccessControl();
+      const root = await models.user.create({
+        username: 'existing_root',
+        displayName: 'Existing Root',
+        email: 'root@example.com',
+      });
+
+      await accessControl.assignSystemRoleToUser(root.id, SystemRole.Root);
+    } finally {
+      await sequelize.close();
+    }
+
+    const service = new SetupService('setup');
+    const environment = {
+      ...service.getDefaults().environment,
+      DATABASE_STORAGE: './data/existing-root.sqlite',
+      SCHEDULER_ENABLED: 'false',
+    };
+
+    await expect(service.testDatabase({ environment })).resolves.toEqual({
+      connected: true,
+      hasExistingAdministrator: true,
+      hasExistingUsers: true,
+    });
+    await expect(service.complete({ environment })).resolves.toEqual({
+      administratorCreated: false,
+      completed: true,
+      restartRequired: true,
+    });
   });
 
   it('rejects setup completion when another process holds the setup lock', async () => {
@@ -321,6 +404,34 @@ describe('setup service', () => {
       status: 409,
     });
     await expect(readFile('config.toml', 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('recovers a stale setup lock owned by a stopped local process', async () => {
+    const service = new SetupService('setup');
+    const environment = {
+      ...service.getDefaults().environment,
+      DATABASE_STORAGE: './data/stale-lock.sqlite',
+      SCHEDULER_ENABLED: 'false',
+    };
+
+    await writeFile(
+      'config.toml.setup.lock',
+      `${JSON.stringify({ host: hostname(), owner: 'stale-owner', pid: Number.MAX_SAFE_INTEGER, startedAt: new Date().toISOString() })}\n`,
+      'utf8',
+    );
+
+    await expect(
+      service.complete({
+        administrator: {
+          username: 'root_user',
+          displayName: 'Root User',
+          email: 'root@example.com',
+          password: 'password123',
+          confirmPassword: 'password123',
+        },
+        environment,
+      }),
+    ).resolves.toMatchObject({ completed: true });
   });
 
   it('checks configuration file writability before mutating the database during setup completion', async () => {
@@ -367,6 +478,7 @@ describe('setup service', () => {
 
     await expect(service.testDatabase({ environment })).resolves.toEqual({
       connected: true,
+      hasExistingAdministrator: false,
       hasExistingUsers: false,
     });
     await expect(service.testCache({ environment })).resolves.toEqual({
@@ -402,6 +514,56 @@ describe('setup service', () => {
       }),
     ).rejects.toMatchObject({
       code: 'SETUP_ENV_INVALID',
+      status: 400,
+    });
+  });
+
+  it('rejects metadata service targets during setup connection testing', async () => {
+    const service = new SetupService('setup');
+    const environment = {
+      ...service.getDefaults().environment,
+      DATABASE_DIALECT: 'postgres',
+      DATABASE_URL: 'postgres://app:password@169.254.169.254:5432/app',
+    };
+
+    await expect(service.testDatabase({ environment })).rejects.toMatchObject({
+      code: 'SETUP_NETWORK_TARGET_FORBIDDEN',
+      details: {
+        field: 'DATABASE_URL',
+      },
+      status: 400,
+    });
+
+    await expect(
+      service.testDatabase({
+        environment: {
+          ...environment,
+          DATABASE_URL: 'postgres://app:password@[::ffff:169.254.169.254]:5432/app',
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'SETUP_NETWORK_TARGET_FORBIDDEN',
+      status: 400,
+    });
+  });
+
+  it('rejects nonempty databases without a compatible scaffold schema', async () => {
+    const sequelize = createSequelize({ dialect: 'sqlite', storage: './data/foreign.sqlite' });
+
+    try {
+      await sequelize.query('CREATE TABLE foreign_records (id INTEGER PRIMARY KEY)');
+    } finally {
+      await sequelize.close();
+    }
+
+    const service = new SetupService('setup');
+    const environment = {
+      ...service.getDefaults().environment,
+      DATABASE_STORAGE: './data/foreign.sqlite',
+    };
+
+    await expect(service.testDatabase({ environment })).rejects.toMatchObject({
+      code: 'SETUP_DATABASE_INCOMPATIBLE',
       status: 400,
     });
   });
@@ -464,7 +626,9 @@ describe('setup service', () => {
 
   it('rejects SMTP email credential failures during setup testing', async () => {
     const service = new SetupService('setup');
-    vi.spyOn(SmtpEmailSender.prototype, 'check').mockRejectedValue(new Error('SMTP authentication failed.'));
+    vi.spyOn(SmtpEmailSender.prototype, 'check').mockRejectedValue(
+      new Error('SMTP authentication failed for smtp://smtp-user:smtp-password@smtp.example.com.'),
+    );
     const environment = {
       ...service.getDefaults().environment,
       EMAIL_VERIFICATION_SERVICE: 'smtp',
@@ -486,6 +650,9 @@ describe('setup service', () => {
 
     await expect(service.testEmail({ environment })).rejects.toMatchObject({
       code: 'SETUP_SMTP_CONNECTION_FAILED',
+      details: {
+        reason: 'authentication',
+      },
       status: 400,
     });
   });

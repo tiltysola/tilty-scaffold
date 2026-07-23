@@ -206,14 +206,14 @@ export function toMessagePathPart(value: string) {
 export function getPrimaryActionLabel(
   stepId: string,
   environment: SetupEnvironment,
-  hasExistingUsers: boolean,
+  hasExistingAdministrator: boolean,
   intl: IntlShape,
 ) {
   if (stepId === 'database') {
     return formatSetupUtilityMessage(intl, 'setup.action.verify.database.and.continue');
   }
 
-  if (stepId === 'administrator' && hasExistingUsers) {
+  if (stepId === 'administrator' && hasExistingAdministrator) {
     return formatSetupUtilityMessage(intl, 'common.continue');
   }
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { SystemRole } from '@tilty/shared/access-control';
 import {
   apiKeyActiveLimitPerUser,
   apiKeyChecksumLength,
@@ -455,6 +456,58 @@ describe('api keys API', () => {
         error: 'API_KEY_NOT_SUPPORTED',
       });
     }
+  });
+
+  it('prevents user administrators from listing or revoking administrator API Keys', async () => {
+    const { session: rootSession } = await registerUserWithApiKeyManagementAccess(
+      'Root User',
+      'root-admin-api-key-policy@example.com',
+    );
+    const rootKey = await createApiKey(rootSession.accessToken, { name: 'root key' });
+    const { session: adminSession, user: adminUser } = await registerUserWithApiKeyManagementAccess(
+      'Admin User',
+      'admin-api-key-policy@example.com',
+    );
+    const { session: regularSession } = await registerUserWithApiKeyManagementAccess(
+      'Regular User',
+      'regular-admin-api-key-policy@example.com',
+    );
+    const regularKey = await createApiKey(regularSession.accessToken, { name: 'regular key' });
+
+    await services.accessControl.replaceUserRoles(adminUser.id, [SystemRole.UserAdmin]);
+
+    const listRoute = getTestRoute(adminRoutes, 'get', '/api-keys');
+    const listContext = await runMiddlewares(
+      [errorMiddleware(), ...listRoute.handlers],
+      createCookieContext(undefined, adminSession.accessToken),
+    );
+    const listBody = listContext.body as ApiKeyListBody;
+
+    expect(listBody.data.keys.map((key) => key.id)).toEqual([regularKey.id]);
+
+    const revokeRoute = getTestRoute(adminRoutes, 'post', '/api-keys/:id/revoke');
+    const forbiddenContext = await runMiddlewares(
+      [errorMiddleware(), ...revokeRoute.handlers],
+      createCookieContext(undefined, adminSession.accessToken, { id: rootKey.id }),
+    );
+
+    expect(forbiddenContext.status).toBe(403);
+    expect(forbiddenContext.body).toMatchObject({
+      error: 'ADMIN_TARGET_FORBIDDEN',
+    });
+
+    const allowedContext = await runMiddlewares(
+      [errorMiddleware(), ...revokeRoute.handlers],
+      createCookieContext(undefined, adminSession.accessToken, { id: regularKey.id }),
+    );
+
+    expect(allowedContext.status).toBeUndefined();
+    expect(allowedContext.body).toMatchObject({
+      data: {
+        id: regularKey.id,
+        status: 'revoked',
+      },
+    });
   });
 
   async function registerUserWithApiKeyManagementAccess(displayName: string, email: string) {

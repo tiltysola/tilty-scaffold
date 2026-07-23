@@ -10,6 +10,7 @@ import {
   testLoggingConnection,
   testSmsConnection,
   testSsoConnection,
+  unlockSetup,
   validateSetupEnvironment,
 } from '../src/lib/setup';
 import { createApiSuccessResponse } from './support/api';
@@ -38,6 +39,25 @@ describe('setup API client', () => {
       environmentFileLoaded: false,
     });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('exchanges the one-time setup token without storing it in client configuration', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      createApiSuccessResponse({
+        expiresInSeconds: 1800,
+        unlocked: true,
+      }),
+    );
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(unlockSetup('one-time-setup-token')).resolves.toMatchObject({ unlocked: true });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+
+    expect(String(url)).toBe('/api/setup/unlock');
+    expect(init?.body).toBe(JSON.stringify({ token: 'one-time-setup-token' }));
+    expect(init?.credentials).toBe('include');
   });
 
   it('posts setup completion payloads', async () => {
@@ -90,7 +110,11 @@ describe('setup API client', () => {
 
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(testDatabaseConnection(environment)).resolves.toEqual({ connected: true, hasExistingUsers: false });
+    await expect(testDatabaseConnection(environment)).resolves.toEqual({
+      connected: true,
+      hasExistingAdministrator: false,
+      hasExistingUsers: false,
+    });
     await expect(testCacheConnection(environment)).resolves.toEqual({ connected: true, store: 'redis' });
     await expect(testFileStorageConnection(environment)).resolves.toEqual({ connected: true, driver: 'oss' });
     await expect(testLoggingConnection(environment)).resolves.toEqual({ connected: true, target: 'sls' });
@@ -149,5 +173,5 @@ function getConnectivityTestResponse(url: string) {
     return { valid: true };
   }
 
-  return { connected: true, hasExistingUsers: false };
+  return { connected: true, hasExistingAdministrator: false, hasExistingUsers: false };
 }
