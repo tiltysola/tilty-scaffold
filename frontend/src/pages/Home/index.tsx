@@ -37,6 +37,7 @@ import {
 } from '@/shadcn/components/ui/dropdown-menu';
 import { Separator } from '@/shadcn/components/ui/separator';
 
+import { SiteIconAttribution } from '@/components/SiteIconAttribution';
 import { ThemeModeToggle } from '@/components/ThemeModeToggle';
 
 type MessageId =
@@ -134,17 +135,9 @@ const Index = () => {
   return (
     <main className="min-h-svh bg-background text-foreground">
       <section className="relative isolate min-h-[82svh] overflow-hidden bg-background text-foreground">
-        <img
-          alt=""
+        <div
           aria-hidden="true"
-          className="absolute inset-0 -z-20 h-full w-full object-cover dark:hidden"
-          src="/images/home-hero-light.png"
-        />
-        <img
-          alt=""
-          aria-hidden="true"
-          className="absolute inset-0 -z-20 hidden h-full w-full object-cover dark:block"
-          src="/images/home-hero.png"
+          className="absolute inset-0 -z-20 bg-[url('/images/home-hero-light.webp')] bg-cover bg-center dark:bg-[url('/images/home-hero.webp')]"
         />
         <div className="absolute inset-0 -z-10 bg-linear-to-r from-background via-background/85 to-background/15 dark:from-background dark:via-background/80 dark:to-background/20" />
         <div className="absolute inset-0 -z-10 bg-linear-to-t from-background/80 via-transparent to-background/40 dark:from-background/70 dark:via-transparent dark:to-background/30" />
@@ -276,6 +269,7 @@ const Index = () => {
               </a>
             </div>
           </div>
+          <SiteIconAttribution className="text-center sm:text-left" />
         </div>
       </footer>
     </main>

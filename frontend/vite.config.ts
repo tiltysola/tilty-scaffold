@@ -15,7 +15,7 @@ export const devServerProxy = {
 
 export default defineConfig({
   root: './',
-  base: './',
+  base: '/',
   publicDir: './public',
   resolve: {
     alias: {

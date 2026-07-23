@@ -101,43 +101,15 @@ const Index = () => {
       description={intl.formatMessage({ id: 'auth.login.description' })}
       footer={
         <>
-          <div className="flex gap-2">
-            <span>{intl.formatMessage({ id: 'auth.need.account' })}</span>
-            <Link className="font-medium text-primary hover:underline" to={routePath('register')}>
-              {intl.formatMessage({ id: 'auth.create.account' })}
-            </Link>
-          </div>
-          <Link className="font-medium text-primary hover:underline" to={routePath('forgotPassword')}>
-            {intl.formatMessage({ id: 'auth.forgot.password.title' })}
+          <span>{intl.formatMessage({ id: 'auth.need.account' })}</span>
+          <Link className="font-medium text-primary hover:underline" to={routePath('register')}>
+            {intl.formatMessage({ id: 'auth.create.account' })}
           </Link>
         </>
       }
-      footerClassName="flex-col justify-center gap-2 text-sm text-muted-foreground"
+      footerClassName="justify-center gap-2 text-sm text-muted-foreground"
       title={intl.formatMessage({ id: 'auth.login' })}
     >
-      {ssoLoginProviders.length > 0 ? (
-        <div className="mb-4 grid gap-4">
-          <div className="grid gap-2">
-            {ssoLoginProviders.map((provider) => (
-              <Button
-                disabled={submitting}
-                key={provider.id}
-                onClick={() => window.location.assign(getSsoStartUrl(redirectPath, provider.id))}
-                type="button"
-                variant="outline"
-              >
-                <SsoProviderIcon iconUrl={provider.iconUrl} name={provider.name} size="compact" />
-                {intl.formatMessage({ id: 'auth.login.with.provider' }, { name: provider.name })}
-              </Button>
-            ))}
-          </div>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <div className="h-px flex-1 bg-border" />
-            <span>{intl.formatMessage({ id: 'auth.alternative' })}</span>
-            <div className="h-px flex-1 bg-border" />
-          </div>
-        </div>
-      ) : null}
       <form className="grid gap-4" onSubmit={handleSubmit}>
         <div className="grid gap-2">
           <Label htmlFor="identifier">{intl.formatMessage({ id: 'auth.email.or.username' })}</Label>
@@ -152,7 +124,15 @@ const Index = () => {
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="password">{intl.formatMessage({ id: 'auth.password' })}</Label>
+          <div className="flex items-center">
+            <Label htmlFor="password">{intl.formatMessage({ id: 'auth.password' })}</Label>
+            <Link
+              className="ml-auto text-sm font-medium text-primary underline-offset-4 hover:underline"
+              to={routePath('forgotPassword')}
+            >
+              {intl.formatMessage({ id: 'auth.forgot.password.title' })}
+            </Link>
+          </div>
           <Input
             autoComplete="current-password"
             disabled={submitting}
@@ -169,6 +149,29 @@ const Index = () => {
           {intl.formatMessage({ id: submitting ? 'auth.processing' : 'auth.login' })}
         </Button>
       </form>
+      {ssoLoginProviders.length > 0 ? (
+        <div className="mt-6 grid gap-4">
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="h-px flex-1 bg-border" />
+            <span>{intl.formatMessage({ id: 'auth.alternative' })}</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          <div className="grid gap-2">
+            {ssoLoginProviders.map((provider) => (
+              <Button
+                disabled={submitting}
+                key={provider.id}
+                onClick={() => window.location.assign(getSsoStartUrl(redirectPath, provider.id))}
+                type="button"
+                variant="outline"
+              >
+                <SsoProviderIcon iconUrl={provider.iconUrl} name={provider.name} size="compact" />
+                {intl.formatMessage({ id: 'auth.login.with.provider' }, { name: provider.name })}
+              </Button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </AuthCard>
   );
 };

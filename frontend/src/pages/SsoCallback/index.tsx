@@ -199,7 +199,7 @@ const Index = () => {
   return (
     <AuthCard
       description={getPageDescription(status, ssoBind, intl.formatMessage)}
-      maxWidth={status === 'bind' ? '2xl' : 'md'}
+      maxWidth={status === 'bind' ? '2xl' : 'sm'}
       title={getPageTitle(status, intl.formatMessage)}
     >
       {status === 'bind' && ssoBind ? (

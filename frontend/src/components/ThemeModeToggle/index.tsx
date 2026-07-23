@@ -16,7 +16,7 @@ import { cn } from '@/shadcn/lib/utils';
 import { type AppThemeMode, useThemeMode } from '@/components/ThemeProvider/theme-mode';
 
 interface ThemeModeOption {
-  icon: LucideIcon;
+  icon: LucideIcon | typeof ShadcnThemeIcon;
   labelMessageId: 'theme.mode.auto' | 'theme.mode.dark' | 'theme.mode.light';
   value: AppThemeMode;
 }
